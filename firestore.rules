@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // 公開閲覧専用。ここには公開画面で見せる最小情報だけを複製する。
+    match /publicLocations/{publicToken} {
+      allow read: if resource.data.isPublic == true;
+      allow create: if signedIn() && request.auth.uid == request.resource.data.ownerId;
+      allow update: if signedIn() && request.auth.uid == resource.data.ownerId && request.auth.uid == request.resource.data.ownerId;
+      allow delete: if signedIn() && request.auth.uid == resource.data.ownerId;
+    }
+  }
+}
