@@ -14,6 +14,10 @@ const navItems = [
   { href: "/app/low-stock", label: "少ない", icon: PackageSearch },
 ];
 
+function isActivePath(pathname: string, href: string) {
+  return href === "/app" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -25,60 +29,62 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20 md:pb-0">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <Link href="/app" className="flex items-center gap-2 font-bold text-slate-900">
-            <span className="grid h-9 w-9 place-items-center rounded-2xl bg-brand-600 text-white">中</span>
-            <span>なかみメモ</span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <span className="hidden text-sm text-slate-500 sm:inline">{user?.displayName || user?.email}</span>
-            <button onClick={handleLogout} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
-              <LogOut size={16} />
-              ログアウト
-            </button>
-          </div>
+    <div className="ui-app-shell">
+      <aside className="ui-sidebar">
+        <Link href="/app" className="ui-sidebar-brand">
+          <span className="ui-brand-mark ui-brand-mark--small" aria-hidden="true"><Box size={21} strokeWidth={1.8} /></span>
+          <span className="ui-brand-name">なかみメモ</span>
+        </Link>
+
+        <nav className="ui-sidebar-nav" aria-label="メインメニュー">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = isActivePath(pathname, item.href);
+            return (
+              <Link key={item.href} href={item.href} className="ui-nav-link" data-active={active} aria-current={active ? "page" : undefined}>
+                <Icon size={18} strokeWidth={1.9} />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="ui-sidebar-footer">
+          <span className="ui-account">{user?.displayName || user?.email}</span>
+          <button type="button" onClick={handleLogout} className="ui-sidebar-logout">
+            <LogOut size={16} strokeWidth={1.9} />
+            ログアウト
+          </button>
         </div>
-      </header>
+      </aside>
 
-      <div className="mx-auto flex max-w-6xl gap-6 px-4 py-6">
-        <aside className="hidden w-48 shrink-0 md:block">
-          <nav className="sticky top-20 space-y-2">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold ${
-                    active ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-white"
-                  }`}
-                >
-                  <Icon size={18} />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </aside>
+      <div className="ui-main-shell">
+        <header className="ui-mobile-header">
+          <Link href="/app" className="ui-mobile-brand">
+            <span className="ui-brand-mark ui-brand-mark--small" aria-hidden="true"><Box size={21} strokeWidth={1.8} /></span>
+            <span className="ui-brand-name">なかみメモ</span>
+          </Link>
+          <button type="button" onClick={handleLogout} className="ui-mobile-logout" aria-label="ログアウト" title="ログアウト">
+            <LogOut size={17} strokeWidth={1.9} />
+          </button>
+        </header>
 
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="ui-main"><div className="ui-content">{children}</div></main>
+
+        <nav className="ui-mobile-nav" aria-label="メインメニュー">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = isActivePath(pathname, item.href);
+            return (
+              <Link key={item.href} href={item.href} className="ui-nav-link" data-active={active} aria-current={active ? "page" : undefined}>
+                <Icon size={19} strokeWidth={1.9} />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
       </div>
-
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-slate-200 bg-white md:hidden">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const active = pathname === item.href;
-          return (
-            <Link key={item.href} href={item.href} className={`flex flex-col items-center gap-1 py-2 text-xs font-semibold ${active ? "text-brand-700" : "text-slate-500"}`}>
-              <Icon size={20} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
     </div>
   );
 }
+
