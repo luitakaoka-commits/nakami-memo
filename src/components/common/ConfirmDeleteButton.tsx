@@ -1,5 +1,6 @@
 "use client";
 
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 
 export function ConfirmDeleteButton({
@@ -24,13 +25,10 @@ export function ConfirmDeleteButton({
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={loading}
-      className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
-    >
-      {loading ? "削除中" : label}
+    <button type="button" onClick={handleClick} disabled={loading} className="ui-button ui-button--danger" title={label}>
+      <Trash2 size={15} strokeWidth={1.9} />
+      <span>{loading ? "削除中" : label}</span>
     </button>
   );
 }
+
