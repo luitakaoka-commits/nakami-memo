@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CalendarClock, MapPin, PackageSearch, Plus, Search } from "lucide-react";
 import { useMemo } from "react";
 import { useAreas } from "@/lib/hooks/useAreas";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -18,79 +19,67 @@ export function Dashboard() {
   const { items, loading: itemsLoading } = useItems(user?.uid);
 
   const itemsWithLocation = useMemo(() => joinItemsWithLocations(items, locations, areas), [areas, items, locations]);
-  const expiringItems = useMemo(() => getExpiringItems(itemsWithLocation, 7).slice(0, 5), [itemsWithLocation]);
-  const lowStockItems = useMemo(() => itemsWithLocation.filter(isLowStock).slice(0, 5), [itemsWithLocation]);
-  const recentItems = useMemo(() => [...itemsWithLocation].sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)).slice(0, 5), [itemsWithLocation]);
-  const grouped = useMemo(() => sortAreas(areas).map((area) => ({ area, locations: sortLocations(locations.filter((location) => location.areaId === area.id)) })), [areas, locations]);
+  const expiringAll = useMemo(() => getExpiringItems(itemsWithLocation, 7), [itemsWithLocation]);
+  const expiringItems = expiringAll.slice(0, 5);
+  const lowStockAll = useMemo(() => itemsWithLocation.filter(isLowStock), [itemsWithLocation]);
+  const lowStockItems = lowStockAll.slice(0, 5);
+  const recentItems = useMemo(
+    () => [...itemsWithLocation].sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)).slice(0, 5),
+    [itemsWithLocation],
+  );
+  const grouped = useMemo(
+    () => sortAreas(areas).map((area) => ({ area, locations: sortLocations(locations.filter((location) => location.areaId === area.id)) })),
+    [areas, locations],
+  );
 
-  if (areasLoading || locationsLoading || itemsLoading) return <LoadingState label="ダッシュボードを読み込み中" />;
+  if (areasLoading || locationsLoading || itemsLoading) return <LoadingState label="読み込み中" />;
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl bg-gradient-to-br from-brand-600 to-brand-700 p-6 text-white shadow-soft">
-        <p className="text-sm font-semibold text-brand-100">なかみメモ</p>
-        <h1 className="mt-2 text-2xl font-black">家の在庫、ちゃんと見えてます。</h1>
-        <p className="mt-2 text-sm leading-6 text-brand-50">検索・期限・低在庫・QRをここから確認できます。冷蔵庫の奥で発掘される古代文明、そろそろ終わらせましょう。</p>
-        <form action="/app/search" className="mt-5 flex gap-2">
-          <input name="q" className="min-w-0 flex-1 rounded-2xl border-0 text-slate-900" placeholder="アイテム名・カテゴリ・保管場所で検索" />
-          <button className="rounded-2xl bg-white px-4 py-2 text-sm font-bold text-brand-700">検索</button>
-        </form>
+    <div className="ui-stack">
+      <section className="ui-commandbar">
+        <div><p className="ui-kicker">なかみメモ</p><h1>ホーム</h1></div>
+        <div className="ui-commandbar__actions">
+          <form action="/app/search" className="ui-search-form">
+            <input name="q" className="ui-input" placeholder="アイテム・場所・カテゴリ" aria-label="検索" />
+            <button type="submit" className="ui-button ui-button--on-dark"><Search size={17} strokeWidth={2} /><span>検索</span></button>
+          </form>
+          <Link href="/app/items/new" className="ui-button ui-button--on-dark"><Plus size={17} strokeWidth={2} /><span>追加</span></Link>
+        </div>
       </section>
 
-      {areas.length === 0 ? (
-        <EmptyState title="まずはエリアを作成しましょう" description="キッチン、玄関、クローゼットなどから始めるのがおすすめです。" actionLabel="エリアを作る" href="/app/areas" />
-      ) : locations.length === 0 ? (
-        <EmptyState title="次は保管場所を追加しましょう" description="冷蔵庫、食品棚、防災備蓄箱などを登録できます。" actionLabel="保管場所を追加" href="/app/locations/new" />
-      ) : null}
+      <div className="ui-stat-grid" aria-label="在庫サマリー">
+        <div className="ui-stat"><span className="ui-stat__label">アイテム</span><strong className="ui-stat__value">{itemsWithLocation.length}</strong></div>
+        <div className="ui-stat"><span className="ui-stat__label">保管場所</span><strong className="ui-stat__value">{locations.length}</strong></div>
+        <div className="ui-stat"><span className="ui-stat__label">期限</span><strong className="ui-stat__value">{expiringAll.length}</strong></div>
+        <div className="ui-stat"><span className="ui-stat__label">少ない</span><strong className="ui-stat__value">{lowStockAll.length}</strong></div>
+      </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-3xl bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-bold text-slate-900">期限が近いもの</h2>
-            <Link href="/app/expiring" className="text-sm font-bold text-brand-700">すべて</Link>
-          </div>
-          <div className="space-y-3">
-            {expiringItems.length ? expiringItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="text-sm text-slate-500">期限が近いものはありません。</p>}
-          </div>
+      {areas.length === 0 ? <EmptyState title="エリアがありません" actionLabel="エリアを追加" href="/app/areas" /> : locations.length === 0 ? <EmptyState title="保管場所がありません" actionLabel="保管場所を追加" href="/app/locations/new" /> : null}
+
+      <div className="ui-grid-two">
+        <section className="ui-section">
+          <div className="ui-section__head"><div className="flex items-center gap-2"><CalendarClock size={18} className="text-[var(--amber)]" /><h2 className="ui-section__title">期限が近いもの</h2></div><Link href="/app/expiring" className="ui-button ui-button--ghost">すべて</Link></div>
+          <div className="ui-list">{expiringItems.length ? expiringItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="ui-muted">該当なし</p>}</div>
         </section>
 
-        <section className="rounded-3xl bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-bold text-slate-900">残り少ないもの</h2>
-            <Link href="/app/low-stock" className="text-sm font-bold text-brand-700">すべて</Link>
-          </div>
-          <div className="space-y-3">
-            {lowStockItems.length ? lowStockItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="text-sm text-slate-500">低在庫のものはありません。</p>}
-          </div>
+        <section className="ui-section">
+          <div className="ui-section__head"><div className="flex items-center gap-2"><PackageSearch size={18} className="text-[var(--brand)]" /><h2 className="ui-section__title">残り少ないもの</h2></div><Link href="/app/low-stock" className="ui-button ui-button--ghost">すべて</Link></div>
+          <div className="ui-list">{lowStockItems.length ? lowStockItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="ui-muted">該当なし</p>}</div>
         </section>
       </div>
 
-      <section className="rounded-3xl bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-bold text-slate-900">エリア別の保管場所</h2>
-          <Link href="/app/locations" className="text-sm font-bold text-brand-700">管理</Link>
-        </div>
-        <div className="space-y-4">
-          {grouped.map(({ area, locations }) => locations.length > 0 && (
-            <div key={area.id}>
-              <h3 className="mb-2 text-sm font-bold text-slate-500">{area.name}</h3>
-              <div className="flex flex-wrap gap-2">
-                {locations.map((location) => <Link key={location.id} href={`/app/locations/${location.id}`} className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200">{location.name}</Link>)}
-              </div>
-            </div>
-          ))}
+      <section className="ui-section">
+        <div className="ui-section__head"><div className="flex items-center gap-2"><MapPin size={18} className="text-[var(--blue)]" /><h2 className="ui-section__title">エリア別の保管場所</h2></div><Link href="/app/locations" className="ui-button ui-button--ghost">管理</Link></div>
+        <div className="ui-list">
+          {grouped.map(({ area, locations: areaLocations }) => areaLocations.length > 0 && <div key={area.id} className="ui-section"><h3 className="ui-muted">{area.name}</h3><div className="ui-chip-list">{areaLocations.map((location) => <Link key={location.id} href={`/app/locations/${location.id}`} className="ui-chip">{location.name}</Link>)}</div></div>)}
         </div>
       </section>
 
-      <section className="rounded-3xl bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-bold text-slate-900">最近追加したアイテム</h2>
-          <Link href="/app/items/new" className="text-sm font-bold text-brand-700">追加</Link>
-        </div>
-        <div className="space-y-3">
-          {recentItems.length ? recentItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="text-sm text-slate-500">まだアイテムがありません。</p>}
-        </div>
+      <section className="ui-section">
+        <div className="ui-section__head"><h2 className="ui-section__title">最近追加したアイテム</h2><Link href="/app/items/new" className="ui-button ui-button--ghost">追加</Link></div>
+        <div className="ui-list">{recentItems.length ? recentItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="ui-muted">該当なし</p>}</div>
       </section>
     </div>
   );
 }
+
