@@ -1,0 +1,58 @@
+{
+  "source": "existing Next.js App Router application",
+  "audience": "household users managing storage locations and inventory",
+  "primaryAction": "find or register the contents of a place quickly",
+  "genre": "quiet editorial utilitarian",
+  "existing": {
+    "framework": "Next.js 15 + React 19 + TypeScript + Tailwind CSS",
+    "font": "system sans stack in src/app/globals.css",
+    "palette": "slate canvas, white surfaces, green brand accent",
+    "motion": "small active-scale feedback and reduced-motion fallback",
+    "structure": "top bar with desktop side nav and mobile bottom nav"
+  },
+  "preserve": [
+    "route structure",
+    "Firebase authentication, Firestore, Storage, and QR behavior",
+    "Japanese labels and existing information architecture",
+    "PWA manifest and icon assets"
+  ],
+  "introduce": [
+    "named design tokens",
+    "desktop rail and mobile bottom navigation",
+    "home command bar with search and inventory metrics",
+    "consistent authored surfaces, states, and responsive spacing"
+  ],
+  "filesToModify": [
+    "src/app/tokens.css",
+    "src/app/globals.css",
+    "src/app/layout.tsx",
+    "src/app/page.tsx",
+    "src/app/login/page.tsx",
+    "src/components/auth/LoginForm.tsx",
+    "src/components/layout/AppShell.tsx",
+    "src/components/dashboard/Dashboard.tsx",
+    "src/components/common/Badge.tsx",
+    "src/components/common/EmptyState.tsx",
+    "src/components/common/LoadingState.tsx",
+    "src/components/common/ConfirmDeleteButton.tsx",
+    "src/components/common/ImagePicker.tsx",
+    "src/components/areas/AreaManager.tsx",
+    "src/components/items/ItemCard.tsx",
+    "src/components/items/InventorySearch.tsx",
+    "src/components/items/ExpiringList.tsx",
+    "src/components/items/LowStockList.tsx",
+    "src/components/items/ItemForm.tsx",
+    "src/components/locations/LocationList.tsx",
+    "src/components/locations/LocationForm.tsx",
+    "src/components/locations/LocationDetail.tsx",
+    "src/components/locations/QRCodePanel.tsx",
+    "src/components/locations/PublicLocationView.tsx"
+  ],
+  "filesToCreate": [
+    ".hallmark/preflight.json",
+    ".hallmark/log.json",
+    "src/app/tokens.css"
+  ],
+  "filesToDelete": []
+}
+
