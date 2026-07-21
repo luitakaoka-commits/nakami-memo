@@ -1,0 +1,25 @@
+[
+  {
+    "date": "2026-07-21",
+    "target": "なかみメモ UI redesign",
+    "genre": "quiet editorial utilitarian",
+    "audience": "household users managing storage locations and inventory",
+    "macrostructure": "desktop rail, mobile bottom navigation, command dashboard",
+    "theme": "forest rail, cool mint canvas, paper surfaces, blue/amber/red status signals",
+    "critique": {
+      "philosophy": 4,
+      "hierarchy": 4,
+      "execution": 4,
+      "specificity": 4,
+      "restraint": 4,
+      "variety": 4
+    },
+    "verified": [
+      "named tokens",
+      "route and Firebase behavior preserved",
+      "320/375/414/768 responsive widths",
+      "no horizontal overflow on public and login entry screens"
+    ]
+  }
+]
+
