@@ -1,5 +1,6 @@
 "use client";
 
+import { Layers3, Plus } from "lucide-react";
 import { useState } from "react";
 import { createArea, deleteArea, updateArea } from "@/lib/firebase/firestore";
 import { useAreas } from "@/lib/hooks/useAreas";
@@ -23,17 +24,10 @@ export function AreaManager() {
     if (!user) return;
     setError("");
     setSubmitting(true);
-
     try {
-      const input = {
-        name,
-        sortOrder: sortOrder === "" ? null : Number(sortOrder),
-      };
-      if (editing) {
-        await updateArea(user.uid, editing.id, input);
-      } else {
-        await createArea(user.uid, input);
-      }
+      const input = { name, sortOrder: sortOrder === "" ? null : Number(sortOrder) };
+      if (editing) await updateArea(user.uid, editing.id, input);
+      else await createArea(user.uid, input);
       setName("");
       setSortOrder("");
       setEditing(null);
@@ -53,39 +47,25 @@ export function AreaManager() {
   if (loading) return <LoadingState label="エリアを読み込み中" />;
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl bg-white p-5 shadow-soft">
-        <h1 className="text-xl font-bold text-slate-900">エリア管理</h1>
-        <p className="mt-1 text-sm text-slate-500">キッチン、玄関、クローゼットなど家の大きな場所を登録します。</p>
-        <form onSubmit={handleSubmit} className="mt-5 grid gap-4 sm:grid-cols-[1fr_120px_auto]">
-          <input required value={name} onChange={(event) => setName(event.target.value)} className="rounded-xl border-slate-200" placeholder="例：キッチン" />
-          <input type="number" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} className="rounded-xl border-slate-200" placeholder="並び順" />
-          <button disabled={submitting} className="rounded-xl bg-brand-600 px-5 py-2 font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
-            {editing ? "更新" : "追加"}
-          </button>
+    <div className="ui-stack">
+      <div className="ui-page-head"><div className="flex items-center gap-3"><Layers3 size={25} className="text-[var(--brand)]" /><h1 className="ui-page-title">エリア管理</h1></div><span className="ui-section__count">{areas.length}件</span></div>
+
+      <section className="ui-form-surface">
+        <form onSubmit={handleSubmit} className="ui-inline-form">
+          <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="エリア名" aria-label="エリア名" />
+          <input type="number" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} placeholder="並び順" aria-label="並び順" />
+          <button type="submit" disabled={submitting} className="ui-button ui-button--primary"><Plus size={17} strokeWidth={2} />{editing ? "更新" : "追加"}</button>
         </form>
-        {editing && (
-          <button type="button" onClick={() => { setEditing(null); setName(""); setSortOrder(""); }} className="mt-3 text-sm font-semibold text-slate-500">
-            編集をキャンセル
-          </button>
-        )}
-        {error && <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {editing && <button type="button" onClick={() => { setEditing(null); setName(""); setSortOrder(""); }} className="ui-button ui-button--ghost mt-3">キャンセル</button>}
+        {error && <p role="alert" className="ui-error mt-3">{error}</p>}
       </section>
 
-      {areas.length === 0 ? (
-        <EmptyState title="まだエリアがありません" description="まずは「キッチン」などを登録すると、保管場所を整理しやすくなります。" />
-      ) : (
-        <div className="grid gap-3">
+      {areas.length === 0 ? <EmptyState title="エリアがありません" /> : (
+        <div className="ui-list">
           {areas.map((area) => (
-            <div key={area.id} className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm">
-              <div>
-                <p className="font-bold text-slate-900">{area.name}</p>
-                <p className="text-xs text-slate-500">並び順: {area.sortOrder ?? "未設定"}</p>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => startEdit(area)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">編集</button>
-                <ConfirmDeleteButton onConfirm={() => user ? deleteArea(user.uid, area.id) : undefined} message="このエリアを削除しますか？" />
-              </div>
+            <div key={area.id} className="ui-area-row">
+              <div className="ui-area-row__meta"><p className="ui-area-row__name">{area.name}</p><p className="ui-area-row__sort">並び順: {area.sortOrder ?? "未設定"}</p></div>
+              <div className="ui-area-row__actions"><button type="button" onClick={() => startEdit(area)} className="ui-button ui-button--secondary">編集</button><ConfirmDeleteButton onConfirm={() => user ? deleteArea(user.uid, area.id) : undefined} message="このエリアを削除しますか？" /></div>
             </div>
           ))}
         </div>
@@ -93,3 +73,4 @@ export function AreaManager() {
     </div>
   );
 }
+
