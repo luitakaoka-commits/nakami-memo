@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "./tokens.css";
 import "./globals.css";
 import { Providers } from "@/components/layout/Providers";
 
@@ -7,7 +8,7 @@ export const metadata: Metadata = {
     default: "なかみメモ",
     template: "%s | なかみメモ",
   },
-  description: "家庭向けの中身メモ + ゆるい在庫管理アプリ",
+  description: "家の在庫管理",
   applicationName: "なかみメモ",
   manifest: "/manifest.webmanifest",
   icons: {
@@ -33,3 +34,4 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     </html>
   );
 }
+
