@@ -1,5 +1,6 @@
 "use client";
 
+import { Search } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAreas } from "@/lib/hooks/useAreas";
@@ -18,27 +19,26 @@ export function InventorySearch() {
   const { areas } = useAreas(user?.uid);
   const { locations } = useLocations(user?.uid);
   const { items, loading } = useItems(user?.uid);
-
   const itemsWithLocation = useMemo(() => joinItemsWithLocations(items, locations, areas), [areas, items, locations]);
   const results = useMemo(() => searchInventory(itemsWithLocation, keyword), [itemsWithLocation, keyword]);
 
   if (loading) return <LoadingState label="検索データを読み込み中" />;
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-3xl bg-white p-5 shadow-soft">
-        <h1 className="text-2xl font-black text-slate-900">検索</h1>
-        <p className="mt-1 text-sm text-slate-500">アイテム名、カテゴリ、メモ、保管場所名を横断検索します。</p>
-        <input value={keyword} onChange={(event) => setKeyword(event.target.value)} className="mt-5 w-full rounded-2xl border-slate-200" placeholder="例：USB-Cケーブル" autoFocus />
+    <div className="ui-stack">
+      <section className="ui-form-surface">
+        <div className="ui-page-head"><h1 className="ui-page-title">検索</h1><span className="ui-section__count">{results.length}件</span></div>
+        <label className="ui-form-field mt-6">
+          <span className="sr-only">キーワード</span>
+          <div className="relative"><Search size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ink-muted)]" /><input value={keyword} onChange={(event) => setKeyword(event.target.value)} className="pl-10" placeholder="アイテム・場所・カテゴリ" autoFocus /></div>
+        </label>
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-bold text-slate-900">検索結果</h2>
-          <span className="text-sm font-semibold text-slate-500">{results.length}件</span>
-        </div>
-        {results.length ? results.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="rounded-2xl bg-white p-5 text-sm text-slate-500">該当するアイテムがありません。</p>}
+      <section className="ui-section">
+        <div className="ui-section__head"><h2 className="ui-section__title">検索結果</h2><span className="ui-section__count">{results.length}件</span></div>
+        <div className="ui-list">{results.length ? results.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="ui-empty__title">該当なし</p>}</div>
       </section>
     </div>
   );
 }
+
