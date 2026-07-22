@@ -10,6 +10,7 @@ import type { Location } from "@/lib/types/location";
 import { LOCATION_TYPE_OPTIONS } from "@/lib/types/location";
 import { ImagePicker } from "@/components/common/ImagePicker";
 import { LoadingState } from "@/components/common/LoadingState";
+import { IDLE_SAVE_PROGRESS, SaveProgressDialog, type SaveProgressState } from "@/components/common/SaveProgressDialog";
 
 export function LocationForm({ locationId }: { locationId?: string }) {
   const router = useRouter();
@@ -27,6 +28,7 @@ export function LocationForm({ locationId }: { locationId?: string }) {
   const [loading, setLoading] = useState(Boolean(locationId));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [saveProgress, setSaveProgress] = useState<SaveProgressState>(IDLE_SAVE_PROGRESS);
 
   useEffect(() => {
     if (!user || !locationId) return;
@@ -60,6 +62,7 @@ export function LocationForm({ locationId }: { locationId?: string }) {
     if (!user) return;
     setError("");
     setSubmitting(true);
+    setSaveProgress({ stage: "saving", progress: 0 });
 
     try {
       const input = {
@@ -75,12 +78,20 @@ export function LocationForm({ locationId }: { locationId?: string }) {
       const targetId = locationId ?? ref?.id;
       if (locationId) await updateLocation(user.uid, locationId, input);
       if (targetId && imageFile) {
-        const imageUrl = await uploadLocationImage(user.uid, targetId, imageFile);
+        setSaveProgress({ stage: "uploading", progress: 0 });
+        const imageUrl = await uploadLocationImage(user.uid, targetId, imageFile, (progress) => {
+          setSaveProgress({ stage: "uploading", progress });
+        });
+        setSaveProgress({ stage: "finalizing", progress: 100 });
         await updateLocationImageUrl(user.uid, targetId, imageUrl);
       }
+      setSaveProgress({ stage: "success", progress: 100 });
+      await new Promise((resolve) => setTimeout(resolve, 650));
       router.push(targetId ? `/app/locations/${targetId}` : "/app/locations");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存に失敗しました。");
+      const message = err instanceof Error ? err.message : "保存に失敗しました。";
+      setError(message);
+      setSaveProgress({ stage: "error", message });
     } finally {
       setSubmitting(false);
     }
@@ -128,17 +139,22 @@ export function LocationForm({ locationId }: { locationId?: string }) {
         </label>
       </div>
 
-      <div className="mt-7"><ImagePicker imageUrl={location?.imageUrl} onFileSelect={setImageFile} label="保管場所の写真" /></div>
+      <div className="mt-7"><ImagePicker imageUrl={location?.imageUrl} onFileSelect={setImageFile} label="保管場所の写真" disabled={submitting} /></div>
 
       {error && <p role="alert" className="ui-error mt-7">{error}</p>}
 
       <div className="ui-form-actions mt-7">
-        <button type="button" onClick={() => router.back()} className="ui-button ui-button--secondary">戻る</button>
+        <button type="button" onClick={() => router.back()} disabled={submitting} className="ui-button ui-button--secondary">戻る</button>
         <button type="submit" disabled={submitting || areas.length === 0} className="ui-button ui-button--primary">
           {areas.length === 0 ? "エリアを追加" : submitting ? "保存中" : "保存"}
         </button>
       </div>
+
+      <SaveProgressDialog
+        state={saveProgress}
+        hasImage={Boolean(imageFile)}
+        onClose={() => setSaveProgress(IDLE_SAVE_PROGRESS)}
+      />
     </form>
   );
 }
-
