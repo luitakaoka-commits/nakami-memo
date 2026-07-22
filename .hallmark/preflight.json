@@ -20,7 +20,8 @@
     "named design tokens",
     "desktop rail and mobile bottom navigation",
     "home command bar with search and inventory metrics",
-    "consistent authored surfaces, states, and responsive spacing"
+    "consistent authored surfaces, states, and responsive spacing",
+    "measured image-upload progress with saving, success, and error feedback"
   ],
   "filesToModify": [
     "src/app/tokens.css",
@@ -36,6 +37,7 @@
     "src/components/common/LoadingState.tsx",
     "src/components/common/ConfirmDeleteButton.tsx",
     "src/components/common/ImagePicker.tsx",
+    "src/components/common/SaveProgressDialog.tsx",
     "src/components/areas/AreaManager.tsx",
     "src/components/items/ItemCard.tsx",
     "src/components/items/InventorySearch.tsx",
@@ -46,13 +48,14 @@
     "src/components/locations/LocationForm.tsx",
     "src/components/locations/LocationDetail.tsx",
     "src/components/locations/QRCodePanel.tsx",
-    "src/components/locations/PublicLocationView.tsx"
+    "src/components/locations/PublicLocationView.tsx",
+    "src/lib/firebase/storage.ts"
   ],
   "filesToCreate": [
     ".hallmark/preflight.json",
     ".hallmark/log.json",
-    "src/app/tokens.css"
+    "src/app/tokens.css",
+    "src/components/common/SaveProgressDialog.tsx"
   ],
   "filesToDelete": []
 }
-
