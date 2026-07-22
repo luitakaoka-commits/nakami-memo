@@ -921,27 +921,195 @@
   background: var(--surface-tint);
 }
 
-.ui-image-picker input[type="file"] {
-  min-height: 42px;
-  border: 0;
-  padding: 0;
-  background: transparent;
+.ui-image-picker__empty {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
   color: var(--ink-muted);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  font-weight: 650;
 }
 
-.ui-image-picker input[type="file"]::file-selector-button {
+.ui-image-picker__control {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.ui-image-picker__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ui-image-picker__button {
+  display: inline-flex;
+  width: fit-content;
   min-height: 38px;
-  margin-right: 8px;
+  align-items: center;
+  gap: 7px;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   padding: 0 11px;
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
-  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 720;
+  transition: border-color var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard);
+}
+
+.ui-image-picker:hover .ui-image-picker__input:not(:disabled) + .ui-image-picker__button {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+}
+
+.ui-image-picker:active .ui-image-picker__input:not(:disabled) + .ui-image-picker__button {
+  transform: scale(0.98);
+}
+
+.ui-image-picker__input:focus-visible + .ui-image-picker__button {
+  outline: 3px solid var(--focus-blue);
+  outline-offset: 2px;
+}
+
+.ui-image-picker__input:disabled + .ui-image-picker__button {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.ui-image-picker__selection {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  color: var(--brand-strong);
+  font-size: 0.76rem;
   font-weight: 720;
 }
+
+.ui-image-picker__selection span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-image-picker__selection small {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  font-weight: 620;
+}
+
+.ui-image-picker__error {
+  margin: 0;
+  color: var(--red);
+  font-size: 0.74rem;
+  font-weight: 680;
+}
+
+.ui-save-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--overlay-scrim);
+  backdrop-filter: blur(10px);
+  animation: ui-overlay-in var(--duration-standard) var(--ease-standard);
+}
+
+.ui-save-dialog {
+  width: min(100%, 360px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-surface);
+  padding: 28px;
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  text-align: center;
+  animation: ui-dialog-in var(--duration-standard) var(--ease-standard);
+}
+
+.ui-save-dialog__icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.ui-save-dialog__icon--success {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+.ui-save-dialog__icon--error {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.ui-save-dialog__spinner {
+  animation: ui-spin 900ms linear infinite;
+}
+
+.ui-save-dialog__title {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 1.05rem;
+  font-weight: 780;
+}
+
+.ui-save-dialog__detail {
+  min-height: 1.4em;
+  margin: 7px 0 0;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+
+.ui-save-progress {
+  height: 6px;
+  margin-top: 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--progress-track);
+}
+
+.ui-save-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+  transition: width var(--duration-standard) var(--ease-standard);
+}
+
+@keyframes ui-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ui-dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ui-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Hallmark upload-feedback critique 2026-07-23: Philosophy 4, Hierarchy 4, Execution 4, Specificity 4, Restraint 4, Variety 4. */
+
 
 .ui-qr-card {
   max-width: 620px;
@@ -1206,4 +1374,3 @@
 }
 
 /* Hallmark self-critique 2026-07-21: Philosophy 4, Hierarchy 4, Execution 4, Specificity 4, Restraint 4, Variety 4. */
-
