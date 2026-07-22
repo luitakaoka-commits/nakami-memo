@@ -4,6 +4,7 @@ import { Check, ImagePlus } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 export function ImagePicker({
   imageUrl,
@@ -33,8 +34,8 @@ export function ImagePicker({
   function handleChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setSelectionError("画像ファイルを選んでください");
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      setSelectionError("JPEG・PNG・WebP・GIF形式の画像を選んでください");
       setSelectedFile(null);
       setPreview(imageUrl);
       onFileSelect(null);
@@ -74,7 +75,7 @@ export function ImagePicker({
           )}
         </div>
         <div className="ui-image-picker__control">
-          <input className="ui-image-picker__input" type="file" accept="image/*" onChange={handleChange} aria-label={label} disabled={disabled} />
+          <input className="ui-image-picker__input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleChange} aria-label={label} disabled={disabled} />
           <span className="ui-image-picker__button" aria-hidden="true"><ImagePlus size={16} strokeWidth={2} />写真を選ぶ</span>
           {selectedFile && (
             <p className="ui-image-picker__selection" aria-live="polite">

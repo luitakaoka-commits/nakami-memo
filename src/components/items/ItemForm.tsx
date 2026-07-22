@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createItem, getItem, updateItem, updateItemImageUrl } from "@/lib/firebase/firestore";
-import { uploadItemImage } from "@/lib/firebase/storage";
+import { uploadItemImage } from "@/lib/image-upload";
 import { useAreas } from "@/lib/hooks/useAreas";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useLocations } from "@/lib/hooks/useLocations";
@@ -95,7 +95,7 @@ export function ItemForm({ itemId }: { itemId?: string }) {
       if (itemId) await updateItem(user.uid, itemId, input);
       if (targetId && imageFile) {
         setSaveProgress({ stage: "uploading", progress: 0 });
-        const imageUrl = await uploadItemImage(user.uid, targetId, imageFile, (progress) => {
+        const imageUrl = await uploadItemImage(user, targetId, imageFile, (progress) => {
           setSaveProgress({ stage: "uploading", progress });
         });
         setSaveProgress({ stage: "finalizing", progress: 100 });

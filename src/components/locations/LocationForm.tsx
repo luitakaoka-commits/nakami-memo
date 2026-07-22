@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createLocation, getLocation, updateLocation, updateLocationImageUrl } from "@/lib/firebase/firestore";
-import { uploadLocationImage } from "@/lib/firebase/storage";
+import { uploadLocationImage } from "@/lib/image-upload";
 import { useAreas } from "@/lib/hooks/useAreas";
 import { useAuth } from "@/lib/hooks/useAuth";
 import type { Location } from "@/lib/types/location";
@@ -79,7 +79,7 @@ export function LocationForm({ locationId }: { locationId?: string }) {
       if (locationId) await updateLocation(user.uid, locationId, input);
       if (targetId && imageFile) {
         setSaveProgress({ stage: "uploading", progress: 0 });
-        const imageUrl = await uploadLocationImage(user.uid, targetId, imageFile, (progress) => {
+        const imageUrl = await uploadLocationImage(user, targetId, imageFile, (progress) => {
           setSaveProgress({ stage: "uploading", progress });
         });
         setSaveProgress({ stage: "finalizing", progress: 100 });
