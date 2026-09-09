@@ -1,0 +1,5 @@
+[
+  { "id": "cand1", "sourcePackage": "jcb.co.jp", "sourceLabel": "JCB", "detectedAt": "2026-08-24T10:00:00.000Z", "usedDate": "2026-08-24", "amount": 12000, "cardHint": "メインカード", "merchant": "ローソン", "type": "purchase", "status": "pending", "fingerprint": "fp-a", "note": "" },
+  { "id": "cand2", "sourcePackage": "rakuten-card.co.jp", "sourceLabel": "楽天カード", "detectedAt": "2026-08-24T10:05:00.000Z", "usedDate": "2026-08-24", "amount": 12000, "cardHint": "メインカード", "type": "purchase", "status": "pending", "fingerprint": "fp-a", "note": "" },
+  { "id": "cand3", "sourcePackage": "unknown", "sourceLabel": "不明", "detectedAt": "2026-08-23T09:00:00.000Z", "usedDate": "", "amount": 0, "cardHint": "", "type": "unknown", "status": "needs_review", "fingerprint": "fp-b", "note": "金額を読み取れませんでした。" }
+]

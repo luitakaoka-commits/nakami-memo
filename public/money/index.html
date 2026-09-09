@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#073f36">
+  <meta name="description" content="支払い・貯金・NISAを引いたあとに、今使える金額を確認するアプリ">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/app-icon.svg?v=22" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=22">
+  <link rel="stylesheet" href="styles.css?v=22">
+  <title>お金管理</title>
+<link rel="stylesheet" href="../shared/app-switcher.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">本文へ移動</a>
+
+  <div id="auth-screen" class="auth-screen" hidden>
+    <div class="auth-panel">
+      <div class="auth-brand"><img src="icons/app-icon.svg?v=22" alt=""><strong>お金管理</strong></div>
+      <div class="auth-lock" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></div>
+      <h1>ログイン</h1>
+      <div class="form-stack">
+        <p id="auth-error" class="auth-error" role="alert" hidden></p>
+        <button id="auth-login-button" class="button google-login-button button-full" type="button" data-action="google-login"><span class="google-mark" aria-hidden="true"></span><span>Googleでログイン</span></button>
+      </div>
+      <div class="auth-note"><span class="security-mark"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6Z"/><path d="m8.5 12 2.3 2.3 4.7-5"/></svg></span><span>データは共有スペースごとに保存されます</span></div>
+    </div>
+  </div>
+
+  <div id="onboarding" class="onboarding" hidden></div>
+
+  <div id="app-shell" class="app-shell" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><img src="icons/app-icon.svg?v=22" alt=""></div>
+        <div>
+          <strong>お金管理</strong>
+          <span>家計と予定</span>
+        </div>
+      </div>
+
+      <nav class="primary-nav" aria-label="メインナビゲーション">
+        <button class="nav-link active" data-page="home"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg></span><span>ホーム</span></button>
+        <button class="nav-link" data-page="plans"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 9h18"/></svg></span><span>予定</span></button>
+        <button class="nav-link" data-page="records"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span><span>記録</span></button>
+        <button class="nav-link" data-page="accounts"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H20v14H5.5A2.5 2.5 0 0 1 3 16.5Z"/><path d="M3 8h15.5A2.5 2.5 0 0 1 21 10.5v3H17a2 2 0 0 1 0-4h4"/></svg></span><span>口座</span></button>
+        <button class="nav-link" data-page="shift"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="4" width="14" height="14" rx="2"/><path d="M12.5 2v4M6.5 2v4M2.5 9h14"/><circle cx="17.5" cy="16.5" r="4.5"/><path d="M17.5 14.4v2.3l1.6 1"/></svg></span><span>シフト</span></button>
+      </nav>
+
+      <div class="sidebar-tip">
+        <span class="tip-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6Z"/><path d="m8.5 12 2.3 2.3 4.7-5"/></svg></span>
+        <strong>確認すること</strong>
+        <p>支払い・貯金・NISAを引いたあとの金額を表示します。</p>
+      </div>
+
+      <button class="nav-link settings-link" data-page="settings"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.3a3.7 3.7 0 1 0 0 7.4 3.7 3.7 0 0 0 0-7.4Z"/><path d="m19.4 15 .1.1a2 2 0 0 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.2a2 2 0 0 1-4 0v-.2a2 2 0 0 0-3.4-1.4l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1A2 2 0 0 0 1.6 12a2 2 0 0 1 2-2h.2a2 2 0 0 0 1.4-3.4l-.1-.1A2 2 0 0 1 7.9 3.7l.1.1a2 2 0 0 0 3.4-1.4v-.2a2 2 0 0 1 4 0v.2a2 2 0 0 0 3.4 1.4l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1A2 2 0 0 0 23 10h.2a2 2 0 0 1 0 4H23a2 2 0 0 0-3.6 1Z"/></svg></span><span>設定</span></button>
+    </aside>
+
+    <main class="main" id="main-content">
+      <header class="topbar">
+        <div class="topbar-start">
+          <div class="topbar-brand"><div class="brand-mark"><img src="icons/app-icon.svg?v=22" alt=""></div><strong>お金管理</strong></div>
+          <button class="icon-button menu-button" id="menu-button" aria-label="メニューを開く"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+          <div class="topbar-context">
+            <div class="topbar-date" id="today-label"></div>
+            <div class="topbar-title" id="page-title">ホーム</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span class="local-badge" id="storage-badge">この端末に保存</span>
+          <button class="icon-button settings-button" data-page="settings" aria-label="設定を開く" title="設定"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 8.3a3.7 3.7 0 1 0 0 7.4 3.7 3.7 0 0 0 0-7.4Z"/><path d="m19.4 15 .1.1a2 2 0 0 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.2a2 2 0 0 1-4 0v-.2a2 2 0 0 0-3.4-1.4l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1A2 2 0 0 0 1.6 12a2 2 0 0 1 2-2h.2a2 2 0 0 0 1.4-3.4l-.1-.1A2 2 0 0 1 7.9 3.7l.1.1a2 2 0 0 0 3.4-1.4v-.2a2 2 0 0 1 4 0v.2a2 2 0 0 0 3.4 1.4l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1A2 2 0 0 0 23 10h.2a2 2 0 0 1 0 4H23a2 2 0 0 0-3.6 1Z"/></svg></button>
+        </div>
+      </header>
+
+      <div class="page-wrap" id="page-container"></div>
+    </main>
+  </div>
+
+  <nav class="bottom-nav" aria-label="モバイルナビゲーション">
+    <button class="nav-link active" data-page="home"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg></span><span>ホーム</span></button>
+    <button class="nav-link" data-page="plans"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 9h18"/></svg></span><span>予定</span></button>
+    <button class="nav-link" data-page="records"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span><span>記録</span></button>
+    <button class="nav-link" data-page="accounts"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H20v14H5.5A2.5 2.5 0 0 1 3 16.5Z"/><path d="M3 8h15.5A2.5 2.5 0 0 1 21 10.5v3H17a2 2 0 0 1 0-4h4"/></svg></span><span>口座</span></button>
+    <button class="nav-link" data-page="shift"><span class="nav-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="4" width="14" height="14" rx="2"/><path d="M12.5 2v4M6.5 2v4M2.5 9h14"/><circle cx="17.5" cy="16.5" r="4.5"/><path d="M17.5 14.4v2.3l1.6 1"/></svg></span><span>シフト</span></button>
+  </nav>
+
+  <button id="floating-add" class="floating-add" data-action="toggle-add-menu" aria-label="追加メニューを開く" aria-controls="add-menu" aria-expanded="false" hidden><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+
+  <div id="add-menu" class="add-menu-backdrop" hidden>
+    <section class="add-menu" role="dialog" aria-modal="true" aria-labelledby="add-menu-title">
+      <div class="add-menu-header"><div><span class="eyebrow">追加</span><h2 id="add-menu-title">何を追加しますか？</h2></div><button class="icon-button modal-close" data-action="close-add-menu" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div class="add-menu-grid">
+        <button class="add-menu-item payment" data-action="add-event" data-kind="payment"><span class="add-menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 13 13M18 18H9M18 18V9"/></svg></span><strong>支払い</strong><small>これからの支出</small></button>
+        <button class="add-menu-item income" data-action="add-event" data-kind="income"><span class="add-menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 19 6 6M6 6h9M6 6v9"/></svg></span><strong>収入</strong><small>入金の予定</small></button>
+        <button class="add-menu-item work-item" data-action="add-work"><span class="add-menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></span><strong>勤務を記録</strong><small>時間から給与を予測</small></button>
+        <button class="add-menu-item saving" data-action="add-event" data-kind="saving"><span class="add-menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8.5A3.5 3.5 0 0 1 8.5 5h7A3.5 3.5 0 0 1 19 8.5v6a3.5 3.5 0 0 1-3.5 3.5h-7A3.5 3.5 0 0 1 5 14.5Z"/><path d="M8 5V3h3v2M8 12h.01M16 12h.01"/></svg></span><strong>貯金</strong><small>貯金の予定</small></button>
+        <button class="add-menu-item nisa" data-action="add-event" data-kind="nisa"><span class="add-menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-8M22 19V3"/><path d="M3 19h20"/></svg></span><strong>NISA</strong><small>投資の予定</small></button>
+        <button class="add-menu-item transfer" data-action="add-event" data-kind="transfer"><span class="add-menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3"/></svg></span><strong>振込</strong><small>自分・他人口座へ</small></button>
+        <button class="add-menu-item card-item" data-action="add-card"><span class="add-menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M7 15h4"/></svg></span><strong>クレジットカード</strong><small>支払いカードを登録</small></button>
+        <button class="add-menu-item account" data-action="add-account"><span class="add-menu-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H20v14H5.5A2.5 2.5 0 0 1 3 16.5Z"/><path d="M3 8h15.5A2.5 2.5 0 0 1 21 10.5v3H17a2 2 0 0 1 0-4h4"/></svg></span><strong>口座</strong><small>口座を登録</small></button>
+      </div>
+    </section>
+  </div>
+
+  <div id="event-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="event-modal-title">
+      <div class="modal-header">
+        <div><span class="eyebrow">予定</span><h2 id="event-modal-title">予定を追加</h2></div>
+        <button class="icon-button modal-close" data-close-modal="event-modal" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <form id="event-form" class="form-stack">
+        <input type="hidden" id="event-id">
+        <div class="field-grid field-grid-2">
+          <label><span>種類</span><select id="event-kind" required>
+            <option value="payment">支払い</option>
+            <option value="income">収入</option>
+            <option value="saving">貯金</option>
+            <option value="nisa">NISA</option>
+            <option value="reimbursement">立替回収</option>
+            <option value="transfer">振込</option>
+          </select></label>
+          <label><span id="event-date-label">予定日</span><input id="event-date" type="date" required></label>
+        </div>
+        <label><span>金額</span><div class="amount-input"><span>¥</span><input id="event-amount" type="number" min="0" step="1" inputmode="numeric" placeholder="0" required></div></label>
+        <label id="event-card-wrap"><span>支払いカード</span><select id="event-card"><option value="">口座から直接支払う</option></select><small class="field-hint" id="event-card-note">登録済みのカードを選ぶと、引落口座を自動で選びます。</small></label>
+        <label id="event-usage-date-wrap" hidden><span>利用日</span><input id="event-usage-date" type="date"><small class="field-hint">実際にカードを使った日です。上の引落予定日は締め日・支払日から自動計算し、あとから変更できます。</small></label>
+        <label id="event-entry-type-wrap" hidden><span>この金額の種類</span><select id="event-entry-type">
+          <option value="statement">このカードの請求総額</option>
+          <option value="itemized">1件の利用</option>
+        </select><small class="field-hint" id="event-entry-type-note">このカードの一定期間の請求をまとめた金額です。</small></label>
+        <label id="event-status-wrap" hidden><span>状態</span><select id="event-status">
+          <option value="planned">未確定</option>
+          <option value="settled">確定済み</option>
+        </select><small class="field-hint">確定にすると口座残高へ反映します。未確定に戻すと残高も元に戻します。</small></label>
+        <label id="event-lending-wrap"><span>うち立替（任意）</span><div class="amount-input"><span>¥</span><input id="event-lending" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div></label>
+        <div class="field-grid field-grid-2">
+          <label><span id="event-source-label">支払い元口座</span><select id="event-source" required></select></label>
+          <label id="event-destination-wrap"><span id="event-destination-label">移動先口座（任意）</span><select id="event-destination"></select></label>
+        </div>
+        <div class="field-grid field-grid-2">
+          <label id="event-transfer-type-wrap"><span>振込先の種類</span><select id="event-transfer-type"><option value="internal">自分の口座へ</option><option value="external">他人口座へ</option></select></label>
+          <label id="event-recipient-wrap"><span>振込先の名前</span><input id="event-recipient" type="text" maxlength="40" placeholder="例：家族口座・〇〇さん"></label>
+        </div>
+        <div class="field-grid field-grid-2">
+          <label><span>カテゴリ</span><select id="event-category">
+            <option value="生活費">生活費</option><option value="固定費">固定費</option><option value="食費">食費</option><option value="交通">交通</option><option value="娯楽">娯楽</option><option value="医療">医療</option><option value="その他">その他</option>
+          </select></label>
+          <label><span>メモ</span><input id="event-memo" type="text" maxlength="80" placeholder="カード・家賃など"></label>
+        </div>
+        <label class="check-row"><input id="event-exclude" type="checkbox"><span>使える額の計算から除外</span></label>
+        <p class="form-note" id="event-form-note">予定で保存します。確定すると残高に反映します。</p>
+        <div class="modal-actions"><button type="button" class="button button-quiet modal-close" data-close-modal="event-modal">キャンセル</button><button class="button button-primary" type="submit">保存</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="account-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+      <div class="modal-header"><div><span class="eyebrow">口座</span><h2 id="account-modal-title">口座を追加</h2></div><button class="icon-button modal-close" data-close-modal="account-modal" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <form id="account-form" class="form-stack">
+        <input type="hidden" id="account-id">
+        <label><span>口座名</span><input id="account-name" type="text" maxlength="40" placeholder="例：生活費口座" required></label>
+        <label><span>役割</span><select id="account-role" required><option value="primary">基準口座</option><option value="spending">自由利用口座</option><option value="savings">貯金口座</option><option value="investment">投資・NISA口座</option><option value="other">その他</option></select></label>
+        <label><span>現在の実残高</span><div class="amount-input"><span>¥</span><input id="account-balance" type="number" step="1" inputmode="numeric" required></div></label>
+        <label class="check-row"><input id="account-spendable" type="checkbox"><span>使える額に含める</span></label>
+        <div class="modal-actions"><button type="button" class="button button-quiet modal-close" data-close-modal="account-modal">キャンセル</button><button class="button button-primary" type="submit">保存</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="future-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="future-modal-title">
+      <div class="modal-header"><div><span class="eyebrow">試算</span><h2 id="future-modal-title">将来の期間に使える金額</h2></div><button class="icon-button modal-close" data-close-modal="future-modal" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div class="form-stack">
+        <div class="future-presets">
+          <button type="button" class="button button-quiet button-small" data-action="future-preset" data-preset="nextSalary">次の給料日まで</button>
+          <button type="button" class="button button-quiet button-small" data-action="future-preset" data-preset="nextMonth">来月</button>
+          <button type="button" class="button button-quiet button-small" data-action="future-preset" data-preset="monthAfter">再来月</button>
+        </div>
+        <div class="field-grid field-grid-2">
+          <label><span>開始日</span><input id="future-start" type="date"></label>
+          <label><span>終了日</span><input id="future-end" type="date"></label>
+        </div>
+        <div id="future-content"></div>
+      </div>
+    </section>
+  </div>
+
+  <div id="card-modal" class="modal-backdrop" hidden>
+    <section class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
+      <div class="modal-header"><div><span class="eyebrow">支払い方法</span><h2 id="card-modal-title">カードを追加</h2></div><button class="icon-button modal-close" data-close-modal="card-modal" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <form id="card-form" class="form-stack">
+        <input type="hidden" id="card-id">
+        <label><span>カード名</span><input id="card-name" type="text" maxlength="40" placeholder="例：メインカード" required></label>
+        <label><span>引落口座</span><select id="card-account" required></select></label>
+        <div class="field-grid field-grid-2">
+          <label><span>締め日</span><input id="card-closing-day" type="number" min="0" max="31" step="1" value="0" required><small class="field-hint">月末締めは0</small></label>
+          <label><span>支払日</span><input id="card-payment-day" type="number" min="1" max="31" step="1" value="27" required><small class="field-hint">月末払いは0</small></label>
+        </div>
+        <label><span>支払月</span><select id="card-payment-month-offset">
+          <option value="1">締め月の翌月に引き落とし</option>
+          <option value="2">締め月の翌々月に引き落とし</option>
+          <option value="0">締め月と同じ月に引き落とし</option>
+        </select><small class="field-hint">例）15日締め・翌月10日払いなら「翌月」、月末締め・翌々月払いなら「翌々月」。</small></label>
+        <div class="modal-actions"><button type="button" class="button button-quiet modal-close" data-close-modal="card-modal">キャンセル</button><button class="button button-primary" type="submit">保存</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="work-modal" class="modal-backdrop" hidden>
+    <section class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="work-modal-title">
+      <div class="modal-header"><div><span class="eyebrow">給与</span><h2 id="work-modal-title">勤務を記録</h2></div><button class="icon-button modal-close" data-close-modal="work-modal" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <form id="work-form" class="form-stack">
+        <input type="hidden" id="work-id">
+        <div class="field-grid field-grid-2">
+          <label><span>勤務日</span><input id="work-date" type="date" required></label>
+          <label><span>状態</span><select id="work-status"><option value="worked">勤務済み</option><option value="planned">勤務予定</option></select></label>
+        </div>
+        <label><span>勤務時間</span><div class="unit-input"><input id="work-hours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal" placeholder="0" required><span>時間</span></div><small class="field-hint">15分は0.25、30分は0.5で入力</small></label>
+        <label><span>この日だけ時給を変更（任意）</span><div class="amount-input"><span>¥</span><input id="work-rate" type="number" min="0" step="1" inputmode="numeric" placeholder="基本時給を使用"></div></label>
+        <label><span>メモ</span><input id="work-memo" type="text" maxlength="60" placeholder="例：夕方シフト"></label>
+        <div class="modal-actions"><button type="button" class="button button-quiet" data-close-modal="work-modal">キャンセル</button><button class="button button-primary" type="submit">保存</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="receipt-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="receipt-modal-title">
+      <div class="modal-header"><div><span class="eyebrow">レシート</span><h2 id="receipt-modal-title">レシートを追加</h2></div><button class="icon-button modal-close" data-close-modal="receipt-modal" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <form id="receipt-form" class="form-stack">
+        <input type="hidden" id="receipt-id">
+        <label><span>店名</span><input id="receipt-store" type="text" maxlength="40" placeholder="例：スーパー〇〇" required></label>
+        <div class="field-grid field-grid-2">
+          <label><span>買った日</span><input id="receipt-date" type="date" required></label>
+          <label><span>支払い方法</span><select id="receipt-method"><option value="cash">現金</option><option value="card">カード</option><option value="emoney">電子マネー</option><option value="unknown">不明</option></select></label>
+        </div>
+        <div class="field-grid field-grid-2">
+          <label><span>合計金額</span><div class="amount-input"><span>¥</span><input id="receipt-total" type="number" min="0" step="1" inputmode="numeric" required></div></label>
+          <label><span>税額</span><div class="amount-input"><span>¥</span><input id="receipt-tax" type="number" min="0" step="1" inputmode="numeric" value="0"></div><small class="field-hint">分からなければ0のまま</small></label>
+        </div>
+        <label><span>メモ</span><input id="receipt-note" type="text" maxlength="80" placeholder="例：まとめ買い"></label>
+        <div class="list-card-header"><div><span class="eyebrow">明細</span><h2>買ったもの</h2></div><strong id="receipt-line-sum">明細の合計 ¥0</strong></div>
+        <p class="form-note" id="receipt-sum-note"></p>
+        <div id="receipt-lines" class="receipt-lines"></div>
+        <button type="button" class="button button-quiet button-small" data-action="add-receipt-line">明細行を追加</button>
+        <div class="modal-actions"><button type="button" class="button button-quiet" data-close-modal="receipt-modal">キャンセル</button><button class="button button-primary" type="submit">保存</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="merge-modal" class="modal-backdrop" hidden>
+    <section class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="merge-modal-title">
+      <div class="modal-header"><div><span class="eyebrow">ムダ支出</span><h2 id="merge-modal-title">品名をまとめる</h2></div><button class="icon-button modal-close" data-close-modal="merge-modal" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div class="form-stack" id="merge-body"></div>
+    </section>
+  </div>
+
+  <div id="review-modal" class="modal-backdrop" hidden>
+    <section class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="review-modal-title">
+      <div class="modal-header"><div><span class="eyebrow" id="review-progress"></span><h2 id="review-modal-title">ふりかえり</h2></div><button class="icon-button modal-close" data-close-modal="review-modal" aria-label="閉じる"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div class="form-stack" id="review-body"></div>
+    </section>
+  </div>
+
+  <input id="import-file" type="file" accept="application/json" hidden>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="finance-engine.js?v=22"></script>
+  <script>window.firebaseSyncReady = import('./firebase-sync.js?v=22').then(module => module.firebaseSync);</script>
+  <script src="app.js?v=22"></script>
+  <script type="module">
+    /* 3アプリ共通の切り替えバー。app.js（IIFE）には手を入れず、ここだけで完結させる。 */
+    import { mountAppSwitcher } from "../shared/app-switcher.js";
+    mountAppSwitcher({ current: "money" });
+  </script>
+</body>
+</html>

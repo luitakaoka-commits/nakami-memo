@@ -1,0 +1,211 @@
+/* 3アプリ共通のアプリ切り替えバーとシート。
+   /money（お金管理）・/recipe（つくりおきノート）・/（なかみメモ）が同じオリジンに
+   同居しているので、1つのCSSを3アプリで読み込んでいる。
+
+   各アプリの配色トークンとは独立させてある。ここだけは3アプリで同じ見た目にしたい
+   （どこにいても同じ場所に同じものがある、という手触りが切り替えUIの価値なので）。 */
+
+.appsw {
+  --appsw-bg: #ffffff;
+  --appsw-ink: #16211c;
+  --appsw-muted: #6d7d72;
+  --appsw-line: #e0e5df;
+  --appsw-line-strong: #cbd3c9;
+  --appsw-sheet-shadow: 0 -8px 32px rgba(12, 24, 18, 0.18);
+  --appsw-money: #14402f;
+  --appsw-nakami: #1f5c43;
+  --appsw-recipe: #8a6a1f;
+
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.appsw *,
+.appsw *::before,
+.appsw *::after { box-sizing: border-box; }
+
+@media (prefers-color-scheme: dark) {
+  .appsw {
+    --appsw-bg: #161d19;
+    --appsw-ink: #e4ebe5;
+    --appsw-muted: #8fa096;
+    --appsw-line: #29332d;
+    --appsw-line-strong: #3a453e;
+  }
+}
+
+/* ---------- 上部のバー ---------- */
+
+.appsw-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  height: 40px;
+  background: var(--appsw-bg);
+  border-bottom: 1px solid var(--appsw-line);
+  padding-top: env(safe-area-inset-top, 0);
+  height: calc(40px + env(safe-area-inset-top, 0px));
+}
+
+.appsw-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 5px 8px 5px 5px;
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--appsw-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.appsw-trigger:hover { background: rgba(127, 140, 132, 0.12); }
+.appsw-trigger:focus-visible { outline: 2px solid var(--appsw-nakami); outline-offset: 1px; }
+
+.appsw-tile {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.appsw-tile svg { display: block; }
+.appsw-tile--money { background: var(--appsw-money); }
+.appsw-tile--nakami { background: var(--appsw-nakami); }
+.appsw-tile--recipe { background: var(--appsw-recipe); }
+
+.appsw-caret {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  color: var(--appsw-muted);
+}
+
+/* ---------- シート ---------- */
+
+.appsw-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(10, 20, 15, 0.42);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: appsw-fade 160ms ease-out;
+}
+
+.appsw-sheet {
+  width: min(520px, 100%);
+  background: var(--appsw-bg);
+  color: var(--appsw-ink);
+  border-radius: 16px 16px 0 0;
+  box-shadow: var(--appsw-sheet-shadow);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  animation: appsw-rise 200ms cubic-bezier(0.22, 0.9, 0.3, 1);
+  overflow: hidden;
+}
+
+@keyframes appsw-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes appsw-rise { from { transform: translateY(14px); } to { transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .appsw-backdrop, .appsw-sheet { animation: none; }
+}
+
+.appsw-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--appsw-line);
+}
+
+.appsw-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.appsw-close {
+  border: 0;
+  background: transparent;
+  color: var(--appsw-muted);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.appsw-close:hover { background: rgba(127, 140, 132, 0.12); }
+.appsw-close:focus-visible { outline: 2px solid var(--appsw-nakami); outline-offset: 1px; }
+
+.appsw-list { padding: 4px 0 10px; }
+
+.appsw-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--appsw-line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.appsw-row:last-child { border-bottom: 0; }
+.appsw-row:hover { background: rgba(127, 140, 132, 0.1); }
+.appsw-row:focus-visible { outline: 2px solid var(--appsw-nakami); outline-offset: -2px; }
+
+.appsw-row .appsw-tile { width: 36px; height: 36px; border-radius: 10px; }
+
+.appsw-name { font-weight: 600; font-size: 15px; }
+
+.appsw-here {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 8px;
+  vertical-align: 1px;
+  color: var(--appsw-nakami);
+}
+
+.appsw-state {
+  margin-left: auto;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--appsw-muted);
+  line-height: 1.45;
+  max-width: 46%;
+}
+
+.appsw-row[aria-current="page"] { cursor: default; }
+.appsw-row[aria-current="page"]:hover { background: transparent; }
+
+.appsw-note {
+  padding: 10px 16px 4px;
+  font-size: 11.5px;
+  color: var(--appsw-muted);
+  line-height: 1.6;
+}

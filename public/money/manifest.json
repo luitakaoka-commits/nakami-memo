@@ -1,0 +1,31 @@
+{
+  "name": "お金管理",
+  "short_name": "お金管理",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#073f36",
+  "theme_color": "#073f36",
+  "lang": "ja",
+  "description": "支払い・貯金・NISAを引いたあとに、今使える金額を確認するアプリ",
+  "icons": [
+    {
+      "src": "icons/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/app-icon.svg?v=22",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "scope": "./"
+}

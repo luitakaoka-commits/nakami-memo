@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 3,
+  "mode": "local",
+  "meta": { "onboarded": true, "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-08-20T00:00:00.000Z" },
+  "accounts": [
+    { "id": "a1", "name": "生活費口座", "role": "primary", "currentBalance": 300000, "includeInSpendable": true, "reserveAmount": 0, "isPrimary": true },
+    { "id": "a2", "name": "自由費口座", "role": "spending", "currentBalance": 40000, "includeInSpendable": true, "reserveAmount": 0, "isPrimary": false },
+    { "id": "a3", "name": "貯金口座", "role": "savings", "currentBalance": 500000, "includeInSpendable": false, "reserveAmount": 0, "isPrimary": false }
+  ],
+  "cards": [
+    { "id": "c1", "name": "メインカード", "accountId": "a1", "closingDay": 15, "paymentDay": 10, "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z" }
+  ],
+  "workEntries": [
+    { "id": "w1", "date": "2026-07-05", "hours": 4, "status": "worked", "hourlyRateOverride": 0, "memo": "早番" },
+    { "id": "w2", "date": "2026-07-20", "hours": 6, "status": "planned", "hourlyRateOverride": 0, "memo": "" },
+    { "id": "w3", "date": "2026-08-03", "hours": 5, "status": "worked", "hourlyRateOverride": 0, "memo": "" }
+  ],
+  "transactions": [
+    { "id": "t1", "kind": "payment", "amount": 30000, "dueDate": "2026-09-10", "status": "planned", "sourceAccountId": "a1", "cardId": "c1", "category": "生活費", "memo": "旧カード利用", "affectsForecast": true },
+    { "id": "t2", "kind": "payment", "amount": 50000, "transactionDate": "2026-08-20", "dueDate": "2026-10-13", "status": "planned", "sourceAccountId": "a1", "cardId": "c1", "category": "生活費", "memo": "新カード利用", "affectsForecast": true },
+    { "id": "t3", "kind": "payment", "amount": 80000, "dueDate": "2026-09-05", "status": "planned", "sourceAccountId": "a1", "cardId": "", "category": "固定費", "memo": "家賃", "affectsForecast": true },
+    { "id": "t4", "kind": "income", "amount": 50000, "dueDate": "2026-09-01", "status": "planned", "sourceAccountId": "a1", "cardId": "", "category": "収入", "memo": "仕送り", "affectsForecast": true }
+  ],
+  "recurringPlans": [],
+  "settings": {
+    "defenseLine": 150000,
+    "deadlineMode": "legacy14",
+    "cashflowHorizonDays": 90,
+    "holidayOverrides": {},
+    "wage": { "hourlyRate": 1200, "closingDay": 0, "paymentDay": 25, "paymentMonthOffset": 1, "includeForecastInSpendable": true }
+  }
+}

@@ -1,0 +1,25 @@
+:root {
+  /* 色はそのまま。形（角丸・境界・影）だけを見直している */
+  --accent: #e7a400;
+  --accent-deep: #c88500;
+  --accent-soft: #fff4cf;
+  --ink: #242424;
+  --muted: #77726e;
+  --faint: #a7a29e;
+  --canvas: #f4f4f4;
+  --surface: #ffffff;
+  --surface-warm: #fffdf8;
+  --line: #e4e0da;
+  --line-strong: #d5d0c8;
+  --danger: #d84b39;
+  --success: #388b61;
+
+  /* 角丸を浅く、影の代わりに境界線を使う */
+  --radius-card: 10px;
+  --radius-control: 8px;
+  --radius-thumb: 6px;
+  --shadow-sheet: 0 -8px 28px rgba(40, 32, 20, .16);
+
+  --ease: cubic-bezier(0.2, 0.75, 0.25, 1);
+  --font: "Noto Sans JP", "Yu Gothic", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+}

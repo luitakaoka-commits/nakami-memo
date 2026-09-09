@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "currency": "JPY",
+  "deadlineCases": [
+    {
+      "today": "2026-07-01",
+      "expectedDeadline": "2026-07-14"
+    },
+    {
+      "today": "2026-07-14",
+      "expectedDeadline": "2026-07-14"
+    },
+    {
+      "today": "2026-07-15",
+      "expectedDeadline": "2026-08-14"
+    },
+    {
+      "today": "2026-12-20",
+      "expectedDeadline": "2027-01-14"
+    }
+  ],
+  "safeToSpendCases": [
+    {
+      "name": "支払い・貯金・NISA・収入をすべて含む標準例",
+      "input": {
+        "primaryBalance": 300000,
+        "pendingPayments": 60000,
+        "defenseLine": 150000,
+        "spendingAccountBalance": 10000,
+        "confirmedIncome": 50000,
+        "plannedSavings": 20000,
+        "plannedNisa": 30000
+      },
+      "expected": {
+        "legacyFree": 90000,
+        "safeToSpend": 100000
+      }
+    },
+    {
+      "name": "不足額を0に丸めず表示する",
+      "input": {
+        "primaryBalance": 180000,
+        "pendingPayments": 40000,
+        "defenseLine": 150000,
+        "spendingAccountBalance": 0,
+        "confirmedIncome": 0,
+        "plannedSavings": 10000,
+        "plannedNisa": 5000
+      },
+      "expected": {
+        "legacyFree": -10000,
+        "safeToSpend": -25000
+      }
+    },
+    {
+      "name": "完了済み貯金は再度差し引かない",
+      "input": {
+        "primaryBalance": 300000,
+        "pendingPayments": 60000,
+        "defenseLine": 150000,
+        "spendingAccountBalance": 10000,
+        "confirmedIncome": 50000,
+        "plannedSavings": 0,
+        "plannedNisa": 30000
+      },
+      "expected": {
+        "legacyFree": 90000,
+        "safeToSpend": 120000
+      }
+    },
+    {
+      "name": "貯金口座と投資口座の残高を加算しない",
+      "input": {
+        "primaryBalance": 250000,
+        "pendingPayments": 50000,
+        "defenseLine": 150000,
+        "spendingAccountBalance": 20000,
+        "protectedSavingsBalance": 500000,
+        "investmentBalance": 800000,
+        "confirmedIncome": 0,
+        "plannedSavings": 10000,
+        "plannedNisa": 10000
+      },
+      "expected": {
+        "legacyFree": 50000,
+        "safeToSpend": 50000
+      }
+    }
+  ],
+  "dailyCases": [
+    {
+      "safeToSpend": 85000,
+      "days": 28,
+      "expectedDaily": 3035
+    },
+    {
+      "safeToSpend": -25000,
+      "days": 28,
+      "expectedDaily": -892
+    }
+  ]
+}

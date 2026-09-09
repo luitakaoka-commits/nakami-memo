@@ -1,0 +1,141 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /workspaces/{workspaceId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll(['name', 'ownerUid', 'memberUids', 'state', 'createdAt', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'memberUids', 'state', 'createdAt', 'updatedAt', 'updatedBy'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.memberUids.size() == 1
+        && request.resource.data.memberUids[0] == request.auth.uid;
+
+      allow update: if signedIn() && (
+        (
+          request.auth.uid == resource.data.ownerUid
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.ownerUid in request.resource.data.memberUids
+        )
+        ||
+        (
+          request.auth.uid in resource.data.memberUids
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state', 'updatedAt', 'updatedBy'])
+          && request.resource.data.updatedBy == request.auth.uid
+        )
+      );
+
+      allow delete: if signedIn() && request.auth.uid == resource.data.ownerUid;
+
+      // 通知・メールからの取込候補。
+      // workspace本体の state を上書きせず、専用サブコレクションだけを読み書きする。
+      // 既存workspaceの権限は変更しない。
+      match /importCandidates/{candidateId} {
+        // get() はドキュメント読み取り1回として課金されるため、exists() との二重呼び出しを避ける。
+        // workspaceが存在しない場合は get() の評価が失敗し、結果として拒否される。
+        function isMember() {
+          return signedIn()
+            && request.auth.uid in get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.memberUids;
+        }
+
+        function validCandidate(data) {
+          return data.keys().hasAll(['sourcePackage', 'detectedAt', 'amount', 'type', 'status', 'fingerprint'])
+            && data.keys().hasOnly([
+              'sourcePackage', 'sourceLabel', 'detectedAt', 'usedDate', 'amount', 'cardHint',
+              'merchant', 'type', 'status', 'fingerprint', 'note', 'createdAt', 'updatedAt', 'createdBy'
+            ])
+            && data.type in ['purchase', 'refund', 'cancel', 'unknown']
+            && data.status in ['pending', 'accepted', 'ignored', 'needs_review'];
+        }
+
+        allow read: if isMember();
+        allow create: if isMember() && validCandidate(request.resource.data);
+        allow update: if isMember() && validCandidate(request.resource.data);
+        allow delete: if isMember();
+      }
+
+      /* ---------- レシート明細 ----------
+       * 買ったものの明細は state（1ドキュメント方式）に入れると1MiBを超えるため、
+       * 取込候補と同じく専用サブコレクションだけで読み書きする。
+       * 既存workspaceの権限は変更しない。 */
+      match /receipts/{receiptId} {
+        function isMember() {
+          return signedIn()
+            && request.auth.uid in get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.memberUids;
+        }
+
+        function validReceipt(data) {
+          return data.keys().hasAll(['storeName', 'purchasedAt', 'total', 'paymentMethod', 'source', 'status'])
+            && data.keys().hasOnly([
+              'storeName', 'purchasedAt', 'total', 'taxTotal', 'paymentMethod',
+              'transactionId', 'source', 'status', 'note', 'createdAt', 'updatedAt', 'createdBy'
+            ])
+            && data.paymentMethod in ['cash', 'card', 'emoney', 'unknown']
+            && data.source in ['manual', 'gemini', 'drive-ocr']
+            && data.status in ['pending', 'accepted', 'needs_review', 'ignored'];
+        }
+
+        allow read: if isMember();
+        allow create: if isMember() && validReceipt(request.resource.data);
+        allow update: if isMember() && validReceipt(request.resource.data);
+        allow delete: if isMember();
+      }
+
+      match /receiptItems/{lineId} {
+        function isMember() {
+          return signedIn()
+            && request.auth.uid in get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.memberUids;
+        }
+
+        function validReceiptItem(data) {
+          return data.keys().hasAll(['receiptId', 'name', 'amount', 'category', 'outcome'])
+            && data.keys().hasOnly([
+              'receiptId', 'lineNo', 'rawName', 'name', 'quantity', 'unit', 'unitPrice', 'amount',
+              'category', 'outcomeTracked', 'outcome', 'outcomeAt', 'outcomeReason', 'wasteAmount',
+              'note', 'createdAt', 'updatedAt'
+            ])
+            && data.category in ['食品', '飲料', '調味料', '日用品', '消耗品', '外食', '交通', 'サービス', '書籍', '衣料', '雑貨', 'その他']
+            && data.outcome in ['in_stock', 'consumed', 'expired', 'discarded', 'unused', 'unnecessary']
+            && (!('outcomeReason' in data) || data.outcomeReason in ['期限切れ', '使わなかった', '買いすぎ', '好みでなかった', '']);
+        }
+
+        allow read: if isMember();
+        allow create: if isMember() && validReceiptItem(request.resource.data);
+        allow update: if isMember() && validReceiptItem(request.resource.data);
+        allow delete: if isMember();
+      }
+
+      /* ---------- 品名の名寄せ辞書 ----------
+       * 「緑豆もやし」を「もやし」としてまとめる、といったユーザーの判断だけを貯める。
+       * ドキュメントIDは aliasKey（normalizeItemName の結果）と同値にする。
+       * receiptItems と同じ作りで、state（1ドキュメント方式）には一切触らない。 */
+      match /itemAliases/{aliasId} {
+        function isMember() {
+          return signedIn()
+            && request.auth.uid in get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.memberUids;
+        }
+
+        function validItemAlias(data) {
+          return data.keys().hasAll(['aliasKey', 'canonicalName', 'canonicalKey'])
+            && data.keys().hasOnly([
+              'aliasKey', 'canonicalName', 'canonicalKey', 'category', 'createdAt', 'updatedAt'
+            ])
+            && data.aliasKey == aliasId
+            && data.aliasKey is string && data.aliasKey.size() > 0
+            && data.canonicalName is string && data.canonicalName.size() > 0
+            && data.canonicalKey is string && data.canonicalKey.size() > 0
+            && (!('category' in data) || data.category is string);
+        }
+
+        allow read: if isMember();
+        allow create: if isMember() && validItemAlias(request.resource.data);
+        allow update: if isMember() && validItemAlias(request.resource.data);
+        allow delete: if isMember();
+      }
+    }
+  }
+}
