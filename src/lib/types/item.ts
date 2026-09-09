@@ -61,8 +61,9 @@ export type Item = {
   imageUrl?: string;
   memo?: string;
   lowStockThreshold?: number | null;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  // serverTimestamp() の直後（pending write のスナップショット）では null になる。
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
 };
 
 export type ItemInput = {

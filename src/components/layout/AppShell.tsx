@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { Box, Home, LogOut, PackageSearch, Plus, Search } from "lucide-react";
 import { logout } from "@/lib/firebase/auth";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { InventoryProvider } from "@/lib/hooks/useInventory";
+import { AppSwitcher } from "./AppSwitcher";
 
 const navItems = [
   { href: "/app", label: "ホーム", icon: Home },
@@ -59,6 +61,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="ui-main-shell">
+        <AppSwitcher />
         <header className="ui-mobile-header">
           <Link href="/app" className="ui-mobile-brand">
             <span className="ui-brand-mark ui-brand-mark--small" aria-hidden="true"><Box size={21} strokeWidth={1.8} /></span>
@@ -69,7 +72,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
         </header>
 
-        <main className="ui-main"><div className="ui-content">{children}</div></main>
+        <main className="ui-main"><div className="ui-content"><InventoryProvider>{children}</InventoryProvider></div></main>
 
         <nav className="ui-mobile-nav" aria-label="メインメニュー">
           {navItems.map((item) => {

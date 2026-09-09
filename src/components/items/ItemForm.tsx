@@ -4,11 +4,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createItem, getItem, updateItem, updateItemImageUrl } from "@/lib/firebase/firestore";
 import { uploadItemImage } from "@/lib/image-upload";
-import { useAreas } from "@/lib/hooks/useAreas";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { useLocations } from "@/lib/hooks/useLocations";
+import { useInventory } from "@/lib/hooks/useInventory";
 import { CATEGORY_OPTIONS, EXPIRATION_TYPE_OPTIONS, NOTIFY_DAYS_OPTIONS, UNIT_OPTIONS, type Item } from "@/lib/types/item";
-import { toDateInputValue } from "@/lib/utils/dates";
+import { fromDateInputValue, toDateInputValue } from "@/lib/utils/dates";
 import { ImagePicker } from "@/components/common/ImagePicker";
 import { LoadingState } from "@/components/common/LoadingState";
 import { IDLE_SAVE_PROGRESS, SaveProgressDialog, type SaveProgressState } from "@/components/common/SaveProgressDialog";
@@ -18,8 +17,7 @@ export function ItemForm({ itemId }: { itemId?: string }) {
   const searchParams = useSearchParams();
   const requestedLocationId = searchParams.get("locationId") ?? "";
   const { user } = useAuth();
-  const { areas } = useAreas(user?.uid);
-  const { locations } = useLocations(user?.uid);
+  const { areas, locations } = useInventory();
   const [item, setItem] = useState<Item | null>(null);
   const [locationId, setLocationId] = useState(requestedLocationId);
   const [name, setName] = useState("");
@@ -84,7 +82,7 @@ export function ItemForm({ itemId }: { itemId?: string }) {
         unit,
         statusMemo,
         category,
-        expirationDate: expirationDate ? new Date(`${expirationDate}T00:00:00`) : null,
+        expirationDate: fromDateInputValue(expirationDate),
         expirationType,
         notifyDaysBefore: notifyDaysBefore === "" ? null : Number(notifyDaysBefore),
         memo,

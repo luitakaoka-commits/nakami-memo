@@ -11,7 +11,7 @@
 - Tailwind CSS
 - Firebase Authentication
 - Cloud Firestore
-- Firebase Storage
+- Supabase Storage（画像保存 / バケット `nakami-memo-images`）
 - Firebase Hosting
 - qrcode.react
 
@@ -80,7 +80,7 @@
 ### Phase 8: ルール・仕上げ
 
 - Firestore Security Rules
-- Storage Rules
+- 画像アップロードAPI（`POST /api/images/upload`）でのサーバー側検証
 - README
 - エラーハンドリング
 - ローディング表示

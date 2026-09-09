@@ -1,10 +1,5 @@
 import type { Timestamp } from "firebase/firestore";
 
-export function timestampToDate(value?: Timestamp | null): Date | null {
-  if (!value) return null;
-  return value.toDate();
-}
-
 export function formatDate(value?: Timestamp | Date | null): string {
   if (!value) return "未設定";
   const date = value instanceof Date ? value : value.toDate();
@@ -22,6 +17,13 @@ export function toDateInputValue(value?: Timestamp | Date | null): string {
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/** <input type="date"> の値（YYYY-MM-DD）をローカル時刻の Date にする。toDateInputValue の逆。 */
+export function fromDateInputValue(value: string): Date | null {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export function daysUntil(value?: Timestamp | Date | null): number | null {

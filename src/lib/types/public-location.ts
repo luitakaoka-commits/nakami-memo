@@ -1,3 +1,4 @@
+import type { Timestamp } from "firebase/firestore";
 import type { PublicItem } from "./item";
 
 export type PublicLocation = {
@@ -8,5 +9,5 @@ export type PublicLocation = {
   labelName?: string;
   isPublic: boolean;
   items: PublicItem[];
-  updatedAt?: unknown;
+  updatedAt?: Timestamp | null;
 };

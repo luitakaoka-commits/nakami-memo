@@ -1,116 +1,155 @@
 import {
   Timestamp,
   addDoc,
-  collection,
   deleteDoc,
-  doc,
-  getDoc,
+  deleteField,
   getDocs,
   limit,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
-  type DocumentData,
-  type QueryDocumentSnapshot,
 } from "firebase/firestore";
-import type { Area, AreaInput } from "@/lib/types/area";
-import type { Item, ItemInput, PublicItem } from "@/lib/types/item";
-import type { Location, LocationInput } from "@/lib/types/location";
+import type { AreaInput } from "@/lib/types/area";
+import type { ItemInput } from "@/lib/types/item";
+import type { LocationInput } from "@/lib/types/location";
 import { createPublicToken } from "@/lib/utils/qr";
-import { db } from "./client";
+import {
+  areaDoc,
+  areasCollection,
+  getItem,
+  getLocation,
+  itemDoc,
+  itemsCollection,
+  locationDoc,
+  locationsCollection,
+  usersDoc,
+} from "./refs";
+import { deletePublicLocation, syncPublicByLocationIfNeeded, syncPublicLocation } from "./public-location";
 
-const cleanObject = <T extends Record<string, unknown>>(value: T): T => {
-  const copy = { ...value };
-  Object.keys(copy).forEach((key) => {
-    if (copy[key] === undefined) delete copy[key];
+export {
+  areaDoc,
+  areasCollection,
+  areasQuery,
+  getArea,
+  getItem,
+  getLocation,
+  itemDoc,
+  itemsCollection,
+  itemsQuery,
+  locationDoc,
+  locationsCollection,
+  locationsQuery,
+  publicLocationDoc,
+  snapToArea,
+  snapToItem,
+  snapToLocation,
+} from "./refs";
+export { syncPublicLocation } from "./public-location";
+
+type WriteMode = "create" | "update";
+
+/**
+ * 作成用と更新用でペイロードの意味が違うため、モードで整形を切り替える。
+ * - create: undefined のキーは落とす（フィールドを作らない）
+ * - update: undefined のキーは deleteField() にする（フィールドを明示的に消す）
+ *   updateDoc で undefined を落としてしまうと「そのフィールドを触らない」になり、
+ *   画面で空にしても古い値が残ってしまう。
+ * null を明示的に渡したいフィールド（expirationDate など）はそのまま null を書き込む。
+ */
+function buildPayload(value: Record<string, unknown>, mode: WriteMode): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  Object.entries(value).forEach(([key, entry]) => {
+    if (entry !== undefined) {
+      payload[key] = entry;
+      return;
+    }
+    if (mode === "update") payload[key] = deleteField();
   });
-  return copy;
-};
-
-const usersDoc = (userId: string) => doc(db, "users", userId);
-export const areasCollection = (userId: string) => collection(db, "users", userId, "areas");
-export const locationsCollection = (userId: string) => collection(db, "users", userId, "locations");
-export const itemsCollection = (userId: string) => collection(db, "users", userId, "items");
-export const publicLocationDoc = (publicToken: string) => doc(db, "publicLocations", publicToken);
-
-export function areaDoc(userId: string, areaId: string) {
-  return doc(db, "users", userId, "areas", areaId);
+  return payload;
 }
 
-export function locationDoc(userId: string, locationId: string) {
-  return doc(db, "users", userId, "locations", locationId);
+function withTimestamps(value: Record<string, unknown>, mode: WriteMode): Record<string, unknown> {
+  return {
+    ...value,
+    ...(mode === "create" ? { createdAt: serverTimestamp() } : {}),
+    updatedAt: serverTimestamp(),
+  };
 }
 
-export function itemDoc(userId: string, itemId: string) {
-  return doc(db, "users", userId, "items", itemId);
+function areaPayload(input: AreaInput, mode: WriteMode) {
+  return withTimestamps(
+    buildPayload(
+      {
+        name: input.name.trim(),
+        sortOrder: input.sortOrder ?? undefined,
+      },
+      mode,
+    ),
+    mode,
+  );
 }
 
-function snapToArea(snapshot: QueryDocumentSnapshot<DocumentData>): Area {
-  return { id: snapshot.id, ...snapshot.data() } as Area;
+function locationPayload(input: LocationInput, mode: WriteMode, isPublic: boolean) {
+  return withTimestamps(
+    buildPayload(
+      {
+        areaId: input.areaId,
+        name: input.name.trim(),
+        type: input.type?.trim() || undefined,
+        memo: input.memo?.trim() || undefined,
+        labelName: input.labelName?.trim() || undefined,
+        sortOrder: input.sortOrder ?? undefined,
+        isPublic,
+      },
+      mode,
+    ),
+    mode,
+  );
 }
 
-function snapToLocation(snapshot: QueryDocumentSnapshot<DocumentData>): Location {
-  return { id: snapshot.id, isPublic: false, ...snapshot.data() } as Location;
-}
-
-function snapToItem(snapshot: QueryDocumentSnapshot<DocumentData>): Item {
-  return { id: snapshot.id, ...snapshot.data() } as Item;
-}
-
-export { snapToArea, snapToLocation, snapToItem };
-
-export function areasQuery(userId: string) {
-  return query(areasCollection(userId), orderBy("name"));
-}
-
-export function locationsQuery(userId: string) {
-  return query(locationsCollection(userId), orderBy("name"));
-}
-
-export function itemsQuery(userId: string, locationId?: string) {
-  if (locationId) {
-    return query(itemsCollection(userId), where("locationId", "==", locationId));
-  }
-  return query(itemsCollection(userId), orderBy("name"));
+function itemPayload(input: ItemInput, mode: WriteMode) {
+  return withTimestamps(
+    buildPayload(
+      {
+        locationId: input.locationId,
+        name: input.name.trim(),
+        quantity: Number(input.quantity),
+        unit: input.unit?.trim() || undefined,
+        statusMemo: input.statusMemo?.trim() || undefined,
+        category: input.category?.trim() || undefined,
+        expirationDate: input.expirationDate ? Timestamp.fromDate(input.expirationDate) : null,
+        expirationType: input.expirationType?.trim() || undefined,
+        notifyDaysBefore: input.notifyDaysBefore ?? null,
+        memo: input.memo?.trim() || undefined,
+        lowStockThreshold: input.lowStockThreshold ?? null,
+      },
+      mode,
+    ),
+    mode,
+  );
 }
 
 export async function ensureUserDocument(userId: string, displayName?: string | null, email?: string | null) {
   await setDoc(
     usersDoc(userId),
-    cleanObject({
+    {
       displayName: displayName ?? null,
       email: email ?? null,
       updatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
-    }),
+    },
     { merge: true },
   );
 }
 
 export async function createArea(userId: string, input: AreaInput) {
-  return addDoc(
-    areasCollection(userId),
-    cleanObject({
-      name: input.name.trim(),
-      sortOrder: input.sortOrder ?? undefined,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }),
-  );
+  return addDoc(areasCollection(userId), areaPayload(input, "create"));
 }
 
 export async function updateArea(userId: string, areaId: string, input: AreaInput) {
-  await updateDoc(
-    areaDoc(userId, areaId),
-    cleanObject({
-      name: input.name.trim(),
-      sortOrder: input.sortOrder ?? undefined,
-      updatedAt: serverTimestamp(),
-    }),
-  );
+  await updateDoc(areaDoc(userId, areaId), areaPayload(input, "update"));
 }
 
 export async function deleteArea(userId: string, areaId: string) {
@@ -122,20 +161,7 @@ export async function deleteArea(userId: string, areaId: string) {
 }
 
 export async function createLocation(userId: string, input: LocationInput) {
-  const newLocation = await addDoc(
-    locationsCollection(userId),
-    cleanObject({
-      areaId: input.areaId,
-      name: input.name.trim(),
-      type: input.type?.trim() || undefined,
-      memo: input.memo?.trim() || undefined,
-      labelName: input.labelName?.trim() || undefined,
-      sortOrder: input.sortOrder ?? undefined,
-      isPublic: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }),
-  );
+  const newLocation = await addDoc(locationsCollection(userId), locationPayload(input, "create", false));
 
   if (input.isPublic) {
     await setLocationPublic(userId, newLocation.id, true);
@@ -146,23 +172,12 @@ export async function createLocation(userId: string, input: LocationInput) {
 
 export async function updateLocation(userId: string, locationId: string, input: LocationInput) {
   const current = await getLocation(userId, locationId);
-  await updateDoc(
-    locationDoc(userId, locationId),
-    cleanObject({
-      areaId: input.areaId,
-      name: input.name.trim(),
-      type: input.type?.trim() || undefined,
-      memo: input.memo?.trim() || undefined,
-      labelName: input.labelName?.trim() || undefined,
-      sortOrder: input.sortOrder ?? undefined,
-      isPublic: input.isPublic ?? current?.isPublic ?? false,
-      updatedAt: serverTimestamp(),
-    }),
-  );
+  const isPublic = input.isPublic ?? current?.isPublic ?? false;
+  await updateDoc(locationDoc(userId, locationId), locationPayload(input, "update", isPublic));
 
   if ((input.isPublic ?? false) !== (current?.isPublic ?? false)) {
     await setLocationPublic(userId, locationId, input.isPublic ?? false);
-  } else if (input.isPublic ?? current?.isPublic) {
+  } else if (isPublic) {
     await syncPublicLocation(userId, locationId);
   }
 }
@@ -185,17 +200,21 @@ export async function setLocationPublic(userId: string, locationId: string, isPu
 
   await updateDoc(
     locationDoc(userId, locationId),
-    cleanObject({
-      isPublic,
-      publicToken: publicToken ?? undefined,
-      updatedAt: serverTimestamp(),
-    }),
+    buildPayload(
+      {
+        isPublic,
+        publicToken: publicToken ?? undefined,
+        updatedAt: serverTimestamp(),
+      },
+      // 非公開化しても publicToken は消さない（再公開時に同じURLを保つ）。
+      "create",
+    ),
   );
 
   if (isPublic && publicToken) {
     await syncPublicLocation(userId, locationId, publicToken);
   } else if (publicToken) {
-    await deleteDoc(publicLocationDoc(publicToken));
+    await deletePublicLocation(publicToken);
   }
 }
 
@@ -207,45 +226,13 @@ export async function deleteLocation(userId: string, locationId: string) {
 
   const location = await getLocation(userId, locationId);
   if (location?.publicToken) {
-    await deleteDoc(publicLocationDoc(location.publicToken));
+    await deletePublicLocation(location.publicToken);
   }
   await deleteDoc(locationDoc(userId, locationId));
 }
 
-export async function getArea(userId: string, areaId: string): Promise<Area | null> {
-  const snapshot = await getDoc(areaDoc(userId, areaId));
-  return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as Area) : null;
-}
-
-export async function getLocation(userId: string, locationId: string): Promise<Location | null> {
-  const snapshot = await getDoc(locationDoc(userId, locationId));
-  return snapshot.exists() ? ({ id: snapshot.id, isPublic: false, ...snapshot.data() } as Location) : null;
-}
-
-export async function getItem(userId: string, itemId: string): Promise<Item | null> {
-  const snapshot = await getDoc(itemDoc(userId, itemId));
-  return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as Item) : null;
-}
-
 export async function createItem(userId: string, input: ItemInput) {
-  const newItem = await addDoc(
-    itemsCollection(userId),
-    cleanObject({
-      locationId: input.locationId,
-      name: input.name.trim(),
-      quantity: Number(input.quantity),
-      unit: input.unit?.trim() || undefined,
-      statusMemo: input.statusMemo?.trim() || undefined,
-      category: input.category?.trim() || undefined,
-      expirationDate: input.expirationDate ? Timestamp.fromDate(input.expirationDate) : null,
-      expirationType: input.expirationType?.trim() || undefined,
-      notifyDaysBefore: input.notifyDaysBefore ?? null,
-      memo: input.memo?.trim() || undefined,
-      lowStockThreshold: input.lowStockThreshold ?? null,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }),
-  );
+  const newItem = await addDoc(itemsCollection(userId), itemPayload(input, "create"));
 
   await syncPublicByLocationIfNeeded(userId, input.locationId);
   return newItem;
@@ -255,23 +242,7 @@ export async function updateItem(userId: string, itemId: string, input: ItemInpu
   const current = await getItem(userId, itemId);
   if (!current) throw new Error("アイテムが見つかりません。");
 
-  await updateDoc(
-    itemDoc(userId, itemId),
-    cleanObject({
-      locationId: input.locationId,
-      name: input.name.trim(),
-      quantity: Number(input.quantity),
-      unit: input.unit?.trim() || undefined,
-      statusMemo: input.statusMemo?.trim() || undefined,
-      category: input.category?.trim() || undefined,
-      expirationDate: input.expirationDate ? Timestamp.fromDate(input.expirationDate) : null,
-      expirationType: input.expirationType?.trim() || undefined,
-      notifyDaysBefore: input.notifyDaysBefore ?? null,
-      memo: input.memo?.trim() || undefined,
-      lowStockThreshold: input.lowStockThreshold ?? null,
-      updatedAt: serverTimestamp(),
-    }),
-  );
+  await updateDoc(itemDoc(userId, itemId), itemPayload(input, "update"));
 
   await syncPublicByLocationIfNeeded(userId, current.locationId);
   if (current.locationId !== input.locationId) {
@@ -292,46 +263,4 @@ export async function deleteItem(userId: string, itemId: string) {
   const item = await getItem(userId, itemId);
   await deleteDoc(itemDoc(userId, itemId));
   if (item) await syncPublicByLocationIfNeeded(userId, item.locationId);
-}
-
-async function syncPublicByLocationIfNeeded(userId: string, locationId: string) {
-  const location = await getLocation(userId, locationId);
-  if (location?.isPublic && location.publicToken) {
-    await syncPublicLocation(userId, locationId, location.publicToken);
-  }
-}
-
-export async function syncPublicLocation(userId: string, locationId: string, fixedToken?: string) {
-  const location = await getLocation(userId, locationId);
-  if (!location || !location.isPublic) return;
-
-  const area = await getArea(userId, location.areaId);
-  const publicToken = fixedToken ?? location.publicToken;
-  if (!publicToken) throw new Error("公開用トークンがありません。");
-
-  const itemSnapshot = await getDocs(query(itemsCollection(userId), where("locationId", "==", locationId)));
-  const items: PublicItem[] = itemSnapshot.docs
-    .map((snapshot) => snapToItem(snapshot))
-    .sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }))
-    .map((item) => {
-    return cleanObject({
-      name: item.name,
-      quantity: item.quantity,
-      unit: item.unit || undefined,
-    });
-  });
-
-  await setDoc(
-    publicLocationDoc(publicToken),
-    cleanObject({
-      ownerId: userId,
-      locationId,
-      areaName: area?.name ?? "未分類",
-      locationName: location.name,
-      labelName: location.labelName || undefined,
-      isPublic: true,
-      items,
-      updatedAt: serverTimestamp(),
-    }),
-  );
 }

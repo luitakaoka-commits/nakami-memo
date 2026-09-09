@@ -5,23 +5,23 @@ import Link from "next/link";
 import { Box, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { deleteLocation } from "@/lib/firebase/firestore";
-import { useAreas } from "@/lib/hooks/useAreas";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { useLocations } from "@/lib/hooks/useLocations";
+import { useInventory } from "@/lib/hooks/useInventory";
 import { sortAreas, sortLocations } from "@/lib/utils/inventory";
 import { Badge } from "@/components/common/Badge";
 import { ConfirmDeleteButton } from "@/components/common/ConfirmDeleteButton";
 import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 
 export function LocationList() {
   const { user } = useAuth();
-  const { areas, loading: areasLoading } = useAreas(user?.uid);
-  const { locations, loading: locationsLoading } = useLocations(user?.uid);
+  const { areas, locations, loading, error: loadError } = useInventory();
   const [error, setError] = useState("");
   const grouped = useMemo(() => sortAreas(areas).map((area) => ({ area, locations: sortLocations(locations.filter((location) => location.areaId === area.id)) })), [areas, locations]);
 
-  if (areasLoading || locationsLoading) return <LoadingState label="保管場所を読み込み中" />;
+  if (loading) return <LoadingState label="保管場所を読み込み中" />;
+  if (loadError) return <ErrorState error={loadError} title="保管場所を読み込めませんでした。" />;
 
   return (
     <div className="ui-stack">
@@ -62,12 +62,9 @@ export function LocationList() {
                         onConfirm={async () => {
                           if (!user) return;
                           setError("");
-                          try {
-                            await deleteLocation(user.uid, location.id);
-                          } catch (err) {
-                            setError(err instanceof Error ? err.message : "削除できませんでした。");
-                          }
+                          await deleteLocation(user.uid, location.id);
                         }}
+                        onError={setError}
                         message="この保管場所を削除しますか？中身がある場合は削除できません。"
                       />
                     </div>

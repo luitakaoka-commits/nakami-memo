@@ -3,16 +3,17 @@
 import { Layers3, Plus } from "lucide-react";
 import { useState } from "react";
 import { createArea, deleteArea, updateArea } from "@/lib/firebase/firestore";
-import { useAreas } from "@/lib/hooks/useAreas";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { useInventory } from "@/lib/hooks/useInventory";
 import type { Area } from "@/lib/types/area";
 import { ConfirmDeleteButton } from "@/components/common/ConfirmDeleteButton";
 import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 
 export function AreaManager() {
   const { user } = useAuth();
-  const { areas, loading } = useAreas(user?.uid);
+  const { areas, loading, error: loadError } = useInventory();
   const [name, setName] = useState("");
   const [sortOrder, setSortOrder] = useState("");
   const [editing, setEditing] = useState<Area | null>(null);
@@ -45,6 +46,7 @@ export function AreaManager() {
   }
 
   if (loading) return <LoadingState label="エリアを読み込み中" />;
+  if (loadError) return <ErrorState error={loadError} title="エリアを読み込めませんでした。" />;
 
   return (
     <div className="ui-stack">
@@ -65,7 +67,7 @@ export function AreaManager() {
           {areas.map((area) => (
             <div key={area.id} className="ui-area-row">
               <div className="ui-area-row__meta"><p className="ui-area-row__name">{area.name}</p><p className="ui-area-row__sort">並び順: {area.sortOrder ?? "未設定"}</p></div>
-              <div className="ui-area-row__actions"><button type="button" onClick={() => startEdit(area)} className="ui-button ui-button--secondary">編集</button><ConfirmDeleteButton onConfirm={() => user ? deleteArea(user.uid, area.id) : undefined} message="このエリアを削除しますか？" /></div>
+              <div className="ui-area-row__actions"><button type="button" onClick={() => startEdit(area)} className="ui-button ui-button--secondary">編集</button><ConfirmDeleteButton onConfirm={async () => { if (!user) return; setError(""); await deleteArea(user.uid, area.id); }} onError={setError} message="このエリアを削除しますか？" /></div>
             </div>
           ))}
         </div>

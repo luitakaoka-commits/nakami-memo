@@ -10,11 +10,24 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    // 許可するサブコレクション名のホワイトリスト。
+    // 以前は match /{document=**} でサブコレクション名を一切制限していなかった。
+    // tools / recipes / consumptions は今後の追加予定分。
+    function allowedCollection(name) {
+      return name in ["areas", "locations", "items", "tools", "recipes", "consumptions"];
+    }
+
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
-      match /{document=**} {
-        allow read, write: if isOwner(userId);
+      // 直下のドキュメント（users/{userId}/{collection}/{docId}）
+      match /{collection}/{docId} {
+        allow read, write: if isOwner(userId) && allowedCollection(collection);
+
+        // さらに下の階層はコレクション名を限定せず、所有者のみに許可する。
+        match /{document=**} {
+          allow read, write: if isOwner(userId) && allowedCollection(collection);
+        }
       }
     }
 

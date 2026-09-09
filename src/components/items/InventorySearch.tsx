@@ -3,11 +3,9 @@
 import { Search } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
-import { useAreas } from "@/lib/hooks/useAreas";
-import { useAuth } from "@/lib/hooks/useAuth";
-import { useItems } from "@/lib/hooks/useItems";
-import { useLocations } from "@/lib/hooks/useLocations";
-import { joinItemsWithLocations, searchInventory } from "@/lib/utils/inventory";
+import { locationLabelOf, useInventory } from "@/lib/hooks/useInventory";
+import { searchInventory } from "@/lib/utils/inventory";
+import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 import { ItemCard } from "@/components/items/ItemCard";
 
@@ -15,14 +13,11 @@ export function InventorySearch() {
   const searchParams = useSearchParams();
   const initialQuery = searchParams.get("q") ?? "";
   const [keyword, setKeyword] = useState(initialQuery);
-  const { user } = useAuth();
-  const { areas } = useAreas(user?.uid);
-  const { locations } = useLocations(user?.uid);
-  const { items, loading } = useItems(user?.uid);
-  const itemsWithLocation = useMemo(() => joinItemsWithLocations(items, locations, areas), [areas, items, locations]);
+  const { itemsWithLocation, loading, error } = useInventory();
   const results = useMemo(() => searchInventory(itemsWithLocation, keyword), [itemsWithLocation, keyword]);
 
   if (loading) return <LoadingState label="検索データを読み込み中" />;
+  if (error) return <ErrorState error={error} title="検索データを読み込めませんでした。" />;
 
   return (
     <div className="ui-stack">
@@ -36,7 +31,7 @@ export function InventorySearch() {
 
       <section className="ui-section">
         <div className="ui-section__head"><h2 className="ui-section__title">検索結果</h2><span className="ui-section__count">{results.length}件</span></div>
-        <div className="ui-list">{results.length ? results.map((item) => <ItemCard key={item.id} item={item} locationLabel={`${item.areaName} / ${item.locationName}`} />) : <p className="ui-empty__title">該当なし</p>}</div>
+        <div className="ui-list">{results.length ? results.map((item) => <ItemCard key={item.id} item={item} locationLabel={locationLabelOf(item)} />) : <p className="ui-empty__title">該当なし</p>}</div>
       </section>
     </div>
   );

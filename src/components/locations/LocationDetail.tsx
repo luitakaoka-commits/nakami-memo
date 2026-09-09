@@ -6,13 +6,13 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Box, Pencil, Plus, QrCode } from "lucide-react";
 import { deleteItem, getLocation } from "@/lib/firebase/firestore";
-import { useAreas } from "@/lib/hooks/useAreas";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { useItems } from "@/lib/hooks/useItems";
+import { useInventory } from "@/lib/hooks/useInventory";
 import type { Location } from "@/lib/types/location";
 import { Badge } from "@/components/common/Badge";
 import { ConfirmDeleteButton } from "@/components/common/ConfirmDeleteButton";
 import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 import { ItemCard } from "@/components/items/ItemCard";
 
@@ -21,8 +21,8 @@ export function LocationDetail() {
   const router = useRouter();
   const locationId = params.locationId;
   const { user } = useAuth();
-  const { areas } = useAreas(user?.uid);
-  const { items, loading: itemsLoading } = useItems(user?.uid, locationId);
+  const { areas, items: allItems, loading: inventoryLoading, error: loadError } = useInventory();
+  const items = useMemo(() => allItems.filter((item) => item.locationId === locationId), [allItems, locationId]);
   const [location, setLocation] = useState<Location | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -40,7 +40,8 @@ export function LocationDetail() {
 
   const areaName = useMemo(() => areas.find((area) => area.id === location?.areaId)?.name ?? "未分類", [areas, location?.areaId]);
 
-  if (loading || itemsLoading) return <LoadingState label="中身を読み込み中" />;
+  if (loading || inventoryLoading) return <LoadingState label="中身を読み込み中" />;
+  if (loadError) return <ErrorState error={loadError} title="中身を読み込めませんでした。" />;
   if (!location) return <EmptyState title="保管場所が見つかりません" href="/app/locations" actionLabel="保管場所一覧へ" />;
 
   return (
@@ -88,13 +89,10 @@ export function LocationDetail() {
                     onConfirm={async () => {
                       if (!user) return;
                       setError("");
-                      try {
-                        await deleteItem(user.uid, item.id);
-                        router.refresh();
-                      } catch (err) {
-                        setError(err instanceof Error ? err.message : "削除できませんでした。");
-                      }
+                      await deleteItem(user.uid, item.id);
+                      router.refresh();
                     }}
+                    onError={setError}
                   />
                 </div>
               </div>

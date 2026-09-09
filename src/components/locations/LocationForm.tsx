@@ -4,8 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createLocation, getLocation, updateLocation, updateLocationImageUrl } from "@/lib/firebase/firestore";
 import { uploadLocationImage } from "@/lib/image-upload";
-import { useAreas } from "@/lib/hooks/useAreas";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { useInventory } from "@/lib/hooks/useInventory";
 import type { Location } from "@/lib/types/location";
 import { LOCATION_TYPE_OPTIONS } from "@/lib/types/location";
 import { ImagePicker } from "@/components/common/ImagePicker";
@@ -15,7 +15,7 @@ import { IDLE_SAVE_PROGRESS, SaveProgressDialog, type SaveProgressState } from "
 export function LocationForm({ locationId }: { locationId?: string }) {
   const router = useRouter();
   const { user } = useAuth();
-  const { areas } = useAreas(user?.uid);
+  const { areas } = useInventory();
   const [location, setLocation] = useState<Location | null>(null);
   const [areaId, setAreaId] = useState("");
   const [name, setName] = useState("");

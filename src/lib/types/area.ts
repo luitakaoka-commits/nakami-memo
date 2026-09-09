@@ -4,8 +4,9 @@ export type Area = {
   id: string;
   name: string;
   sortOrder?: number;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  // serverTimestamp() の直後（pending write のスナップショット）では null になる。
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
 };
 
 export type AreaInput = {

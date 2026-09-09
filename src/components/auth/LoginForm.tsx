@@ -6,10 +6,20 @@ import { Box, LogIn } from "lucide-react";
 import { signInWithEmail, signInWithGoogle, signUpWithEmail } from "@/lib/firebase/auth";
 import { useAuth } from "@/lib/hooks/useAuth";
 
+/**
+ * 外部サイトへの飛ばし（オープンリダイレクト）を防ぐ。
+ * "//evil.example.com" は URL としては絶対URL扱いになるので、"/" 始まりだけでは不十分。
+ */
+function safeRedirect(value: string | null): string {
+  if (!value) return "/app";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/app";
+  return value;
+}
+
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") ?? "/app";
+  const redirect = safeRedirect(searchParams.get("redirect"));
   const { user } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");

@@ -19,7 +19,6 @@
 - 保管場所単位のQRコード
 - ログイン不要の公開閲覧ページ
 - Firestore Security Rules
-- Storage Rules
 
 ## 技術スタック
 
@@ -28,8 +27,8 @@
 - Tailwind CSS
 - Firebase Authentication
 - Cloud Firestore
-- Firebase Storage
-- Firebase Hosting想定
+- Supabase Storage（画像保存）
+- Vercel デプロイ想定
 - qrcode.react
 
 ## セットアップ
@@ -40,7 +39,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-`.env.local` に Firebase Web App の設定値を入れてください。
+`.env.local` に Firebase Web App と Supabase の設定値を入れてください。
 
 ```env
 NEXT_PUBLIC_FIREBASE_API_KEY=
@@ -49,7 +48,34 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
 NEXT_PUBLIC_FIREBASE_APP_ID=
+
+# 画像アップロード（サーバー側のみで使用。ブラウザには渡らない）
+SUPABASE_URL=https://<プロジェクトRef>.supabase.co
+SUPABASE_SECRET_KEY=
 ```
+
+Firebase の値は Firebase Console の「プロジェクトの設定 > マイアプリ > Web アプリ」から取得します。
+
+## 画像保存（Supabase Storage）
+
+画像は Firebase Storage ではなく Supabase Storage に保存します。
+アップロードはサーバー側の API ルート `POST /api/images/upload` 経由で行い、
+`SUPABASE_SECRET_KEY` はブラウザに出しません。
+
+- バケット名: `nakami-memo-images`（公開バケット。API 側で無ければ自動作成します）
+- 保存パス: `users/{userId}/{items|locations}/{recordId}/image`
+- 上限: 5 MB 未満 / JPEG・PNG・WebP・GIF
+
+Supabase 側で必要な設定は次の2つです。
+
+1. Supabase ダッシュボードの「Project Settings > Data API」から Project URL（`https://<プロジェクトRef>.supabase.co`）をコピーし、`SUPABASE_URL` に設定
+2. 同じ画面の「API Keys」から service_role（secret）キーをコピーし、`SUPABASE_SECRET_KEY` に設定
+
+`next.config.ts` の `images.remotePatterns` には、Supabaseのホスト名を直接書いています。
+ホスト名は画像URLに元から露出している公開情報なので秘密ではなく、環境変数にすると
+ビルド環境への設定漏れで画像が黙って表示されなくなるためです。
+Supabaseプロジェクトを移す場合だけ、`next.config.ts` の `DEFAULT_SUPABASE_HOSTNAME` を書き換えるか、
+`SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL` で上書きしてください。
 
 ## Firebase側で必要な設定
 
@@ -59,14 +85,13 @@ Firebase Consoleで以下を有効化してください。
    - Googleログイン
    - メール/パスワードログイン
 2. Cloud Firestore
-3. Firebase Storage
-4. Firebase Hosting
 
 ## 開発コマンド
 
 ```bash
 npm run dev
 npm run typecheck
+npm run lint
 npm run build
 ```
 
@@ -95,10 +120,8 @@ publicLocations/{publicToken}
 ## Firebase Rules反映
 
 ```bash
-firebase deploy --only firestore:rules,storage
+firebase deploy --only firestore:rules
 ```
-
-Hostingまでデプロイする場合は、Firebase HostingのNext.js対応設定に沿ってデプロイしてください。
 
 ## 現時点の注意
 
