@@ -16,6 +16,7 @@ const SUITES = [
   'card-netting.test.js',
   'records-view.test.js',
   'gas-parser.test.js',
+  'gas-receipt.test.js',
   'app-contract.test.js',
   'receipt.test.js'
 ];
