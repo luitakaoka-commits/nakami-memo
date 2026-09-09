@@ -33,22 +33,31 @@ function resolveSupabaseHostname(): string {
  *   /recipe/     つくりおきノート（public/recipe/ の素のHTML+JS）
  *
  * public/ 配下は Next.js がそのまま配信するので、/money/index.html は既に見える。
- * ただし末尾スラッシュ無しの /money と /recipe は index.html に解決されないので、
- * ここで rewrite する。両アプリとも相対パスしか使っていないため、他の調整は不要。
+ * 短いURL /money と /recipe からそこへ送る。
+ *
+ * ここは rewrite ではなく redirect にしている。
+ * rewrite だとブラウザ上のURLが /money のままなので、HTML内の相対パス
+ * （styles.css や app.js）が /money/styles.css ではなく /styles.css に解決されてしまい、
+ * 全部404になってアプリが起動しない。redirect ならURL自体が /money/index.html になるので、
+ * 相対パスが正しく /money/ 配下を指す。
+ *
+ * 末尾スラッシュの /money/ を使わないのは、Next.js が trailingSlash: false の既定で
+ * /money/ → /money へ戻してしまい、噛み合わないため。
+ *
+ * permanent: false なのは、この構成を後で変える余地を残すため
+ * （308だとブラウザが恒久的にキャッシュしてしまう）。
  *
  * 同一オリジンなので、Firebase Auth のセッションと /api/images/upload を3アプリで共有できる。
  */
-const staticAppRewrites = [
-  { source: "/money", destination: "/money/index.html" },
-  { source: "/money/", destination: "/money/index.html" },
-  { source: "/recipe", destination: "/recipe/index.html" },
-  { source: "/recipe/", destination: "/recipe/index.html" },
+const staticAppRedirects = [
+  { source: "/money", destination: "/money/index.html", permanent: false },
+  { source: "/recipe", destination: "/recipe/index.html", permanent: false },
 ];
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  async rewrites() {
-    return staticAppRewrites;
+  async redirects() {
+    return staticAppRedirects;
   },
   images: {
     remotePatterns: [
