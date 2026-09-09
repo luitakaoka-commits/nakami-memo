@@ -556,6 +556,47 @@ test('63. rules と実装のズレ防止 — itemAliases のフィールドが�
   allowed.forEach(field => assert(declared.includes(field), `${field} が firebase-sync で定義されている`));
 });
 
+test('64. 繰り返しリスト — 辞書が無くても表記ゆれは1つに数える', () => {
+  /* レシートから読むと「ﾓﾔｼ」「モヤシ」「もやし2P」が混ざる。
+     辞書を作るまで別集計になっていると、繰り返し捨てているものが見えない。 */
+  const items = [
+    line({ name: 'もやし', amount: 100, outcome: 'expired' }),
+    line({ name: 'ﾓﾔｼ', amount: 100, outcome: 'discarded' }),
+    line({ name: 'モヤシ', amount: 100, outcome: 'expired' }),
+    line({ name: 'もやし2P', amount: 100, outcome: 'consumed' })
+  ];
+  const ranked = engine.repeatedWasteRanking(items);
+  equal(ranked.length, 1, '1グループにまとまる');
+  equal(ranked[0].purchaseCount, 4, '購入回数');
+  equal(ranked[0].wasteCount, 3, '廃棄回数');
+  equal(ranked[0].wasteTotal, 300, '廃棄額');
+});
+
+test('65. 繰り返しリスト — 意味の違うものは辞書が無くても分かれたまま', () => {
+  /* 正規化は表記だけを揃える。「同じものか」の判断は辞書（=本人の操作）に任せる。 */
+  const items = [
+    line({ name: '牛乳', amount: 300, outcome: 'expired' }),
+    line({ name: '低脂肪乳', amount: 300, outcome: 'expired' }),
+    line({ name: '緑豆もやし', amount: 100, outcome: 'expired' }),
+    line({ name: 'もやし', amount: 100, outcome: 'expired' })
+  ];
+  const ranked = engine.repeatedWasteRanking(items);
+  equal(ranked.length, 4, '4グループのまま');
+  deepEqual(ranked.map(item => item.name).sort(), ['もやし', '低脂肪乳', '牛乳', '緑豆もやし'].sort(), '寄せない');
+});
+
+test('66. 繰り返しリスト — 表示名は正規化キーではなく最も多い rawName', () => {
+  const items = [
+    line({ name: 'ﾓﾔｼ', amount: 100, outcome: 'expired' }),
+    line({ name: 'ﾓﾔｼ', amount: 100, outcome: 'expired' }),
+    line({ name: 'モヤシ', amount: 100, outcome: 'expired' })
+  ];
+  const ranked = engine.repeatedWasteRanking(items);
+  equal(ranked.length, 1, '1グループ');
+  equal(ranked[0].key, 'もやし', 'まとめ先のキーは正規化された形');
+  equal(ranked[0].name, 'ﾓﾔｼ', '画面に出すのは最も多かった元の表記');
+});
+
 if (!failures.length) { console.log(JSON.stringify({ suite: 'receipt', total, passed: total, failed: 0 })); process.exit(0); }
 console.log(JSON.stringify({ suite: 'receipt', total, passed: total - failures.length, failed: failures.length, failures }, null, 2));
 process.exit(1);

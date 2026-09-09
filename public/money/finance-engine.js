@@ -1583,9 +1583,11 @@
    * 「同じものを繰り返し捨てていないか」を品名でまとめる。
    * 一度も捨てていないものは並べても意味がないので落とす。
    * 並び順は 廃棄回数の多い順 → 同数なら廃棄額の多い順 → それも同じなら名前順。
-   * options.aliases を渡すと resolveItemKey でまとめ、表示名は辞書の canonicalName、
-   * 無ければグループ内で最も多かった rawName（同数なら先に出てきたもの）を使う。
-   * aliases を渡さないときは、これまでどおり表記そのままでまとめる。
+   * まとめ先は常に resolveItemKey（=①機械的正規化 →②辞書）で決める。
+   * 辞書が空でも①は必ず通すので、「もやし」と「ﾓﾔｼ」は辞書を作る前から1つに数える。
+   * レシートから機械的に読み取ると表記ゆれが常態になるため、ここを素通しにはしない。
+   * 表示名は辞書の canonicalName、無ければグループ内で最も多かった rawName
+   * （同数なら先に出てきたもの）を使う。正規化キーはそのまま出さない。
    */
   function repeatedWasteRanking(receiptItems = [], options = {}) {
     const limit = Number.isFinite(Number(options?.limit)) ? Math.max(Number(options.limit), 0) : 5;
@@ -1594,7 +1596,7 @@
     (receiptItems || []).forEach(item => {
       const label = String(item?.name || item?.rawName || '').trim();
       if (!label) return;
-      const key = aliases.size ? (resolveItemKey(item, aliases) || label) : label;
+      const key = resolveItemKey(item, aliases) || label;
       const group = groups.get(key) || { key, name: '', purchaseCount: 0, wasteCount: 0, wasteTotal: 0, labels: new Map() };
       const raw = String(item?.rawName || item?.name || '').trim() || label;
       group.labels.set(raw, (group.labels.get(raw) || 0) + 1);
