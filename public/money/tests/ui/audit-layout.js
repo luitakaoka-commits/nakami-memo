@@ -12,7 +12,7 @@ const CANDIDATES = JSON.parse(fs.readFileSync(path.join(__dirname,'candidates.js
 
 (async () => {
   await new Promise(r=>server.listen(PORT,r));
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 412, height: 800 }, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
   await page.route('**/firebase-sync.js*', r => r.fulfill({ status:200, contentType:'text/javascript; charset=utf-8', body: STUB }));

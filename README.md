@@ -98,10 +98,23 @@ npm run build
 
 `npm test` は同居している3アプリのテスト（`public/money` / `public/recipe` / `public/shared`）をまとめて実行します。中身は [`scripts/run-tests.mjs`](scripts/run-tests.mjs) を見てください。CIでも同じコマンドが走ります。
 
-次の2つは追加の準備が要るため `npm test` には含めていません。
+起動中のサーバーが要る配信チェックは `npm test` には入らず、CIでは別ステップとして
+ビルド後に走ります。手元で試すときは `npm run build && npm start` のあとに次を実行します。
 
-- `public/money/tests/ui/` — ブラウザ実測。別途 `npm install playwright` が必要
-- `public/shared/serving-check.mjs` — 起動中のサーバーが必要（`BASE=http://127.0.0.1:3000 node public/shared/serving-check.mjs`）
+```bash
+BASE=http://127.0.0.1:3000 node public/shared/serving-check.mjs
+```
+
+### ブラウザ実測テスト（`public/money/tests/ui/`）
+
+```bash
+npx playwright install chromium   # 初回のみ
+node public/money/tests/ui/run-ui-test.js
+```
+
+**現状25項目中8項目が落ちるため、まだCIには入れていません。**
+アプリ側が schemaVersion 6 まで進んでいるのに対し、テストの期待値が古い状態で止まっています。
+アプリの不具合なのかテストの期待値が古いだけなのかは切り分けが済んでいません。
 
 ## データ構造
 

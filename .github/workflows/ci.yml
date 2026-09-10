@@ -45,3 +45,15 @@ jobs:
           NEXT_PUBLIC_FIREBASE_APP_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID }}
           # アップロードAPIが実行時に参照する。未設定でもビルド自体は通る。
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+
+      # ビルドしたものを実際に起動して、3アプリが「ページとして」配信されるか確かめる。
+      # 200が返るかではなく、HTMLが参照する相対URLをブラウザと同じ手順で取りに行く。
+      # NEXT_PUBLIC_* はビルド時に埋め込み済みなので、起動側に環境変数は要らない。
+      - name: Serving check
+        run: |
+          npm start &
+          for _ in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:3000/ && break
+            sleep 1
+          done
+          BASE=http://127.0.0.1:3000 node public/shared/serving-check.mjs

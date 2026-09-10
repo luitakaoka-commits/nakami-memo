@@ -6,11 +6,26 @@ Firebaseへは接続せず、`stub-firebase-sync.js` に差し替えて動かす
 ## 実行
 
 ```bash
-npm install playwright        # 初回のみ
+npx playwright install chromium # 初回のみ（playwright 自体は devDependencies に入っている）
 node tests/ui/run-ui-test.js
 ```
 
-`APP_ROOT` を指定すると、別の場所にあるアプリを対象にできます（既定はリポジトリ直下）。
+`APP_ROOT` は配信の根で、既定は `public/`。`APP_PATH`（既定 `/money/index.html`）で開くページを選びます。
+`index.html` が `../shared/app-switcher.css` を参照しているので、根を `public/money/` にすると
+切り替えバーが404になります。本番と同じ `public/` を根にしてください。
+
+「今日」はスクリプト冒頭の `TODAY` で固定しています。期待値が seed の日付を前提に
+書かれているため、ここを動かすと期待値も書き直しになります。
+
+## 現状（未解決）
+
+**25項目中8項目が落ちます。CIにはまだ入れていません。**
+
+アプリは schemaVersion 6 まで進んでいるのに、`SEED_STATE` と期待値が古いままです。
+アプリの不具合なのか期待値が古いだけなのかは切り分けが済んでいません。
+
+- `card_usage_not_double_counted` / `cashflow_check` — 金額の期待値が合わない
+- 残り6項目 — 前の項目が途中で失敗して画面が残り、続く項目が要素をクリックできない
 
 ## 結果
 

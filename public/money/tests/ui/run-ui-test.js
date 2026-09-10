@@ -3,7 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-const ROOT = process.env.APP_ROOT || path.join(process.env.HOME, 'uitest');
+// 本番と同じく public/ を配信の根にする。index.html が ../shared/app-switcher.css を
+// 参照しているため、public/money/ を根にすると切り替えバーが404になる。
+const ROOT = process.env.APP_ROOT || path.join(__dirname, '..', '..', '..');
+const APP_PATH = process.env.APP_PATH || '/money/index.html';
+// テスト中の「今日」。期待値がこの日を前提に書かれているため固定する。
+const TODAY = '2026-09-10T09:00:00+09:00';
 const STUB = fs.readFileSync(process.env.STUB_PATH || path.join(__dirname, 'stub-firebase-sync.js'), 'utf8');
 const PORT = 8791;
 
@@ -70,9 +75,14 @@ const closeModals = page => page.evaluate(() => {
 
 (async () => {
   await new Promise(resolve => server.listen(PORT, resolve));
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  // パスは指定しない。playwright が入れたブラウザを使う（場所を変えたいときは PLAYWRIGHT_BROWSERS_PATH）。
+  const browser = await chromium.launch();
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
+
+  // 期待値（未払いカード額、残高推移、判定期限など）は seed の日付を基準に書いてあるので、
+  // 実行日で答えが変わらないよう「今日」を固定する。ここを動かすと期待値も全部書き直しになる。
+  await page.clock.setFixedTime(new Date(TODAY));
 
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('pageerror', error => consoleErrors.push(`pageerror: ${error.message}`));
@@ -85,7 +95,7 @@ const closeModals = page => page.evaluate(() => {
     localStorage.setItem('yoryoku-cloud-user', 'test-user');
   }, SEED_STATE);
 
-  await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: 'networkidle' });
+  await page.goto(`http://localhost:${PORT}${APP_PATH}`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => Boolean(window.__YORYOKU__), null, { timeout: 10000 }).catch(() => {});
 
   await record('initial_render', async () => {
