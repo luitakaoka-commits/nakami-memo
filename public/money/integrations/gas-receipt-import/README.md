@@ -20,7 +20,19 @@ Firestore の `receipts` / `receiptItems` に入れます。
 ## 用意するもの
 
 1. Gemini のAPIキー（[Google AI Studio](https://aistudio.google.com/apikey) で発行）
-2. アプリの `workspaceId`（お金管理の設定画面 → 共有スペース で確認できます）
+2. アプリの `workspaceId`
+
+`workspaceId` は**設定画面には表示されません**。設定 → 共有 に出ている
+「あなたのメンバーID」は uid であって別物なので、取り違えないでください。
+取り方は次の2つです。
+
+- **アプリから**：`/money` を開いて、ブラウザの開発者ツール（F12）のコンソールで
+  ```js
+  localStorage.getItem('okane-active-workspace')
+  ```
+  いま開いている共有スペースのIDが返ります。
+- **Firebase Console から**：`cash-manege` → Firestore Database → `workspaces` コレクション。
+  ドキュメントIDがそれです。複数あるときは `memberUids` に自分の uid が入っている方を選びます。
 
 キーが無くても動きます。その場合は Drive OCR だけになり、店名・日付・合計を拾って
 `needs_review` で登録します。明細は手で足すことになります。
