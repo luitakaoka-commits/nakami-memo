@@ -92,8 +92,16 @@ Firebase Consoleで以下を有効化してください。
 npm run dev
 npm run typecheck
 npm run lint
+npm test
 npm run build
 ```
+
+`npm test` は同居している3アプリのテスト（`public/money` / `public/recipe` / `public/shared`）をまとめて実行します。中身は [`scripts/run-tests.mjs`](scripts/run-tests.mjs) を見てください。CIでも同じコマンドが走ります。
+
+次の2つは追加の準備が要るため `npm test` には含めていません。
+
+- `public/money/tests/ui/` — ブラウザ実測。別途 `npm install playwright` が必要
+- `public/shared/serving-check.mjs` — 起動中のサーバーが必要（`BASE=http://127.0.0.1:3000 node public/shared/serving-check.mjs`）
 
 ## データ構造
 
