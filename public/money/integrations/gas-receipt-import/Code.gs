@@ -390,7 +390,7 @@ function setup() {
   ensureChildFolder(folder, DONE_FOLDER_NAME);
   messages.push('フォルダ: ' + folder.getName() + ' (' + folder.getId() + ')');
 
-  if (!config.workspaceId) messages.push('⚠ WORKSPACE_ID が未設定です（アプリの設定画面で確認できます）');
+  if (!config.workspaceId) messages.push('⚠ WORKSPACE_ID が未設定です（設定画面には出ません。取り方は README の「用意するもの」）');
   if (!config.geminiApiKey) messages.push('⚠ GEMINI_API_KEY が未設定です（Drive OCR だけで動きます）');
 
   var exists = ScriptApp.getProjectTriggers().some(function (trigger) {
