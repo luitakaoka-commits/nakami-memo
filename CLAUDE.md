@@ -154,7 +154,7 @@ Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環
 ## 現在地（2026-09-11 確認）
 
 - `main` に 2026-09-11 の作業（CI整備・ブラウザ実測テストの修復・このファイルの追加）までマージ済み。
-  **`origin/main` より13コミット先行 → push待ち**（件数は `git rev-list --count origin/main..main` で確かめる）
+  **`origin/main` より先行 → push待ち**（件数は書かない。すぐ古くなるので `git rev-list --count origin/main..main` で確かめる）
 - 検証は全部通した：money 183 / recipe 16 / app-switcher 25 / ブラウザ実測 25 / tsc / eslint / next build / serving-check 17
 - `public/money/integrations/` に `gas-card-mail-import` と `gas-receipt-import` の両方がある
 - **アプリの画面や計算のコードは 2026-09-10 から変わっていない**（09-11 はテスト・CI・文書だけ）
@@ -196,14 +196,14 @@ push とルール公開は数分で終わります。Phase 2 は `dryRun()` の�
 
 ### 1. push ★ユーザーの手作業
 
-GitHub Desktop で `main` を push してください（`origin/main` より13コミット先行）。
+GitHub Desktop で `main` を push してください。
 
 - `ffb6eba` 名寄せの穴の修正（`repeatedWasteRanking` が常に `resolveItemKey` を通る。155→158件）
 - `a226dfa` `gas-receipt-import` の4ファイルを配置
 - `9a31089` その純粋関数のテスト25件（158→183件）
 - `d1c6508` README の `workspaceId` の取り方を修正
-- 2026-09-11 の6コミット：CIでテストを回す、ブラウザ実測テストの修復、このファイルをリポジトリに追加、
-  GAS README の `WORKSPACE_ID` の説明の矛盾を修正
+- 2026-09-11 の分：CIでテストを回す、ブラウザ実測テストの修復、このファイルをリポジトリに追加、
+  GAS取込の `WORKSPACE_ID` の案内（README の表と `setup()` のログ）が「設定画面に出る」となっていた矛盾を修正
 - それ以前の feature ブランチ3コミット
 
 `main` への push は Vercel の本番デプロイになります。
