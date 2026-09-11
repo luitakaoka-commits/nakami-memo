@@ -46,7 +46,7 @@ Firestore の `receipts` / `receiptItems` に入れます。
 
    | プロパティ | 値 | 必須 |
    |---|---|---|
-   | `WORKSPACE_ID` | アプリの設定画面に出ている値 | ✅ |
+   | `WORKSPACE_ID` | 上の「用意するもの」の 2 で調べた値（設定画面には出ない） | ✅ |
    | `GEMINI_API_KEY` | AI Studio で発行したキー | 推奨 |
    | `FIRESTORE_PROJECT_ID` | 既定 `cash-manege` | |
    | `RECEIPT_FOLDER_NAME` | 既定 `レシート` | |
