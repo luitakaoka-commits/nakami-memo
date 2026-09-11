@@ -107,14 +107,12 @@ BASE=http://127.0.0.1:3000 node public/shared/serving-check.mjs
 
 ### ブラウザ実測テスト（`public/money/tests/ui/`）
 
+お金管理を実際のブラウザで操作して確かめる25項目です。CIでも毎回走ります。
+
 ```bash
 npx playwright install chromium   # 初回のみ
-node public/money/tests/ui/run-ui-test.js
+npm run test:ui
 ```
-
-**現状25項目中8項目が落ちるため、まだCIには入れていません。**
-アプリ側が schemaVersion 6 まで進んでいるのに対し、テストの期待値が古い状態で止まっています。
-アプリの不具合なのかテストの期待値が古いだけなのかは切り分けが済んでいません。
 
 ## データ構造
 

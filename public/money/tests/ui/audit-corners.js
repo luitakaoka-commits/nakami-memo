@@ -1,6 +1,6 @@
 const { chromium } = require('playwright');
 const fs=require('fs'), path=require('path'), http=require('http');
-const ROOT = process.env.APP_ROOT || path.join(__dirname, '..', '..');
+const ROOT = process.env.APP_ROOT || path.join(__dirname, '..', '..', '..'); // public/（run-ui-test.js と同じ理由）
 const STUB = fs.readFileSync(process.env.STUB_PATH || path.join(__dirname, 'stub-firebase-sync.js'), 'utf8');
 const PORT=8799;
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png'};
@@ -11,11 +11,11 @@ const CANDIDATES=JSON.parse(fs.readFileSync(path.join(__dirname,'candidates.json
   await new Promise(r=>server.listen(PORT,r));
   const b=await chromium.launch();
   const width=Number(process.env.W||412);
-  const ctx=await b.newContext({viewport:{width,height:900}});
+  const ctx=await b.newContext({viewport:{width,height:900},serviceWorkers:'block'});
   const p=await ctx.newPage();
   await p.route('**/firebase-sync.js*',r=>r.fulfill({status:200,contentType:'text/javascript; charset=utf-8',body:STUB}));
   await p.addInitScript(s=>{if(!localStorage.getItem('yoryoku-finance-v2'))localStorage.setItem('yoryoku-finance-v2',JSON.stringify(s));localStorage.setItem('yoryoku-cloud-user','test-user');},SEED);
-  await p.goto(`http://localhost:${PORT}/index.html`,{waitUntil:'networkidle'});
+  await p.goto(`http://localhost:${PORT}/money/index.html`,{waitUntil:'networkidle'});
   await p.waitForFunction(()=>Boolean(window.__YORYOKU__),null,{timeout:15000});
   await p.evaluate(c=>window.__YORYOKU__.setImportCandidates(c),CANDIDATES);
   await p.evaluate(m=>{window.__CORNER_MARGIN__=m;}, Number(process.env.MARGIN||0.5));

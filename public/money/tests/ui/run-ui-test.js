@@ -7,8 +7,12 @@ const http = require('http');
 // 参照しているため、public/money/ を根にすると切り替えバーが404になる。
 const ROOT = process.env.APP_ROOT || path.join(__dirname, '..', '..', '..');
 const APP_PATH = process.env.APP_PATH || '/money/index.html';
-// テスト中の「今日」。期待値がこの日を前提に書かれているため固定する。
-const TODAY = '2026-09-10T09:00:00+09:00';
+// テスト中の「今日」。SEED_STATE と期待値はこの日を前提に書かれている:
+//   - 家賃（9/5）が判定期限（毎月14日締め → 9/14）の内側に入り、現金支出が 80,000 になる
+//   - 初日の残高が口座残高 300,000 のまま（9/1 の仕送りより後、9/5 の家賃より前）
+//   - 記録ページの既定の月が 2026年9月になる
+// 実行日のままにすると、日付が進むたびに黙って落ちる。
+const TODAY = '2026-09-02T09:00:00+09:00';
 const STUB = fs.readFileSync(process.env.STUB_PATH || path.join(__dirname, 'stub-firebase-sync.js'), 'utf8');
 const PORT = 8791;
 
@@ -77,7 +81,9 @@ const closeModals = page => page.evaluate(() => {
   await new Promise(resolve => server.listen(PORT, resolve));
   // パスは指定しない。playwright が入れたブラウザを使う（場所を変えたいときは PLAYWRIGHT_BROWSERS_PATH）。
   const browser = await chromium.launch();
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  // Service Worker は止める。動かすと再読み込み後に本物の firebase-sync.js がキャッシュから返り、
+  // 下の page.route のスタブを素通りしてログイン画面に戻ってしまう（SW経由の取得は route で横取りできない）。
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
   const page = await context.newPage();
 
   // 期待値（未払いカード額、残高推移、判定期限など）は seed の日付を基準に書いてあるので、
