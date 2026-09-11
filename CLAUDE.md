@@ -16,10 +16,12 @@ git log --oneline -5
 git status --porcelain             # 未コミットの有無
 git rev-parse --short HEAD origin/main   # push済みかどうか
 
-cd public/money && node tests/run.js
-# 183件 → 2026-09-10 時点の完成形（名寄せ修正 + GAS取込のテスト）
-# 158件 → GAS取込のテストが無い
-# 155件 → 名寄せの修正も無い。古いコミットを見ている
+npm test
+# money 183件 → 2026-09-10 時点の完成形（名寄せ修正 + GAS取込のテスト）
+#       158件 → GAS取込のテストが無い
+#       155件 → 名寄せの修正も無い。古いコミットを見ている
+# recipe 16件 / app-switcher 25件 も同じコマンドで走る
+# 「Cannot find package 'jsdom'」と出たら npm install が済んでいない
 ```
 
 **テストの件数が、いま何が終わっているかを一番正確に教えてくれます。**
@@ -53,6 +55,14 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
 
 **編集は `public/` 配下と `src/` 配下だけ。** `Documents/Codex/2026-07-17/.../財務管理アプリ再作成` と
 `2026-08-26/.../献立アプリ比較` は保管用で、触りません。
+
+設計の全体（なぜこの形か、データモデル、各 Phase の中身）は
+`Documents/Codex/設計書/統合設計_レシート明細とレシピ生成.md` にあります。
+ただし 2026-09-06 時点の文書なので、「なかみメモの rules は一括許可だから変更不要」の記述は古いです
+（いまはホワイトリスト方式。`tools` / `recipes` / `consumptions` は入っているが未デプロイ。下の Phase 3 を参照）。
+
+**`docs/IMPLEMENTATION_PLAN.md` の Phase 1〜8 は、なかみメモ単体を最初に作ったときの完了済みの計画です。**
+このファイルの Phase 0〜4（統合）とは別物です。ユーザーが「フェーズ2から3」と言ったら**統合の方**です。
 
 **push はユーザーが GitHub Desktop で行います。** コミットまで済ませて「pushしてください」と伝えてください。
 
@@ -105,47 +115,58 @@ Firebase Console で公開するまで反映されません。レシートが保
 **GitHub Desktop が別のクローンを開いていることがある。** 「45コミット遅れ」のような表示が出たら
 別フォルダを見ています。`File → Add local repository` で正しいパスを追加してください。
 
+**ブラウザ実測テストが長いあいだ誰にも動かされていなかった。** `tests/ui/run-ui-test.js` は chromium のパスが
+特定の環境（`/opt/pw-browsers/chromium`）に固定されていて、どこで走らせても起動しませんでした。
+パスを直したあとも、①「今日」が実行日のまま（期待値は 2026-09-02 前提）②Service Worker が本物の
+`firebase-sync.js` をキャッシュから返し、テスト用スタブを素通りしてログイン画面に戻る、の2つで8項目が落ちていました。
+**期待値は1つも書き換えず**にこの2つを直し、25項目すべて通っています（2026-09-11）。CIに入れたので、もう眠りません。
+
+**2つの「Phase」を取り違えた。** このファイルが Git に入っておらず、Claude Code が作業用コピー（git worktree）で
+動いたときに読まれなかったため、統合の Phase を知らないまま `docs/IMPLEMENTATION_PLAN.md` の Phase で話を進め、
+不要なセットアップ手順をユーザーに渡してしまいました。2026-09-11 にこのファイルをリポジトリへ入れています。
+
 ---
 
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-cd public/money && node tests/run.js              # 183件
-cd ../recipe && node tests/row-template.test.js   # 16件
-cd .. && node shared/switcher.test.mjs            # jsdom が要る
-
-cd ../..
-npx tsc --noEmit && npx eslint . && npx next build
+npm test                 # money 183 / recipe 16 / app-switcher 25
+npm run test:ui          # お金管理のブラウザ実測 25項目（初回だけ npx playwright install chromium）
+npm run typecheck && npm run lint && npm run build
 
 # サーバーを起動して配信チェック（17件）
-npx next start -p 3000 &
+npm start &
 BASE=http://127.0.0.1:3000 node public/shared/serving-check.mjs
 ```
+
+GitHub Actions（`.github/workflows/ci.yml`）が、`main` への push と PR のたびに上の全部を回します。
 
 `serving-check.mjs` は、ステータスコードではなくブラウザと同じ手順でHTMLから相対URLを
 解決して実際に取りに行きます。**デプロイ前に必ず走らせてください。**
 
 `.env.local` が無い場合、ビルドにはダミーの環境変数で足ります（`.env.example` 参照）。
+**空の値ではダメ**で、`auth/invalid-api-key` で prerender が落ちます。CIは Secrets が無ければ自動でダミーに落とします。
 Vercelの本番/プレビューには本物の値が Production・Preview 両方に設定済みです。
 Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環境変数の設定漏れで画像が消えることはありません。
 
 ---
 
-## 現在地（2026-09-10 確認）
+## 現在地（2026-09-11 確認）
 
-- `main` = `a226dfa` = `feature/three-app-suite`。**`origin/main` より5コミット先行 → push待ち**
-- 未コミットの変更なし
-- **テスト183件・全通過 → 名寄せの修正もGAS取込のテストも入っている**
+- `main` に 2026-09-11 の作業（CI整備・ブラウザ実測テストの修復・このファイルの追加）までマージ済み。
+  **`origin/main` より13コミット先行 → push待ち**（件数は `git rev-list --count origin/main..main` で確かめる）
+- 検証は全部通した：money 183 / recipe 16 / app-switcher 25 / ブラウザ実測 25 / tsc / eslint / next build / serving-check 17
 - `public/money/integrations/` に `gas-card-mail-import` と `gas-receipt-import` の両方がある
-- 検証は全部通した：money 183 / recipe 16 / switcher 25 / tsc / eslint / next build / serving-check 17
+- **アプリの画面や計算のコードは 2026-09-10 から変わっていない**（09-11 はテスト・CI・文書だけ）
 
 ### この環境の癖（毎回ひっかかるので先に書く）
 
-- **`git` が PATH に無い。** GitHub Desktop 同梱のものを使う:
+- **PowerShell では `git` が PATH に無い。** GitHub Desktop 同梱のものを使う（Bash ツールからはそのまま使える）:
   `$env:Path = "C:\Users\humal\AppData\Local\GitHubDesktop\app-3.6.5\resources\app\git\cmd;" + $env:Path`
-- **`node_modules` が無い状態から始まることがある。** `npm ci` が要る。
-  `switcher.test.mjs` の jsdom は package.json に入っていないので `npm install --no-save jsdom` を足す。
-  さらに `SHARED_DIR` の指定が要る（`$env:SHARED_DIR = (Resolve-Path "public\shared").Path`）。
+- **`node_modules` が古い・無い状態から始まることがある。** `npm install` を1回。
+  jsdom と playwright は devDependencies に入れたので、`--no-save` での追加や `SHARED_DIR` の手指定はもう要らない。
+- **Claude Code が git worktree（`.claude/worktrees/…`）で動くことがある。** そのときは本体フォルダにある
+  Git 管理外のファイル（`.env.local` など）は見えない。**Git に入っていないものは無いものとして扱う。**
 - `next build` は `next-env.d.ts` に1行足す。生成物なので `git checkout -- next-env.d.ts` で戻す。
 
 ### 完了していること
@@ -170,16 +191,19 @@ Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環
 
 ## 残っていること
 
-**やる順番は 1 → 3 → 2。** 1と3は数分で終わります。2 は `dryRun()` の結果を見る時間が要ります。
+**やる順番は push → Phase 2 のセットアップ → Phase 3 の前提（ルール公開・Vercel の環境変数）→ Phase 3 の実装。**
+push とルール公開は数分で終わります。Phase 2 は `dryRun()` の結果を見る時間が要ります。
 
 ### 1. push ★ユーザーの手作業
 
-`main` = `d1c6508` を GitHub Desktop で push してください（`origin/main` より7コミット先行）。
+GitHub Desktop で `main` を push してください（`origin/main` より13コミット先行）。
 
 - `ffb6eba` 名寄せの穴の修正（`repeatedWasteRanking` が常に `resolveItemKey` を通る。155→158件）
 - `a226dfa` `gas-receipt-import` の4ファイルを配置
 - `9a31089` その純粋関数のテスト25件（158→183件）
 - `d1c6508` README の `workspaceId` の取り方を修正
+- 2026-09-11 の6コミット：CIでテストを回す、ブラウザ実測テストの修復、このファイルをリポジトリに追加、
+  GAS README の `WORKSPACE_ID` の説明の矛盾を修正
 - それ以前の feature ブランチ3コミット
 
 `main` への push は Vercel の本番デプロイになります。
@@ -203,7 +227,8 @@ GAS + Gemini。**次の一歩は Apps Script にセットアップして `dryRun
 そこで見るのは3点。**小計や「お預り」が明細に混ざっていないか、値引き行がマイナスで入っているか、
 カテゴリの振り分けが妥当か。** 外れていたら `Gemini.gs` の `receiptPrompt()` に1行足して直します。
 
-必要なもの: Gemini APIキー（https://aistudio.google.com/apikey）と `workspaceId`（お金管理の設定画面）。
+必要なもの: Gemini APIキー（https://aistudio.google.com/apikey）と `workspaceId`
+（**設定画面には出ません**。「あなたのメンバーID」は uid で別物。取り方は同フォルダの README）。
 どちらもスクリプトプロパティに入れます。モデルは `GEMINI_MODEL` で差し替え可能（既定 `gemini-2.5-flash`）。
 
 コードは `public/money/integrations/gas-receipt-import/` にあります（2026-09-10 配置）。
