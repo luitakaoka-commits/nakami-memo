@@ -127,6 +127,7 @@ function reviewReceipt(record, options) {
   var receipt = record.receipt;
   var items = record.items;
   var reasons = [];
+  var taxNote = allocateExclusiveTax(record);
 
   if (!receipt.purchasedAt) reasons.push('購入日を読み取れませんでした');
   if (!receipt.storeName) reasons.push('店名を読み取れませんでした');
@@ -147,8 +148,73 @@ function reviewReceipt(record, options) {
   }
 
   receipt.status = reasons.length ? 'needs_review' : 'pending';
-  receipt.note = reasons.join(' / ');
+  receipt.note = reasons.concat(taxNote ? [taxNote] : []).join(' / ');
   return record;
+}
+
+/**
+ * 外税のレシートを税込にそろえる。
+ *
+ * 外税の店（東急ストアなど）は、品物の行に税抜の本体価格を印字し、最後に消費税をまとめて足す。
+ * そのまま読むと「明細の合計 + 消費税 = 合計金額」になり、明細の合計が合計金額と合わない。
+ * アプリは明細の合計と合計金額の一致を前提にしている（合わなければ保存時に要確認へ落とす）ので、
+ * 消費税を明細へ金額の比で割り振り、明細も税込にする。
+ *
+ * 軽減税率（8%）と標準税率（10%）の品物が混ざっていても区別せずに割り振るため、
+ * 1行あたり数円の誤差は出る。合計は必ず一致させる（端数は金額の一番大きい行へ寄せる）。
+ *
+ * 外税だと言い切れるとき（明細の合計 + 消費税 が合計金額と1円以内で一致）だけ動く。
+ * それ以外は何もしない。割り振った場合は note に書く文言を、しなかった場合は '' を返す。
+ * 割り振った各行の額は record.taxAllocation に残す（保存はされない。dryRun の表示用）。
+ */
+function allocateExclusiveTax(record) {
+  var receipt = record.receipt;
+  var items = record.items;
+  var tax = receipt.taxTotal;
+  if (!items.length || tax <= 0 || receipt.total <= 0) return '';
+
+  var sum = items.reduce(function (acc, item) { return acc + item.amount; }, 0);
+  if (sum <= 0) return '';
+  if (Math.abs(sum - receipt.total) <= TOTAL_TOLERANCE_YEN) return '';          // 内税。そのままで合っている
+  if (Math.abs(sum + tax - receipt.total) > TOTAL_TOLERANCE_YEN) return '';     // 外税でも説明がつかない。検算に任せる
+
+  var target = receipt.total - sum;   // 1円の端数も含めて、合計にぴったり合わせる
+  var shares = items.map(function (item) { return Math.round(item.amount * target / sum); });
+  var remainder = target - shares.reduce(function (acc, n) { return acc + n; }, 0);
+  var largest = 0;
+  items.forEach(function (item, index) { if (item.amount > items[largest].amount) largest = index; });
+  shares[largest] += remainder;
+
+  items.forEach(function (item, index) {
+    item.amount += shares[index];
+    item.outcomeTracked = classifyOutcomeTracked(item.category, item.amount);
+  });
+  record.taxAllocation = shares;
+  return '外税のレシートのため、消費税 ' + target + '円 を明細に割り振って税込にしました';
+}
+
+/**
+ * 読み取り結果を、レシートと見比べやすい1行1品の表にする（dryRun 用）。
+ * JSON のままだと15品で300行を超え、スクリーンショット1枚に収まらないため。
+ */
+function summarizeReceipt(record) {
+  var receipt = record.receipt;
+  var shares = record.taxAllocation || [];
+  var lines = [
+    '店名: ' + receipt.storeName + ' / 日付: ' + receipt.purchasedAt + ' / 支払: ' + receipt.paymentMethod,
+    '状態: ' + receipt.status + (receipt.note ? '（' + receipt.note + '）' : ''),
+    '----'
+  ];
+  var sum = 0;
+  record.items.forEach(function (item, index) {
+    sum += item.amount;
+    var printed = shares[index] ? '（印字 ' + (item.amount - shares[index]) + '円）' : '';
+    lines.push(item.lineNo + '. ' + item.rawName + '  ' + item.amount + '円' + printed
+      + '  ' + item.category + (item.outcomeTracked ? '  ★ふりかえり' : ''));
+  });
+  lines.push('----');
+  lines.push('明細の合計 ' + sum + '円 / 合計金額 ' + receipt.total + '円 / 消費税 ' + receipt.taxTotal + '円');
+  return lines.join('\n');
 }
 
 /** JSONをFirestoreのフィールド表現へ変換する（gas-card-mail-import と同じ形）。 */
@@ -440,7 +506,8 @@ function dryRun() {
       source: source, createdBy: 'dry-run'
     });
     reviewReceipt(record, { confidence: parsed && parsed.confidence });
-    Logger.log(file.getName() + '（読み取り: ' + source + '）\n' + JSON.stringify(record, null, 2));
+    Logger.log(file.getName() + '（読み取り: ' + source + '）\n' + summarizeReceipt(record));
+    Logger.log('保存される形:\n' + JSON.stringify({ receipt: record.receipt, items: record.items }, null, 2));
     return record;
   }
   Logger.log('画像がありません');

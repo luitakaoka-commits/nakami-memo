@@ -259,6 +259,66 @@ test('25. OCR結果は confidence 0.3 なので必ず needs_review になる', (
   equal(record.receipt.source, 'drive-ocr', 'source');
 });
 
+/* ---------- 外税のレシート ---------- */
+
+/* 2026-09-13 の実物（東急ストア）: 明細の合計 3,543円 + 消費税 294円 = 合計 3,837円。
+   品物の行は税抜で印字され、消費税が最後にまとめて足されていた。 */
+const exclusive = over => reviewed(Object.assign({
+  total: 3837,
+  taxTotal: 294,
+  items: [
+    { rawName: 'ﾓﾔｼ', amount: 100, category: '食品' },
+    { rawName: 'ｷﾞｭｳﾆｭｳ', amount: 223, category: '飲料' },
+    { rawName: 'ｾﾝｻﾞｲ', amount: 3300, category: '日用品' },
+    { rawName: '値引', amount: -80, category: 'その他' }
+  ]
+}, over));
+
+test('26. 外税のレシートは消費税を明細に割り振り、明細の合計を合計金額にぴったり合わせる', () => {
+  const record = exclusive();
+  const sum = record.items.reduce((acc, item) => acc + item.amount, 0);
+  equal(sum, 3837, '明細の合計 = 合計金額');
+  equal(record.receipt.status, 'pending', '外税で説明がつくので要確認にしない');
+  assert(/外税/.test(record.receipt.note), `割り振ったことが note に残る: ${record.receipt.note}`);
+  deepEqual(record.taxAllocation.reduce((a, n) => a + n, 0), 294, '割り振った額の合計 = 消費税');
+});
+
+test('27. 割り振りは金額の比。値引き行は値引きのまま（マイナスが小さくなるだけ）', () => {
+  const items = exclusive().items;
+  assert(items[2].amount > items[1].amount && items[1].amount > items[0].amount, '大きい行ほど多く足される');
+  assert(items[3].amount < 0 && items[3].amount > -100, `値引きはマイナスのまま: ${items[3].amount}`);
+});
+
+test('28. 割り振りで5,000円を超えた行はふりかえり対象になり直す', () => {
+  const record = exclusive({
+    total: 5400,
+    taxTotal: 400,
+    items: [{ rawName: 'ﾌﾗｲﾊﾟﾝ', amount: 5000 - 1, category: '雑貨' }, { rawName: 'ｱﾒ', amount: 1, category: '食品' }]
+  });
+  equal(record.items[0].outcomeTracked, true, '税込で5,000円を超えたので対象');
+});
+
+test('29. 内税のレシート（明細の合計が最初から合っている）には何もしない', () => {
+  const record = reviewed({ total: 300, taxTotal: 22 });
+  equal(record.items[0].amount, 300, '金額はそのまま');
+  equal(record.receipt.note, '', 'note も空');
+  equal(record.taxAllocation, undefined, '割り振りなし');
+});
+
+test('30. 消費税を足しても合わないレシートは割り振らずに要確認のまま', () => {
+  const record = exclusive({ total: 4000 });
+  equal(record.items[2].amount, 3300, '金額を勝手に動かさない');
+  equal(record.receipt.status, 'needs_review', '要確認');
+  assert(!/外税/.test(record.receipt.note), '外税とは書かない');
+});
+
+test('31. dryRun の表は1品1行で、印字の金額と合計を並べる', () => {
+  const text = sandbox.summarizeReceipt(exclusive());
+  assert(/\(印字 3300円\)|（印字 3300円）/.test(text), `印字の金額が出る:\n${text}`);
+  assert(/明細の合計 3837円 \/ 合計金額 3837円 \/ 消費税 294円/.test(text), `合計の行:\n${text}`);
+  equal(text.split('\n').filter(line => /^\d+\. /.test(line)).length, 4, '4品で4行');
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-receipt', total, passed: total, failed: 0 }));
   process.exit(0);
