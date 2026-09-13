@@ -90,8 +90,15 @@ await checkPage("つくりおきノート /recipe", "/recipe", [
 
 await checkPage("なかみメモ /", "/", []);
 
+await checkPage("くらしノートの起動ページ /start.html", "/start.html", ["くらしノート"]);
+
 // 共有アセットは3アプリから同じURLで引かれる
-for (const path of ["/shared/app-switcher.js", "/shared/app-switcher.css"]) {
+// （last-app.js と manifest・アイコンは HTML から相対パスで拾えない形で参照されるので、ここで直接見る）
+for (const path of [
+  "/shared/app-switcher.js", "/shared/app-switcher.css", "/shared/last-app.js",
+  "/manifest.webmanifest", "/icons/kurashi-note-192.png", "/icons/kurashi-note-512.png",
+  "/icons/kurashi-note-maskable-512.png", "/icons/kurashi-note-apple-180.png",
+]) {
   const res = await fetch(BASE + path);
   check(`共有アセット ${path}`, res.ok, String(res.status));
 }

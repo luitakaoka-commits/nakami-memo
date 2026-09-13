@@ -38,6 +38,8 @@ const bar = mountAppSwitcher({ current: "money" });
 t("バーが body の先頭に入る", () => ok(document.body.firstChild === bar, "先頭でない"));
 t("バーに現在のアプリ名が出る", () => ok(bar.textContent.includes("お金管理"), bar.textContent));
 t("バーのアイコンが現在のアプリのもの", () => ok(bar.querySelector(".appsw-tile--money"), "money タイルがない"));
+t("バーを出したアプリを「最後に開いたアプリ」として覚える（くらしノートの起動先）", () =>
+  eq(localStorage.getItem("appSwitcherLast"), "money", "appSwitcherLast"));
 t("トリガーがボタンで、ダイアログを開くと宣言している", () => {
   const b = bar.querySelector(".appsw-trigger");
   ok(b && b.tagName === "BUTTON", "button でない");

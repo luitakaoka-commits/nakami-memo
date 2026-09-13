@@ -1,28 +1,30 @@
 {
-  "name": "なかみメモ",
-  "short_name": "なかみメモ",
-  "description": "家庭向けの中身メモ + ゆるい在庫管理アプリ",
-  "start_url": "/app",
+  "id": "/",
+  "name": "くらしノート",
+  "short_name": "くらしノート",
+  "description": "お金管理・なかみメモ・つくりおきノートをまとめて使う、家の台帳アプリ",
+  "lang": "ja",
+  "start_url": "/start.html",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#1e8a58",
   "orientation": "portrait",
+  "background_color": "#F1EFE8",
+  "theme_color": "#F1EFE8",
   "icons": [
     {
-      "src": "/icons/icon-192.png",
+      "src": "/icons/kurashi-note-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "/icons/kurashi-note-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/maskable-512.png",
+      "src": "/icons/kurashi-note-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

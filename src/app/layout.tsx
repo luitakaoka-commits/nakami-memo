@@ -10,17 +10,19 @@ export const metadata: Metadata = {
   },
   description: "家の在庫管理",
   applicationName: "なかみメモ",
+  // 3アプリは「くらしノート」1つとしてインストールする。manifest と iPhone 用のアイコン・名前は3アプリ共通。
+  // タブのアイコン（icon）はアプリごとのままにして、ブラウザで開いたときに見分けられるようにしている。
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    apple: [{ url: "/icons/kurashi-note-apple-180.png", sizes: "180x180", type: "image/png" }],
   },
   appleWebApp: {
     capable: true,
-    title: "なかみメモ",
+    title: "くらしノート",
     statusBarStyle: "default",
   },
 };

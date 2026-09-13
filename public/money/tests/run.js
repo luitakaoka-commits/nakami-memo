@@ -18,7 +18,8 @@ const SUITES = [
   'gas-parser.test.js',
   'gas-receipt.test.js',
   'app-contract.test.js',
-  'receipt.test.js'
+  'receipt.test.js',
+  'sw-version.test.js'
 ];
 
 const results = [];

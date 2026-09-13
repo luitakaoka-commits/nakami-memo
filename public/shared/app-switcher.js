@@ -14,6 +14,8 @@
  *   つくりおきノート … 蓋つきの保存容器（調理中の鍋ではなく、しまっておく器）
  */
 
+import { rememberLastApp } from "./last-app.js";
+
 const STATUS_KEY = "appSwitcherStatus";
 /* 状態表示が古すぎると誤解を招くので、この時間を過ぎたら出さない。 */
 const STATUS_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 3;
@@ -169,6 +171,9 @@ export function mountAppSwitcher(options) {
   /* 各アプリはこのフックだけを見る。切り替えバーを外しても
      アプリ側は `window.__appStatus?.(...)` が空振りするだけで壊れない。 */
   window.__appStatus = (text) => publishAppStatus(currentId, text);
+
+  /* くらしノートを次に起動したとき、このアプリから始める（last-app.js）。 */
+  rememberLastApp(currentId);
 
   return bar;
 }

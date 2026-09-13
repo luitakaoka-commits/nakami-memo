@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- くらしノート（3アプリをまとめてインストールしたときのアイコン）。
+       3冊（お金管理・なかみメモ・つくりおきノート）を1冊に綴じたノートと、3色のしおり。
+       PNG は scripts/render-icons.mjs でこのファイルから作る。ここを直したら PNG も作り直すこと。
+       中身は中心から半径200px以内に収めてある（maskable の安全領域は半径約205px）。 -->
+  <rect width="512" height="512" fill="#F1EFE8"/>
+  <rect x="128" y="108" width="224" height="296" rx="30" fill="#FFFDF8" stroke="#444441" stroke-width="26"/>
+  <path d="M186 108v296" stroke="#444441" stroke-width="22"/>
+  <path d="M228 200h78M228 256h78" stroke="#444441" stroke-width="22" stroke-linecap="round"/>
+  <rect x="332" y="138" width="56" height="80" rx="12" fill="#0F6E56"/>
+  <rect x="332" y="232" width="56" height="64" rx="12" fill="#BA7517"/>
+  <rect x="332" y="310" width="56" height="54" rx="12" fill="#D85A30"/>
+</svg>
