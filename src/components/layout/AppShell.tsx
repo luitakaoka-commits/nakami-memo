@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Box, Home, LogOut, PackageSearch, Plus, Search } from "lucide-react";
+import { Box, ChefHat, Home, LogOut, Plus, Search } from "lucide-react";
 import { logout } from "@/lib/firebase/auth";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { InventoryProvider } from "@/lib/hooks/useInventory";
@@ -13,7 +13,8 @@ const navItems = [
   { href: "/app/locations", label: "保管場所", icon: Box },
   { href: "/app/items/new", label: "追加", icon: Plus },
   { href: "/app/search", label: "検索", icon: Search },
-  { href: "/app/low-stock", label: "少ない", icon: PackageSearch },
+  // 「少ない」はホームの「残り少ないもの」から開ける（2026-09-14 決定でレシピに置き換え）
+  { href: "/app/recipes", label: "レシピ", icon: ChefHat },
 ];
 
 function isActivePath(pathname: string, href: string) {

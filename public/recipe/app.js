@@ -14,7 +14,7 @@ const LEGACY_KEY = "tsukurioki-note-state-v1";
 const PREF_FIELDS = ["tab", "sort", "scope", "keywordMode", "category", "theme"];
 
 const CATEGORIES = ["主菜", "副菜", "汁物", "ごはん", "麺", "お菓子", "その他"];
-const SOURCES = ["自分のレシピ", "SNS", "レシピサービス", "本・雑誌"];
+const SOURCES = ["自分のレシピ", "SNS", "レシピサービス", "本・雑誌", "AIの提案"];
 const SLOTS = ["朝食", "昼食", "夕食", "その他"];
 const SORTS = [
   ["new", "登録が新しい順"],

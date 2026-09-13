@@ -26,13 +26,20 @@ const SUITES = [
   { name: "install", cwd: SHARED_DIR, file: "install.test.mjs" },
   { name: "rules", cwd: SHARED_DIR, file: "rules.test.mjs" },
   { name: "migrate", cwd: SHARED_DIR, file: "migrate.test.mjs" },
+  // なかみメモのレシピ提案。TypeScript のまま読むので型を剥がして動かす（Node 22.6 以降）
+  {
+    name: "recipes",
+    cwd: path.join(ROOT, "src", "lib", "recipes"),
+    file: "suggest-core.test.mjs",
+    nodeArgs: ["--experimental-strip-types", "--no-warnings"],
+  },
 ];
 
 const failures = [];
 
 for (const suite of SUITES) {
   console.log(`\n=== ${suite.name} ===`);
-  const run = spawnSync(process.execPath, [suite.file], {
+  const run = spawnSync(process.execPath, [...(suite.nodeArgs ?? []), suite.file], {
     cwd: suite.cwd,
     env: { ...process.env, ...suite.env },
     stdio: "inherit",

@@ -53,7 +53,7 @@ export function Dashboard() {
 
       <div className="ui-grid-two">
         <section className="ui-section">
-          <div className="ui-section__head"><div className="flex items-center gap-2"><CalendarClock size={18} className="text-[var(--amber)]" /><h2 className="ui-section__title">期限が近いもの</h2></div><Link href="/app/expiring" className="ui-button ui-button--ghost">すべて</Link></div>
+          <div className="ui-section__head"><div className="flex items-center gap-2"><CalendarClock size={18} className="text-[var(--amber)]" /><h2 className="ui-section__title">期限が近いもの</h2></div><div className="flex gap-1">{expiringAll.length > 0 && <Link href="/app/recipes" className="ui-button ui-button--ghost">レシピを考える</Link>}<Link href="/app/expiring" className="ui-button ui-button--ghost">すべて</Link></div></div>
           <div className="ui-list">{expiringItems.length ? expiringItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={locationLabelOf(item)} />) : <p className="ui-muted">該当なし</p>}</div>
         </section>
 

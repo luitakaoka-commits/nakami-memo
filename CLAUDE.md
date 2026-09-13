@@ -22,7 +22,7 @@ npm test
 #       183件 → 2026-09-10 時点（名寄せ修正 + GAS取込のテスト）
 #       158件 → GAS取込のテストが無い
 #       155件 → 名寄せの修正も無い。古いコミットを見ている
-# recipe 16件 / app-switcher 26件 / install 10件 / rules 7件 / migrate 7件 も同じコマンドで走る
+# recipe 16件 / app-switcher 26件 / install 10件 / rules 7件 / migrate 7件 / recipes 14件 も同じコマンドで走る
 # 「Cannot find package 'jsdom'」と出たら npm install が済んでいない
 ```
 
@@ -113,8 +113,8 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
 | 2 | そのルールを cash-manege に公開する（ユーザー） | 済（09-14） |
 | 3 | 引っ越しページ `/migrate`（`public/migrate/`）を公開する | 済 |
 | 4 | ユーザーが引っ越しページで書き写し、件数の一致を確かめる | 済（09-15 1:15。エリア2・保管場所4・モノ54・レシピ1・献立0・買い物0・公開0、すべて一致） |
-| 5 | なかみメモ（`src/lib/firebase/config.ts`、画像APIの apiKey）とつくりおきノート（`firebase-config.js`）の接続先を cash-manege に切り替える | 済（push待ち） |
-| 6 | ユーザーが3アプリでデータとログイン1回を確かめる | 未着手 |
+| 5 | なかみメモ（`src/lib/firebase/config.ts`、画像APIの apiKey）とつくりおきノート（`firebase-config.js`）の接続先を cash-manege に切り替える | 済 |
+| 6 | ユーザーが3アプリでデータとログイン1回を確かめる | 済（09-15。モノ54・レシピ1が見え、ログインは1回、保存もできた） |
 
 - uid はプロジェクトごとに違うので、`users/{古いuid}` → `users/{新しいuid}` へ書き写す。ドキュメントIDは変えない。
   `publicLocations` は `ownerId` を新しい uid に書き換える
@@ -167,7 +167,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10 / rules 7 / migrate 7
+npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 14
 npm run test:ui          # お金管理のブラウザ実測 27項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -328,8 +328,23 @@ APIキーが無くても動きます。その場合は Drive OCR だけになり
 
 ### Phase 3 — レシピ生成（なかみメモ）
 
-`tools`（調理器具）と `recipes` を追加。`POST /api/recipes/suggest` で Gemini を呼ぶ。
-期限が近い食材を必須制約にし、持っていない器具を使わせない。
+**2026-09-15 実装（本番での動作確認待ち）。**
+
+| 場所 | 中身 |
+|---|---|
+| `src/lib/recipes/suggest-core.ts` | ネットワークを使わない部分すべて（在庫の絞り込み・AIへの指示・返答の突き合わせ・保存形・減らす量の初期値）。テスト14件 |
+| `src/app/api/recipes/suggest/route.ts` | ID トークン確認 → 在庫と器具を Firestore REST で本人の権限で読む → Gemini → 突き合わせ |
+| `src/components/recipes/RecipeSuggester.tsx` | `/app/recipes`。条件・必ず使う食材（期限3日以内に最初から印）→ 3案 → つくりおきノートに保存／作った |
+| `src/components/recipes/ToolManager.tsx` | `/app/tools`。調理器具。0件なら「コンロ・鍋・フライパン・電子レンジ」前提 |
+| `src/lib/firebase/kitchen.ts` | tools / consumptions / つくりおきノートの recipes への書き込み。「作った」は1バッチで在庫減＋記録 |
+
+- 在庫に使うのはカテゴリ「食品・飲料・調味料」で数量1以上だけ。**カテゴリ未設定の在庫は使われない**
+- AIの返答は `sanitizeSuggestions` で必ず在庫・器具と突き合わせる（ID の書き間違いは名前で拾う、持っていない器具は捨てる、
+  在庫超過・期限切れ・使わない指定は注意として出す、どのレシピにも入らなかった必ず使う食材を返す）
+- つくりおきノートへの保存は `source: "AIの提案"`（つくりおきノート側の SOURCES に足した）。材料は「名前 量」の1行文字列
+- 「作った」は数量0になっても在庫を消さない。調味料は既定で減らさない。保存済みならつくりおきの lastCookedAt も更新
+- `suggest-core.test.mjs` は `node --experimental-strip-types` で .ts をそのまま読む（run-tests.mjs の nodeArgs）
+- 連打よけ（1人1分5回）はサーバーのメモリなので、インスタンスをまたぐと効かない
 
 **前提は2つとも済んでいます（2026-09-13 ユーザー確認）。**
 
