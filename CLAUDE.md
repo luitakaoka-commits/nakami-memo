@@ -17,11 +17,12 @@ git status --porcelain             # 未コミットの有無
 git rev-parse --short HEAD origin/main   # push済みかどうか
 
 npm test
-# money 196件 → 2026-09-13 時点（外税の割り振り・部門コード・取込タイミングのテストを追加）
+# money 199件 → 2026-09-14 時点（SW の VERSION 上げ忘れの検出を追加）
+#       196件 → 2026-09-13 時点（外税の割り振り・部門コード・取込タイミングのテストを追加）
 #       183件 → 2026-09-10 時点（名寄せ修正 + GAS取込のテスト）
 #       158件 → GAS取込のテストが無い
 #       155件 → 名寄せの修正も無い。古いコミットを見ている
-# recipe 16件 / app-switcher 25件 も同じコマンドで走る
+# recipe 16件 / app-switcher 26件 / install 10件 も同じコマンドで走る
 # 「Cannot find package 'jsdom'」と出たら npm install が済んでいない
 ```
 
@@ -92,6 +93,11 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   **意味の判断を自動でやらない**。「牛乳」と「低脂肪乳」を同じにしてよいかは本人にしか決められない。
   逆に寄せすぎると粒度が粗くなって行動につながらない
 - **レシートは記録ページ内のタブ**。ボトムナビは5項目のまま。口座はナビに残す
+- **3アプリは「くらしノート」1つとしてインストールする**（2026-09-14）。manifest は `public/manifest.webmanifest`
+  の1つだけで、3アプリのページはすべてそれを指す（`id: "/"`・`scope: "/"`。**id を変えると別アプリ扱いになり入れ直しが要る**）。
+  起動は `/start.html` で、最後に切り替えバーを出したアプリへ移る（`public/shared/last-app.js`、初回はお金管理）。
+  アイコンは3色のしおりのノート（`public/icons/kurashi-note.svg`。PNG は `node scripts/render-icons.mjs` で作る）。
+  タブのアイコン（favicon）はアプリごとのまま
 
 ---
 
@@ -109,6 +115,13 @@ HTML内の `styles.css` が `/money/styles.css` ではなく `/styles.css` に�
 接頭辞 `okane-` で絞る形に修正済み。**この条件を元に戻さないでください。**
 
 **`cache.addAll` は1件でも失敗すると Service Worker 全体が入りません。** 1件ずつ入れる形にしてあります。
+
+**お金管理の Service Worker の VERSION を上げ忘れ、直したコードがスマホに届いていなかった。** `public/money/sw.js` は
+キャッシュ優先なので、VERSION（と `?v=`）を上げない限り、一度開いた端末には古いファイルが出続けます。
+22 のまま `finance-engine.js` を2回直していました（09-09 名寄せ、09-13 部門コード）。2026-09-14 に 23 へ上げ、
+`tests/sw-version.test.js` が「中身が変わったのに VERSION が同じ」を検出するようにしました。落ちたら VERSION を上げて
+`tests/sw-shell-hashes.json` に**行を足す**（既存の行を書き換えない）。
+あわせて、この SW が `/money/` の外（`/shared/` や共通の manifest）までキャッシュ優先で抱えていたのをやめました。
 
 **ルールはデプロイしないと効かない。** リポジトリの `firestore.rules` はただのファイルです。
 Firebase Console で公開するまで反映されません。レシートが保存できなかった原因はこれでした。
@@ -131,14 +144,18 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 196 / recipe 16 / app-switcher 25
+npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10
 npm run test:ui          # お金管理のブラウザ実測 25項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
-# サーバーを起動して配信チェック（17件）
+# サーバーを起動して配信チェック（27件）とインストールの確認（14件）
 npm start &
 BASE=http://127.0.0.1:3000 node public/shared/serving-check.mjs
+BASE=http://127.0.0.1:3000 node public/shared/install-check.mjs
 ```
+
+`install-check.mjs` の Service Worker まわりを手で見るときは `127.0.0.1` ではなく `localhost` で開くこと
+（お金管理は https か localhost のときだけ SW を登録する）。
 
 GitHub Actions（`.github/workflows/ci.yml`）が、`main` への push と PR のたびに上の全部を回します。
 
