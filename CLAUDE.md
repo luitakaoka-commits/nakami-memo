@@ -22,7 +22,7 @@ npm test
 #       183件 → 2026-09-10 時点（名寄せ修正 + GAS取込のテスト）
 #       158件 → GAS取込のテストが無い
 #       155件 → 名寄せの修正も無い。古いコミットを見ている
-# recipe 16件 / app-switcher 26件 / install 10件 も同じコマンドで走る
+# recipe 16件 / app-switcher 26件 / install 10件 / rules 5件 / migrate 7件 も同じコマンドで走る
 # 「Cannot find package 'jsdom'」と出たら npm install が済んでいない
 ```
 
@@ -102,7 +102,25 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   - なかみメモの下のメニューの「少ない」を「レシピ」に置き換える（残り少ないものはホームに出ている）。調理器具の登録はレシピ画面の中から
   - AIが考えたレシピの保存先は**つくりおきノート**（設計書の「Phase 3 はなかみメモに保存」から変更）
   - Phase 4 は**案B：Firebase を1つにまとめる**。つくりおきノートへの保存が2アプリをまたぐため、
-    **まとめる作業を Phase 3 の保存より先にやる**。どのプロジェクトに寄せるかは着手時に決める（設計書の推奨は `cash-manege`）
+    **まとめる作業を Phase 3 の保存より先にやる**。寄せ先は **`cash-manege`**（2026-09-14 決定。お金管理とGAS取込を動かさずに済むため）
+  - ユーザーは3アプリとも **Google でログイン**している（メール/パスワードは使っていない）
+
+### Firebase を cash-manege にまとめる手順（2026-09-14 着手）
+
+| # | 内容 | 状態 |
+|---|---|---|
+| 1 | `public/money/firestore.rules` に なかみメモ・つくりおきノートの分（`users/{uid}` と `publicLocations`）を足す | 済 |
+| 2 | そのルールを cash-manege に公開する（ユーザー） | 待ち |
+| 3 | 引っ越しページ `/migrate`（`public/migrate/`）を公開する | 済（push待ち） |
+| 4 | ユーザーが引っ越しページで書き写し、件数の一致を確かめる | 待ち |
+| 5 | なかみメモ（`src/lib/firebase/client.ts`、画像APIの apiKey）とつくりおきノート（`firebase-config.js`）の接続先を cash-manege に切り替える | 未着手 |
+| 6 | ユーザーが3アプリでデータとログイン1回を確かめる | 未着手 |
+
+- uid はプロジェクトごとに違うので、`users/{古いuid}` → `users/{新しいuid}` へ書き写す。ドキュメントIDは変えない。
+  `publicLocations` は `ownerId` を新しい uid に書き換える
+- **古いプロジェクトのデータは消さない**（戻せるように残す）。4〜5の間はなかみメモとつくりおきで編集しない
+- Supabase の写真は URL がそのまま使える。新しい写真は新しい uid のパスに入り、古い写真の削除だけ効かなくなる（孤児が少し残る）
+- `rules.test.mjs` がアプリの使うコレクション名とルールのホワイトリストを突き合わせる。ルールの文法は Console に貼るまで確かめられない
 
 ---
 
@@ -149,7 +167,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10
+npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10 / rules 5 / migrate 7
 npm run test:ui          # お金管理のブラウザ実測 27項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
