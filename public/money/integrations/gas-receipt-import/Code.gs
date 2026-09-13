@@ -176,14 +176,16 @@ var MAX_FILES_PER_RUN = 10;
 
 function readConfig() {
   var properties = PropertiesService.getScriptProperties();
+  // 画面から貼り付けると前後に空白や改行が混ざりやすい。混ざるとキーが無効扱いになるので落とす。
+  var read = function (name) { return (properties.getProperty(name) || '').trim(); };
   return {
-    projectId: properties.getProperty('FIRESTORE_PROJECT_ID') || DEFAULT_PROJECT_ID,
-    workspaceId: properties.getProperty('WORKSPACE_ID') || '',
-    folderName: properties.getProperty('RECEIPT_FOLDER_NAME') || DEFAULT_FOLDER_NAME,
-    geminiApiKey: properties.getProperty('GEMINI_API_KEY') || '',
+    projectId: read('FIRESTORE_PROJECT_ID') || DEFAULT_PROJECT_ID,
+    workspaceId: read('WORKSPACE_ID'),
+    folderName: read('RECEIPT_FOLDER_NAME') || DEFAULT_FOLDER_NAME,
+    geminiApiKey: read('GEMINI_API_KEY'),
     // モデルは世代が上がるので差し替えられるようにしておく。
-    // 例: gemini-2.5-flash / gemini-3.5-flash-lite / gemini-3.8-flash
-    geminiModel: properties.getProperty('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL
+    // 例: gemini-2.5-flash / gemini-3.1-flash-lite / gemini-3.6-flash
+    geminiModel: read('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL
   };
 }
 
@@ -410,19 +412,33 @@ function setup() {
 /** 保存せずに、1枚だけ読み取り結果を見る。プロンプトを調整するとき用。 */
 function dryRun() {
   var config = readConfig();
+  // どの設定で動いたかを先に出す。キーの中身は出さず、有無と長さだけ（正しいキーは39文字）。
+  Logger.log('設定: WORKSPACE_ID=' + (config.workspaceId ? 'あり' : '未設定')
+    + ' / GEMINI_API_KEY=' + (config.geminiApiKey ? 'あり（' + config.geminiApiKey.length + '文字）' : '未設定')
+    + ' / モデル=' + config.geminiModel);
   var folder = findFolder(config.folderName);
   if (!folder) throw new Error('フォルダがありません');
   var files = folder.getFiles();
   while (files.hasNext()) {
     var file = files.next();
     if (!/^image\//.test(file.getMimeType())) continue;
-    var parsed = parseReceiptWithGemini(file.getBlob(), config) || parseReceiptWithDriveOcr(file);
+    // 本番（processFile）と同じ順で読み、どちらで読めたかを source に残す。
+    // 以前は source を 'manual' 固定にしていたため、Gemini が失敗して OCR に落ちても見分けられなかった。
+    var parsed = parseReceiptWithGemini(file.getBlob(), config);
+    var source = 'gemini';
+    if (!parsed) {
+      Logger.log(config.geminiApiKey
+        ? '⚠ Gemini で読めなかったので Drive OCR に切り替えます（理由はひとつ前のログ）'
+        : '⚠ GEMINI_API_KEY が未設定なので Drive OCR だけで読みます');
+      parsed = parseReceiptWithDriveOcr(file);
+      source = 'drive-ocr';
+    }
     var record = buildReceiptRecord(parsed || {}, {
       receiptId: 'dry-run', now: new Date().toISOString(),
-      source: 'manual', createdBy: 'dry-run'
+      source: source, createdBy: 'dry-run'
     });
     reviewReceipt(record, { confidence: parsed && parsed.confidence });
-    Logger.log(file.getName() + '\n' + JSON.stringify(record, null, 2));
+    Logger.log(file.getName() + '（読み取り: ' + source + '）\n' + JSON.stringify(record, null, 2));
     return record;
   }
   Logger.log('画像がありません');
