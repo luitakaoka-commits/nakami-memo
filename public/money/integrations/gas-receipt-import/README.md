@@ -44,13 +44,22 @@ Firestore の `receipts` / `receiptItems` に入れます。
    appsscript.json をエディタで表示する」で置き換える）
 3. **プロジェクトの設定 → スクリプト プロパティ** に追加する
 
-   | プロパティ | 値 | 必須 |
+   **入れるのはこの2つだけです。**
+
+   | プロパティ | 値 |
+   |---|---|
+   | `WORKSPACE_ID` | 上の「用意するもの」の 2 で調べた値（設定画面には出ない） |
+   | `GEMINI_API_KEY` | AI Studio で発行したキー |
+
+   次の3つは**入れないでください**。入れなくても既定値で動きます。
+   入れるとその値が既定より優先され、`Code.gs` を更新しても反映されなくなります
+   （2026-09-13、`GEMINI_MODEL` に古いモデル名が残っていて、既定を直しても 404 が続いた）。
+
+   | プロパティ | 既定値 | 入れるのは |
    |---|---|---|
-   | `WORKSPACE_ID` | 上の「用意するもの」の 2 で調べた値（設定画面には出ない） | ✅ |
-   | `GEMINI_API_KEY` | AI Studio で発行したキー | 推奨 |
-   | `FIRESTORE_PROJECT_ID` | 既定 `cash-manege` | |
-   | `RECEIPT_FOLDER_NAME` | 既定 `レシート` | |
-   | `GEMINI_MODEL` | 既定 `gemini-3.6-flash`。**普段は入れない**（入れると既定の更新が効かなくなる） | |
+   | `FIRESTORE_PROJECT_ID` | `cash-manege` | 別のFirebaseプロジェクトに書くときだけ |
+   | `RECEIPT_FOLDER_NAME` | `レシート` | フォルダ名を変えたいときだけ |
+   | `GEMINI_MODEL` | `gemini-3.6-flash` | モデルが急に使えなくなり、`Code.gs` を貼り直す前に一時的に切り替えるときだけ |
 
 4. **サービス** から **Drive API** を追加する（Drive OCR のフォールバックに必要）
 5. `setup()` を実行する。初回は権限の確認が出ます
