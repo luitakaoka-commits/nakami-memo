@@ -319,6 +319,35 @@ test('31. dryRun の表は1品1行で、印字の金額と合計を並べる', (
   equal(text.split('\n').filter(line => /^\d+\. /.test(line)).length, 4, '4品で4行');
 });
 
+/* ---------- 取込のタイミングと、無料枠を無駄にしない判断 ---------- */
+
+test('32. 最後の追加から5分たつまで待ち、たったら取り込む', () => {
+  const MIN = 60 * 1000;
+  const now = Date.parse('2026-09-13T12:00:00Z');
+  equal(sandbox.millisUntilQuiet([now - 2 * MIN], now, 5 * MIN), 3 * MIN, '2分前に追加 → あと3分');
+  equal(sandbox.millisUntilQuiet([now - 5 * MIN], now, 5 * MIN), 0, 'ちょうど5分 → 取り込む');
+  equal(sandbox.millisUntilQuiet([], now, 5 * MIN), 0, '写真が無ければ待たない');
+});
+
+test('33. 複数枚は一番新しい1枚を基準に待つ（入れている途中で取り込み始めない）', () => {
+  const MIN = 60 * 1000;
+  const now = Date.parse('2026-09-13T12:00:00Z');
+  equal(sandbox.millisUntilQuiet([now - 30 * MIN, now - 1 * MIN, now - 10 * MIN], now, 5 * MIN), 4 * MIN, '1分前の1枚に合わせる');
+});
+
+test('34. Gemini の失敗の扱い — 枠切れ・障害・設定ミスは OCR に落とさず次回やり直す', () => {
+  equal(sandbox.classifyGeminiResponse(200, '{}'), 'ok', '200');
+  equal(sandbox.classifyGeminiResponse(429, 'RESOURCE_EXHAUSTED'), 'retry', '無料枠切れ');
+  equal(sandbox.classifyGeminiResponse(503, ''), 'retry', '一時障害');
+  equal(sandbox.classifyGeminiResponse(404, 'no longer available to new users'), 'retry', 'モデル提供終了（2026-09-13 に実際に起きた）');
+  equal(sandbox.classifyGeminiResponse(403, ''), 'retry', '権限');
+  equal(sandbox.classifyGeminiResponse(400, '{"error":{"details":[{"reason":"API_KEY_INVALID"}]}}'), 'retry', 'キーの誤りは 400 で来る');
+});
+
+test('35. Gemini の失敗の扱い — その画像だけの問題（キー以外の 400）は OCR に回す', () => {
+  equal(sandbox.classifyGeminiResponse(400, '{"error":{"message":"Unable to process input image"}}'), 'fallback', '画像の問題');
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-receipt', total, passed: total, failed: 0 }));
   process.exit(0);

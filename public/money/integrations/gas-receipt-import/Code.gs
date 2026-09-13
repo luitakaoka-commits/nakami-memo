@@ -217,6 +217,16 @@ function summarizeReceipt(record) {
   return lines.join('\n');
 }
 
+/**
+ * 最後に写真が追加されてから、あと何ミリ秒待つか。0 なら取り込んでよい。
+ * 何枚か続けて入れている途中で取り込み始めないよう、追加が止んでから動く。
+ */
+function millisUntilQuiet(addedTimes, nowMs, quietMs) {
+  if (!addedTimes.length) return 0;
+  var newest = addedTimes.reduce(function (max, time) { return time > max ? time : max; }, 0);
+  return Math.max(0, newest + quietMs - nowMs);
+}
+
 /** JSONをFirestoreのフィールド表現へ変換する（gas-card-mail-import と同じ形）。 */
 function toFirestoreFields(object) {
   var fields = {};
@@ -241,6 +251,22 @@ var DONE_FOLDER_NAME = '取込済み';
 // エラー本文が移行先として示したのが gemini-3.6-flash。
 var DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 var MAX_FILES_PER_RUN = 10;
+var FAILED_FOLDER_NAME = '取込失敗';
+
+/*
+ * 取込のタイミング（2026-09-13 決定）
+ *   5分おきにフォルダを見て、最後に写真が追加されてから5分たっていたら、まとめて取り込む。
+ *   → 1枚でも複数枚でも、入れ終わってから5〜10分後に取り込まれる。
+ *
+ * Gemini を呼ぶのは「新しい写真1枚につき1回」だけ。見回りで写真が無ければ Gemini は呼ばない。
+ * 無料枠を守るために効くのは、見回りの間隔ではなく次の3つ:
+ *   - 取込済みの写真では呼ばない（processFile の先頭で確認する）
+ *   - 読めない写真で呼び続けない（MAX_ATTEMPTS 回失敗したら「取込失敗」フォルダへ移す）
+ *   - 枠切れや設定ミスのときはその回を止める（残りの写真で呼んでも全部失敗するため）
+ */
+var TRIGGER_EVERY_MINUTES = 5;
+var QUIET_MINUTES = 5;
+var MAX_ATTEMPTS = 3;
 
 function readConfig() {
   var properties = PropertiesService.getScriptProperties();
@@ -257,37 +283,68 @@ function readConfig() {
   };
 }
 
-/** 15分おきに走る本体。 */
+/** 5分おきに走る本体。タイミングの考え方はファイル上部の定数のコメント。 */
 function importReceipts() {
   var config = readConfig();
   if (!config.workspaceId) throw new Error('WORKSPACE_ID が未設定です。setup() を実行してください。');
 
-  var token = ScriptApp.getOAuthToken();
   var folder = findFolder(config.folderName);
   if (!folder) throw new Error('「' + config.folderName + '」フォルダが見つかりません。setup() を実行してください。');
-  var doneFolder = ensureChildFolder(folder, DONE_FOLDER_NAME);
 
-  var summary = { seen: 0, imported: 0, duplicate: 0, needsReview: 0, failed: 0 };
+  // 直下の写真だけを見る（取込済み・取込失敗のフォルダの中は見ない）
+  var images = [];
   var files = folder.getFiles();
-
-  while (files.hasNext() && summary.seen < MAX_FILES_PER_RUN) {
+  while (files.hasNext()) {
     var file = files.next();
-    if (!/^image\//.test(file.getMimeType())) continue;
-    summary.seen += 1;
+    if (/^image\//.test(file.getMimeType())) images.push(file);
+  }
 
+  var summary = { seen: images.length, imported: 0, duplicate: 0, needsReview: 0, failed: 0, gaveUp: 0 };
+  if (!images.length) return summary;   // 写真が無ければ Gemini は呼ばない。ログも出さない
+
+  var wait = millisUntilQuiet(images.map(addedTimeOf), Date.now(), QUIET_MINUTES * 60 * 1000);
+  if (wait > 0) {
+    Logger.log('写真の追加が止んでから ' + QUIET_MINUTES + ' 分待ちます（あと約 ' + Math.ceil(wait / 60000) + ' 分）');
+    summary.waiting = true;
+    return summary;
+  }
+
+  var token = ScriptApp.getOAuthToken();
+  var doneFolder = ensureChildFolder(folder, DONE_FOLDER_NAME);
+  // 失敗回数は、ユーザーが触る「スクリプト プロパティ」の画面に出さないよう、ユーザー用の保存先に置く
+  var attempts = PropertiesService.getUserProperties();
+
+  for (var i = 0; i < images.length && i < MAX_FILES_PER_RUN; i++) {
+    var image = images[i];
+    var attemptKey = 'attempts:' + image.getId();
     try {
-      var result = processFile(file, config, token);
+      var result = processFile(image, config, token);
       if (result === 'duplicate') summary.duplicate += 1;
       else {
         summary.imported += 1;
         if (result === 'needs_review') summary.needsReview += 1;
       }
       // 取り込めたら別フォルダへ移す。次回以降ダウンロードし直さないため。
-      file.moveTo(doneFolder);
+      image.moveTo(doneFolder);
+      attempts.deleteProperty(attemptKey);
     } catch (error) {
+      if (error.geminiUnavailable) {
+        // 残りの写真で呼んでも同じ理由で失敗するだけなので、この回はここで止める。写真は動かさない。
+        Logger.log('⚠ Gemini が使えないので今回は止めます。写真は次回また読みます。\n' + error.message);
+        summary.stopped = true;
+        break;
+      }
       summary.failed += 1;
-      Logger.log('取込に失敗: ' + file.getName() + ' / ' + error);
-      // 失敗したファイルは動かさない。原因を直せば次回また拾える。
+      var count = Number(attempts.getProperty(attemptKey) || 0) + 1;
+      Logger.log('取込に失敗（' + count + '回目）: ' + image.getName() + ' / ' + error);
+      if (count >= MAX_ATTEMPTS) {
+        image.moveTo(ensureChildFolder(folder, FAILED_FOLDER_NAME));
+        attempts.deleteProperty(attemptKey);
+        summary.gaveUp += 1;
+        Logger.log('⚠ ' + MAX_ATTEMPTS + '回失敗したので「' + FAILED_FOLDER_NAME + '」フォルダへ移しました: ' + image.getName());
+      } else {
+        attempts.setProperty(attemptKey, String(count));
+      }
     }
   }
 
@@ -295,9 +352,16 @@ function importReceipts() {
   return summary;
 }
 
+/** 写真がフォルダに入った時刻の目安。移動で入れた古い写真は作成日が古いので、更新日時とも比べる。 */
+function addedTimeOf(file) {
+  return Math.max(file.getDateCreated().getTime(), file.getLastUpdated().getTime());
+}
+
 /** 画像1枚を処理する。既に取り込み済みなら 'duplicate' を返す。 */
 function processFile(file, config, token) {
   var receiptId = receiptIdOf(file.getId());
+  // 取り込み済みなら Gemini を呼ばない（保存はできたが移動だけ失敗した写真で、無料枠を使わないため）
+  if (receiptExists(config, token, receiptId)) return 'duplicate';
   var now = new Date().toISOString();
 
   var parsed = parseReceiptWithGemini(file.getBlob(), config);
@@ -332,10 +396,27 @@ function receiptIdOf(fileId) {
   }).join('');
 }
 
+function workspaceDocumentsUrl(config) {
+  return 'https://firestore.googleapis.com/v1/projects/' + config.projectId
+    + '/databases/(default)/documents/workspaces/' + config.workspaceId;
+}
+
+/** そのレシートが Firestore に既にあるか。 */
+function receiptExists(config, token, receiptId) {
+  var response = UrlFetchApp.fetch(workspaceDocumentsUrl(config) + '/receipts/' + encodeURIComponent(receiptId), {
+    method: 'get',
+    muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  var code = response.getResponseCode();
+  if (code === 200) return true;
+  if (code === 404) return false;
+  throw new Error('取込済みかどうか確認できません (HTTP ' + code + '): ' + response.getContentText().slice(0, 200));
+}
+
 /** レシート1件と明細行をまとめて書く。既にあれば 'duplicate'。 */
 function saveReceipt(config, token, receiptId, record) {
-  var base = 'https://firestore.googleapis.com/v1/projects/' + config.projectId
-    + '/databases/(default)/documents/workspaces/' + config.workspaceId;
+  var base = workspaceDocumentsUrl(config);
 
   var response = UrlFetchApp.fetch(base + '/receipts?documentId=' + encodeURIComponent(receiptId), {
     method: 'post',
@@ -449,8 +530,9 @@ function ensureChildFolder(parent, name) {
 /* ---------- 初期設定と試し実行 ---------- */
 
 /**
- * 一度だけ実行する。フォルダを作り、15分おきのトリガーを仕掛ける。
+ * 一度だけ実行する。フォルダを作り、5分おきの見回りを仕掛ける。
  * WORKSPACE_ID と GEMINI_API_KEY は先にスクリプトプロパティへ入れておくこと。
+ * 何度実行しても見回りは1つだけになる（古い間隔のものは作り直す）。
  */
 function setup() {
   var config = readConfig();
@@ -463,15 +545,13 @@ function setup() {
   if (!config.workspaceId) messages.push('⚠ WORKSPACE_ID が未設定です（設定画面には出ません。取り方は README の「用意するもの」）');
   if (!config.geminiApiKey) messages.push('⚠ GEMINI_API_KEY が未設定です（Drive OCR だけで動きます）');
 
-  var exists = ScriptApp.getProjectTriggers().some(function (trigger) {
+  var old = ScriptApp.getProjectTriggers().filter(function (trigger) {
     return trigger.getHandlerFunction() === 'importReceipts';
   });
-  if (!exists) {
-    ScriptApp.newTrigger('importReceipts').timeBased().everyMinutes(15).create();
-    messages.push('15分おきのトリガーを作成しました');
-  } else {
-    messages.push('トリガーは既にあります');
-  }
+  old.forEach(function (trigger) { ScriptApp.deleteTrigger(trigger); });
+  ScriptApp.newTrigger('importReceipts').timeBased().everyMinutes(TRIGGER_EVERY_MINUTES).create();
+  messages.push((old.length ? '見回りを作り直しました' : '見回りを作成しました')
+    + '（' + TRIGGER_EVERY_MINUTES + '分おき。写真を入れ終わってから' + QUIET_MINUTES + '分たったら取り込みます）');
 
   Logger.log(messages.join('\n'));
   return messages;

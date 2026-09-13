@@ -80,8 +80,36 @@ function receiptPrompt() {
 }
 
 /**
+ * Gemini の応答をどう扱うか。
+ *
+ *   'ok'       … 読めた
+ *   'retry'    … 今回は諦めて、写真はそのまま残し次回やり直す（無料枠切れ・一時障害・キーやモデルの設定ミス）
+ *   'fallback' … この画像だけの問題。Drive OCR に回す
+ *
+ * 以前は失敗を全部 Drive OCR に回していた。2026-09-13 にモデルの提供終了（HTTP 404）が起きたとき、
+ * そのまま本番で動いていたら、全部のレシートが「明細なし・合計0円」で取り込まれ、
+ * 写真は取込済みに移されて Gemini で読み直す機会が失われていた。
+ * 無料枠切れ（429）でも同じことが起きる。設定や枠の問題は、待てば直るので読み直す方を選ぶ。
+ */
+function classifyGeminiResponse(code, body) {
+  if (code === 200) return 'ok';
+  // キーの誤りは 400 で返る。画像の問題の 400 と区別する
+  if (code === 400 && /API_KEY/.test(String(body))) return 'retry';
+  if (code === 400) return 'fallback';
+  return 'retry';
+}
+
+/** 「今回は Gemini が使えない」を表す例外。importReceipts はこれを受けたら、その回の取込を止める。 */
+function geminiUnavailable(message) {
+  var error = new Error(message);
+  error.geminiUnavailable = true;
+  return error;
+}
+
+/**
  * Gemini に画像を投げてJSONを受け取る。
- * 失敗したら例外ではなく null を返し、呼び出し側で Drive OCR へ落とす。
+ * キーが無いとき・この画像を読めなかったときは null を返し、呼び出し側で Drive OCR へ落とす。
+ * 無料枠切れや設定ミスのときは geminiUnavailable を投げる（OCR に落とさない。理由は classifyGeminiResponse）。
  */
 function parseReceiptWithGemini(blob, config) {
   if (!config.geminiApiKey) return null;
@@ -115,18 +143,21 @@ function parseReceiptWithGemini(blob, config) {
       payload: JSON.stringify(payload)
     });
   } catch (error) {
-    Logger.log('Gemini へ到達できません: ' + error);
-    return null;
+    throw geminiUnavailable('Gemini へ到達できません: ' + error);
   }
 
   var code = response.getResponseCode();
-  if (code !== 200) {
-    // 429 は無料枠の上限。翌日また流れるので、ここでは黙って諦める。
-    Logger.log('Gemini がエラーを返しました (HTTP ' + code + '): ' + response.getContentText().slice(0, 300));
+  var body = response.getContentText();
+  var verdict = classifyGeminiResponse(code, body);
+  if (verdict === 'retry') {
+    throw geminiUnavailable('Gemini が使えません (HTTP ' + code + '): ' + body.slice(0, 300));
+  }
+  if (verdict === 'fallback') {
+    Logger.log('Gemini がこの画像を受け付けませんでした (HTTP ' + code + '): ' + body.slice(0, 300));
     return null;
   }
 
-  var text = extractGeminiText(response.getContentText());
+  var text = extractGeminiText(body);
   if (!text) return null;
 
   try {
