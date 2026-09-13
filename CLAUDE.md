@@ -159,7 +159,8 @@ Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環
 - 検証は全部通した：money 183 / recipe 16 / app-switcher 25 / ブラウザ実測 25 / tsc / eslint / next build / serving-check 17
   （2026-09-13 に GAS取込とレシートのテストを足して money 196。GitHub Actions は 09-13 の push で緑）
 - `public/money/integrations/` に `gas-card-mail-import` と `gas-receipt-import` の両方がある
-- **アプリの画面や計算のコードは 2026-09-10 から変わっていない**（09-11 はテスト・CI・文書だけ）
+- アプリのコードで 2026-09-10 以降に変わったのは `finance-engine.js` の `normalizeItemName`（部門コードを剥がす、09-13）だけ。
+  画面は変わっていない。ほかは GAS・テスト・CI・文書
 
 ### この環境の癖（毎回ひっかかるので先に書く）
 
