@@ -37,14 +37,8 @@ jobs:
       - name: Build
         run: npm run build
         # CIのビルドは「通るか」の確認で、どこにもデプロイしない（本番は Vercel が自前でビルドする）。
-        # 値が空だと prerender が auth/invalid-api-key で落ちるので、Secrets が無ければ形だけのダミーを使う。
+        # Firebase の接続先は src/lib/firebase/config.ts に書いてあるので、環境変数は要らない。
         env:
-          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ secrets.NEXT_PUBLIC_FIREBASE_API_KEY || 'ci-dummy-api-key' }}
-          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || 'ci-dummy.firebaseapp.com' }}
-          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'ci-dummy' }}
-          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ secrets.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'ci-dummy.appspot.com' }}
-          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '000000000000' }}
-          NEXT_PUBLIC_FIREBASE_APP_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID || '1:000000000000:web:ci' }}
           # アップロードAPIが実行時に参照する。未設定でもビルド自体は通る。
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
 

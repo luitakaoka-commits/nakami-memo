@@ -39,22 +39,17 @@ cp .env.example .env.local
 npm run dev
 ```
 
-`.env.local` に Firebase Web App と Supabase の設定値を入れてください。
+`.env.local` に Supabase（と、レシピ提案を試すなら Gemini）の設定値を入れてください。
 
 ```env
-NEXT_PUBLIC_FIREBASE_API_KEY=
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
-NEXT_PUBLIC_FIREBASE_APP_ID=
-
 # 画像アップロード（サーバー側のみで使用。ブラウザには渡らない）
 SUPABASE_URL=https://<プロジェクトRef>.supabase.co
 SUPABASE_SECRET_KEY=
+GEMINI_API_KEY=
 ```
 
-Firebase の値は Firebase Console の「プロジェクトの設定 > マイアプリ > Web アプリ」から取得します。
+Firebase の接続先は環境変数ではなく `src/lib/firebase/config.ts` に書いてあります。
+3アプリ（お金管理・なかみメモ・つくりおきノート）とも `cash-manege` プロジェクトを使います（2026-09-14 にまとめました）。
 
 ## 画像保存（Supabase Storage）
 
@@ -79,12 +74,13 @@ Supabaseプロジェクトを移す場合だけ、`next.config.ts` の `DEFAULT_
 
 ## Firebase側で必要な設定
 
-Firebase Consoleで以下を有効化してください。
+プロジェクトは `cash-manege`（3アプリ共通）です。Firebase Console で以下が必要です。
 
 1. Authentication
-   - Googleログイン
-   - メール/パスワードログイン
+   - Googleログイン（3アプリともこれを使う）
+   - 承認済みドメインに `nakami-memo.vercel.app`
 2. Cloud Firestore
+   - ルールは `public/money/firestore.rules`（3アプリ分をまとめたもの）を貼って公開する
 
 ## 開発コマンド
 

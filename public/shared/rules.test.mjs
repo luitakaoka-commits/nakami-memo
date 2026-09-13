@@ -85,5 +85,28 @@ t("users と publicLocations は workspaces の外（documents の直下）に�
   ok(depth === 0, `users の match が workspaces の中に入っている（括弧の深さ ${depth}）`);
 });
 
+t("3アプリが同じ Firebase プロジェクト（cash-manege）の同じ設定値につながっている", () => {
+  // どれか1つでも別の値だと、そのアプリだけ別の場所に保存し、ログインも共有されない（2026-09-14 にまとめた）
+  const pick = (text, key) => (text.match(new RegExp(`${key}:\\s*["']([^"']+)["']`)) || [])[1];
+  const sources = {
+    "お金管理（public/money/firebase-sync.js）": read("public", "money", "firebase-sync.js"),
+    "つくりおきノート（public/recipe/firebase-config.js）": read("public", "recipe", "firebase-config.js"),
+    "なかみメモ（src/lib/firebase/config.ts）": read("src", "lib", "firebase", "config.ts"),
+    "引っ越しページの引っ越し先（public/migrate/migrate.js）": read("public", "migrate", "migrate.js").split("nakami:")[0],
+  };
+  for (const [label, text] of Object.entries(sources)) {
+    ok(pick(text, "projectId") === "cash-manege", `${label} の projectId が ${pick(text, "projectId")}`);
+    ok(pick(text, "apiKey") === "AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A", `${label} の apiKey が違う`);
+    ok(pick(text, "appId") === "1:529145553530:web:d65452017ffb9c109b51c3", `${label} の appId が違う`);
+  }
+});
+
+t("なかみメモは Firebase の接続先を環境変数から読まない（Vercel に古い値が残っているため）", () => {
+  const client = read("src", "lib", "firebase", "client.ts");
+  ok(!client.includes("process.env"), "client.ts が環境変数を読んでいる");
+  const route = read("src", "app", "api", "images", "upload", "route.ts");
+  ok(!/NEXT_PUBLIC_(RECIPE_)?FIREBASE/.test(route), "画像APIが古い環境変数を読んでいる");
+});
+
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);
 process.exit(fail ? 1 : 0);

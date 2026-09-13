@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { firebaseConfig } from "@/lib/firebase/config";
 
 /**
  * 3アプリ共通の画像アップロードAPI。
@@ -10,7 +11,7 @@ import { NextResponse } from "next/server";
  * つくりおきノートが Firebase Storage ではなくここを使う理由:
  * Cloud Storage for Firebase は2024年9月以降、バケットの作成に Blaze プラン
  * （クレジットカード登録）が必須になった。recipe-a18e1 も nakami-memo も Spark のままなので、
- * 画像は Supabase Storage に寄せている。
+ * 画像は Supabase Storage に寄せている。（3プロジェクトを cash-manege にまとめた後も Spark のまま）
  */
 
 const BUCKET_NAME = "nakami-memo-images";
@@ -24,9 +25,8 @@ const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
  *
  * apiKey は Firebase の「ウェブAPIキー」で、クライアントに配られる公開値。
  * identitytoolkit でIDトークンを検証するために、トークンを発行したプロジェクトのキーが要る。
- * 環境変数で上書きできるが、設定漏れで画像が保存できなくなるのを避けるため既定値を持たせている。
- *
- * uid は Firebaseプロジェクトごとに別々に発行されるため、保存パスもアプリ単位で分ける。
+ * 2026-09-14 に3アプリの Firebase を cash-manege 1つにまとめたので、2アプリとも同じキーになった。
+ * 保存パスはアプリ単位で分けたまま（既存の写真の場所を変えないため）。
  */
 type AppKey = "nakami" | "recipe";
 
@@ -40,15 +40,13 @@ type AppConfig = {
 const APPS: Record<AppKey, AppConfig> = {
   // なかみメモ（このNext.jsアプリ本体）。既存の保存パスは変えない。
   nakami: {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    apiKey: firebaseConfig.apiKey,
     collections: new Set(["items", "locations"]),
     buildPath: (userId, collection, recordId) => `users/${userId}/${collection}/${recordId}/image`,
   },
-  // つくりおきノート（public/recipe/、Firebaseプロジェクト recipe-a18e1）。
+  // つくりおきノート（public/recipe/）。
   recipe: {
-    apiKey:
-      process.env.NEXT_PUBLIC_RECIPE_FIREBASE_API_KEY ||
-      "AIzaSyClrHXJL7HDrEfCU0chH2FUuXCu54aQcQ0",
+    apiKey: firebaseConfig.apiKey,
     collections: new Set(["recipes"]),
     buildPath: (userId, collection, recordId) => `recipe/${userId}/${collection}/${recordId}/image`,
   },

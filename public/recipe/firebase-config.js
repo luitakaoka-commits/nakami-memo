@@ -4,13 +4,16 @@
    ここに書く値は公開されても問題ないもの（クライアントを識別するための値）です。
    データを守るのは firestore.rules / storage.rules の側です。 */
 
+/* 2026-09-14 に3アプリの Firebase を cash-manege 1つにまとめた。
+   引っ越し前は recipe-a18e1（データは消さずに残してある）。
+   お金管理（public/money/firebase-sync.js）となかみメモ（src/lib/firebase/config.ts）と同じ値。 */
 export const firebaseConfig = {
-  apiKey: "AIzaSyClrHXJL7HDrEfCU0chH2FUuXCu54aQcQ0",
-  authDomain: "recipe-a18e1.firebaseapp.com",
-  projectId: "recipe-a18e1",
-  storageBucket: "recipe-a18e1.firebasestorage.app",
-  messagingSenderId: "692052886567",
-  appId: "1:692052886567:web:ade3712cd78f2863283a02"
+  apiKey: "AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A",
+  authDomain: "cash-manege.firebaseapp.com",
+  projectId: "cash-manege",
+  storageBucket: "cash-manege.firebasestorage.app",
+  messagingSenderId: "529145553530",
+  appId: "1:529145553530:web:d65452017ffb9c109b51c3"
 };
 
 /* ローカルで Firebase エミュレータに接続したいときだけ true にする。

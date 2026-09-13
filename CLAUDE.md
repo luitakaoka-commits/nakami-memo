@@ -22,7 +22,7 @@ npm test
 #       183件 → 2026-09-10 時点（名寄せ修正 + GAS取込のテスト）
 #       158件 → GAS取込のテストが無い
 #       155件 → 名寄せの修正も無い。古いコミットを見ている
-# recipe 16件 / app-switcher 26件 / install 10件 / rules 5件 / migrate 7件 も同じコマンドで走る
+# recipe 16件 / app-switcher 26件 / install 10件 / rules 7件 / migrate 7件 も同じコマンドで走る
 # 「Cannot find package 'jsdom'」と出たら npm install が済んでいない
 ```
 
@@ -110,10 +110,10 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
 | # | 内容 | 状態 |
 |---|---|---|
 | 1 | `public/money/firestore.rules` に なかみメモ・つくりおきノートの分（`users/{uid}` と `publicLocations`）を足す | 済 |
-| 2 | そのルールを cash-manege に公開する（ユーザー） | 待ち |
-| 3 | 引っ越しページ `/migrate`（`public/migrate/`）を公開する | 済（push待ち） |
-| 4 | ユーザーが引っ越しページで書き写し、件数の一致を確かめる | 待ち |
-| 5 | なかみメモ（`src/lib/firebase/client.ts`、画像APIの apiKey）とつくりおきノート（`firebase-config.js`）の接続先を cash-manege に切り替える | 未着手 |
+| 2 | そのルールを cash-manege に公開する（ユーザー） | 済（09-14） |
+| 3 | 引っ越しページ `/migrate`（`public/migrate/`）を公開する | 済 |
+| 4 | ユーザーが引っ越しページで書き写し、件数の一致を確かめる | 済（09-15 1:15。エリア2・保管場所4・モノ54・レシピ1・献立0・買い物0・公開0、すべて一致） |
+| 5 | なかみメモ（`src/lib/firebase/config.ts`、画像APIの apiKey）とつくりおきノート（`firebase-config.js`）の接続先を cash-manege に切り替える | 済（push待ち） |
 | 6 | ユーザーが3アプリでデータとログイン1回を確かめる | 未着手 |
 
 - uid はプロジェクトごとに違うので、`users/{古いuid}` → `users/{新しいuid}` へ書き写す。ドキュメントIDは変えない。
@@ -167,7 +167,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10 / rules 5 / migrate 7
+npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10 / rules 7 / migrate 7
 npm run test:ui          # お金管理のブラウザ実測 27項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -185,9 +185,9 @@ GitHub Actions（`.github/workflows/ci.yml`）が、`main` への push と PR �
 `serving-check.mjs` は、ステータスコードではなくブラウザと同じ手順でHTMLから相対URLを
 解決して実際に取りに行きます。**デプロイ前に必ず走らせてください。**
 
-`.env.local` が無い場合、ビルドにはダミーの環境変数で足ります（`.env.example` 参照）。
-**空の値ではダメ**で、`auth/invalid-api-key` で prerender が落ちます。CIは Secrets が無ければ自動でダミーに落とします。
-Vercelの本番/プレビューには本物の値が Production・Preview 両方に設定済みです。
+`.env.local` が無くてもビルドは通ります。
+Firebase の接続先は 2026-09-14 から `src/lib/firebase/config.ts` に直書きなので、ビルドに環境変数は要りません。
+Vercel に残っている `NEXT_PUBLIC_FIREBASE_*`（引っ越し前の nakami-memo の値）はもう読まれません。消しても消さなくても動きます。
 Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環境変数の設定漏れで画像が消えることはありません。
 
 ---
