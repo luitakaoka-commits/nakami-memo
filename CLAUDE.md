@@ -17,7 +17,8 @@ git status --porcelain             # 未コミットの有無
 git rev-parse --short HEAD origin/main   # push済みかどうか
 
 npm test
-# money 183件 → 2026-09-10 時点の完成形（名寄せ修正 + GAS取込のテスト）
+# money 189件 → 2026-09-13 時点（外税レシートの割り振りのテスト6件を追加）
+#       183件 → 2026-09-10 時点（名寄せ修正 + GAS取込のテスト）
 #       158件 → GAS取込のテストが無い
 #       155件 → 名寄せの修正も無い。古いコミットを見ている
 # recipe 16件 / app-switcher 25件 も同じコマンドで走る
@@ -59,7 +60,7 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
 設計の全体（なぜこの形か、データモデル、各 Phase の中身）は
 `Documents/Codex/設計書/統合設計_レシート明細とレシピ生成.md` にあります。
 ただし 2026-09-06 時点の文書なので、「なかみメモの rules は一括許可だから変更不要」の記述は古いです
-（いまはホワイトリスト方式。`tools` / `recipes` / `consumptions` は入っているが未デプロイ。下の Phase 3 を参照）。
+（いまはホワイトリスト方式。`tools` / `recipes` / `consumptions` を含めて 2026-09-13 に公開済み）。
 
 **`docs/IMPLEMENTATION_PLAN.md` の Phase 1〜8 は、なかみメモ単体を最初に作ったときの完了済みの計画です。**
 このファイルの Phase 0〜4（統合）とは別物です。ユーザーが「フェーズ2から3」と言ったら**統合の方**です。
@@ -130,7 +131,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 183 / recipe 16 / app-switcher 25
+npm test                 # money 189 / recipe 16 / app-switcher 25
 npm run test:ui          # お金管理のブラウザ実測 25項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -156,6 +157,7 @@ Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環
 - `main` に 2026-09-11 の作業（CI整備・ブラウザ実測テストの修復・このファイルの追加）までマージ済み。
   **`origin/main` より先行 → push待ち**（件数は書かない。すぐ古くなるので `git rev-list --count origin/main..main` で確かめる）
 - 検証は全部通した：money 183 / recipe 16 / app-switcher 25 / ブラウザ実測 25 / tsc / eslint / next build / serving-check 17
+  （2026-09-13 に GAS取込のテストを足して money 189。GitHub Actions は 09-13 の push で緑）
 - `public/money/integrations/` に `gas-card-mail-import` と `gas-receipt-import` の両方がある
 - **アプリの画面や計算のコードは 2026-09-10 から変わっていない**（09-11 はテスト・CI・文書だけ）
 
@@ -236,14 +238,26 @@ GAS + Gemini。**次の一歩は Apps Script にセットアップして `dryRun
 既定を `gemini-3.6-flash` に変え、Gemini 3 系の注意に従って temperature 指定（0）を外した。
 **Phase 3 の `/api/recipes/suggest` でも同じモデル名と temperature の扱いにすること。**
 
+**2026-09-13 の3回目 dryRun（gemini-3.6-flash）で初めて Gemini が読めた。** 東急ストアのレシート1枚で、
+店名・日付・合計 3,837円・消費税 294円・支払方法 card・明細15行・値引き行はマイナス、まで取れた。
+ただし**外税のレシート**で、明細（税抜の印字）の合計 3,543円 + 消費税 294円 = 合計、となり要確認に落ちた。
+アプリは明細の合計 = 合計金額を前提にしているので、GAS 側で消費税を明細へ金額比で割り振って税込にそろえる
+`allocateExclusiveTax` を足した（外税で説明がつくときだけ動く。テスト 26〜31）。
+残りの確認（小計・お預りの混入、カテゴリの妥当さ）は、1品1行の表を出すようにした dryRun の次の結果待ち。
+値引き行が「その他」になる点は、ふりかえりに出ない（outcomeTracked=false）ので実害は小さいが、
+カテゴリ別の支出がわずかにずれる。直すかは次の dryRun の全体を見て決める。
+
+**スクリプトプロパティは `WORKSPACE_ID` と `GEMINI_API_KEY` の2つだけにする。** 2回目の dryRun で、
+`GEMINI_MODEL` に `gemini-2.5-flash` が入っていて既定の変更が効かなかった（README の表が全行入れる読み方を許していた）。
+
 コードは `public/money/integrations/gas-receipt-import/` にあります（2026-09-10 配置）。
-手順は同フォルダの `README.md`。純粋関数には `tests/gas-receipt.test.js`（25件）が付いています。
+手順は同フォルダの `README.md`。純粋関数には `tests/gas-receipt.test.js`（31件）が付いています。
 
 **`dryRun()` の結果がおかしかったら、まずこのテストを走らせてください。**
 通るなら整形・検算は正しいので、原因は `Gemini.gs` の `receiptPrompt()` 側です。
 テストは「読み取れた後の処理」しか見ていないので、そこの切り分けに使えます。
 
-配置時に確認したのは次の4点で、**まだ1回も動かしていません**:
+配置時に確認したのは次の4点です（**`setup()` と本番の `importReceipts()` はまだ動かしていません**。動かしたのは dryRun だけ）:
 
 - 秘密情報は入っていない（`GEMINI_API_KEY` はスクリプトプロパティ読み）
 - カテゴリ一覧・ふりかえり対象カテゴリ・5,000円の境界が `finance-engine.js` と一致
@@ -257,10 +271,14 @@ APIキーが無くても動きます。その場合は Drive OCR だけになり
 `tools`（調理器具）と `recipes` を追加。`POST /api/recipes/suggest` で Gemini を呼ぶ。
 期限が近い食材を必須制約にし、持っていない器具を使わせない。
 
-**着手前に、なかみメモ側のルール公開が必要です。** リポジトリ直下の `firestore.rules`
-（サブコレクション名のホワイトリスト）が未デプロイです。今は旧ルール（`{document=**}` の一括許可）が
-動いているので支障はありませんが、`tools` / `recipes` / `consumptions` を使う前に Firebase Console で反映が必要です。
-手順は Firebase Console → `nakami-memo` → Firestore Database → ルール → 貼って公開。
+**前提は2つとも済んでいます（2026-09-13 ユーザー確認）。**
+
+- なかみメモ側のルール公開：リポジトリ直下の `firestore.rules`（サブコレクション名のホワイトリスト）を
+  Firebase Console で公開済み。モノ一覧・編集・公開場所のQRリンクの3点も確認済み
+- Gemini APIキー：Vercel の環境変数 `GEMINI_API_KEY` に Production・Preview の両方で登録済み
+  （まだ使うコードが無いので再デプロイはしていない。Phase 3 の最初の push で自然に反映される）
+
+以下はルール公開前に確認した内容（記録として残す）。
 
 **公開しても既存データは読めなくなりません（2026-09-10 確認済み）。**
 新ルールは `users/{uid}/` の下を `areas` `locations` `items` `tools` `recipes` `consumptions` に絞りますが、
@@ -269,9 +287,7 @@ APIキーが無くても動きます。その場合は Drive OCR だけになり
 `publicLocations` は `users/` の外なので別の match ブロックが受けます。
 公開後の確認は、モノ一覧が出る・1件編集できる・公開場所のQRリンクが開ける、の3つ。
 
-**もうひとつ必要なもの：Gemini APIキーを Vercel の環境変数に入れること。**
-`NEXT_PUBLIC_` を付けないこと（付けるとブラウザに漏れます）。Production と Preview の両方に。
-GASのキーとは別枠で構いません。
+APIキーはサーバー側（API Route）でだけ読むこと。`NEXT_PUBLIC_` を付けた名前で読むとブラウザに漏れます。
 
 ### Phase 4 — 輪を閉じる
 
