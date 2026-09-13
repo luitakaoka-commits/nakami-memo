@@ -615,7 +615,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=23" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=24" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1196,6 +1196,7 @@
           </div>
           <div class="list-actions">
             <button class="mini-button" data-action="toggle-receipt" data-id="${esc(receipt.id)}">${opened ? '閉じる' : '明細'}</button>
+            ${receipt.status === 'accepted' ? '' : `<button class="mini-button" data-action="accept-receipt" data-id="${esc(receipt.id)}">確認済みにする</button>`}
             <button class="mini-button" data-action="edit-receipt" data-id="${esc(receipt.id)}">編集</button>
             <button class="mini-button danger" data-action="delete-receipt" data-id="${esc(receipt.id)}">削除</button>
           </div>
@@ -1273,7 +1274,7 @@
         </div>
         <div class="field-grid field-grid-2">
           <label><span>単価</span><div class="amount-input"><span>¥</span><input type="number" min="0" step="1" inputmode="numeric" data-line-field="unitPrice" value="${Number(line.unitPrice || 0)}"></div></label>
-          <label><span>金額</span><div class="amount-input"><span>¥</span><input type="number" min="0" step="1" inputmode="numeric" data-line-field="amount" value="${Number(line.amount || 0)}"></div></label>
+          <label><span>金額</span><div class="amount-input"><span>¥</span><input type="number" step="1" inputmode="numeric" data-line-field="amount" value="${Number(line.amount || 0)}"></div></label>
         </div>
         <div class="field-grid field-grid-2">
           <label><span>カテゴリ</span><select data-line-field="category">${categories}</select></label>
@@ -1301,7 +1302,8 @@
         quantity: Math.max(Number(get('quantity')?.value || 0), 0),
         unit: String(get('unit')?.value || '').trim(),
         unitPrice: Math.max(Math.round(Number(get('unitPrice')?.value || 0)), 0),
-        amount: Math.max(Math.round(Number(get('amount')?.value || 0)), 0),
+        // 値引き行はマイナスで入る（レシート取込が「値引 -87」のように作る）。0 に丸めると合計が狂う。
+        amount: Math.round(Number(get('amount')?.value || 0)),
         category: get('category')?.value || 'その他',
         outcome: get('outcome')?.value || 'in_stock',
         outcomeTracked: Boolean(trackedNode?.checked),
@@ -1341,7 +1343,7 @@
     const node = $('#receipt-line-sum');
     if (!node) return;
     const sum = $$('#receipt-lines [data-line-field="amount"]')
-      .reduce((total, input) => total + Math.max(Math.round(Number(input.value || 0)), 0), 0);
+      .reduce((total, input) => total + Math.round(Number(input.value || 0)), 0);
     const total = Math.max(Math.round(Number($('#receipt-total')?.value || 0)), 0);
     node.textContent = `明細の合計 ${formatAbsoluteYen(sum)}`;
     const mismatched = sum !== total && (sum > 0 || total > 0);
@@ -1370,7 +1372,7 @@
     if (!receiptsAvailable()) { showToast('共有スペースに接続すると使えます'); return; }
     const current = receipts.find(item => item.id === (receiptDraft?.id || '')) || null;
     const total = Math.max(Math.round(Number($('#receipt-total').value || 0)), 0);
-    const lines = readReceiptLinesFromDom().filter(line => line.rawName || line.amount > 0);
+    const lines = readReceiptLinesFromDom().filter(line => line.rawName || line.amount !== 0);
     const lineSum = lines.reduce((sum, line) => sum + line.amount, 0);
     // 明細を入れたのに合計と合わないときは、保存は通したうえで「要確認」にする
     const mismatched = lines.length > 0 && lineSum !== total;
@@ -1427,6 +1429,22 @@
     } catch (error) {
       console.warn('レシートを保存できませんでした', error);
       showToast('レシートを保存できませんでした');
+    }
+  }
+
+  /**
+   * 取り込んだレシートを見て、中身が合っていたら「確認済み」にする。
+   * 目印を変えるだけで、取引は作らない（カードの支払いはメール取込から別に入るため、作ると二重になる）。
+   * ふりかえりやムダ支出の集計は、未確認のうちから対象になっている。
+   */
+  async function acceptReceipt(receiptId) {
+    if (!receiptsAvailable() || !receiptId) return;
+    try {
+      await cloud.updateReceiptStatus(receiptId, 'accepted');
+      showToast('確認済みにしました');
+    } catch (error) {
+      console.warn('レシートを確認済みにできませんでした', error);
+      showToast('確認済みにできませんでした');
     }
   }
 
@@ -2715,6 +2733,7 @@
     if (name === 'open-future') { openFutureModal(); return; }
     if (name === 'future-preset') { applyFuturePreset(action.dataset.preset); return; }
     if (name === 'add-receipt') { closeAddMenu(); openReceiptModal(); return; }
+    if (name === 'accept-receipt') { acceptReceipt(action.dataset.id); return; }
     if (name === 'edit-receipt') { openReceiptModal(action.dataset.id); return; }
     if (name === 'delete-receipt') { deleteReceiptRow(action.dataset.id); return; }
     if (name === 'toggle-receipt') { openReceiptId = openReceiptId === action.dataset.id ? '' : action.dataset.id; renderPage(); return; }

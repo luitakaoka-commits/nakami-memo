@@ -630,6 +630,48 @@ const closeModals = page => page.evaluate(() => {
     assert(after.absorbedBy === 'lg-st', `吸収元の総額が紐づいていない: ${after.absorbedBy}`);
   });
 
+  await record('receipt_discount_survives_edit', async () => {
+    // レシート取込は値引きをマイナスの行で作る。編集して保存しても 0 に丸めず、合計も狂わないこと（2026-09-14 の不具合）
+    await closeModals(page);
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      window.__TEST_CALLS__ = [];
+      api.setReceipts([{ id: 'rc1', storeName: 'テストストア', purchasedAt: '2026-09-02', total: 193, taxTotal: 0, paymentMethod: 'card', transactionId: '', source: 'gemini', status: 'pending', note: '', createdAt: '2026-09-02T00:00:00.000Z', createdBy: 'gas-receipt-import' }]);
+      api.setReceiptItems([
+        { id: 'rc1-001', receiptId: 'rc1', lineNo: 1, rawName: '* 3271 牛乳', name: '* 3271 牛乳', quantity: 1, unit: '', unitPrice: 0, amount: 280, category: '飲料', outcomeTracked: true, outcome: 'in_stock', outcomeAt: '', outcomeReason: '', wasteAmount: 0, note: '', createdAt: '2026-09-02T00:00:00.000Z' },
+        { id: 'rc1-002', receiptId: 'rc1', lineNo: 2, rawName: '値引', name: '値引', quantity: 1, unit: '', unitPrice: 0, amount: -87, category: 'その他', outcomeTracked: false, outcome: 'in_stock', outcomeAt: '', outcomeReason: '', wasteAmount: 0, note: '', createdAt: '2026-09-02T00:00:00.000Z' }
+      ]);
+      api.openReceiptModal('rc1');
+    });
+    await page.waitForSelector('#receipt-modal:not([hidden])');
+    const shownSum = await page.textContent('#receipt-line-sum');
+    assert(/193/.test(shownSum), `編集画面の明細の合計が値引きを引いていない: ${shownSum}`);
+    await page.click('#receipt-form button[type="submit"]');
+    await page.waitForTimeout(300);
+    const saved = await page.evaluate(() => (window.__TEST_CALLS__ || []).find(call => call.fn === 'saveReceipt'));
+    assert(saved, '保存が呼ばれていない');
+    const discount = saved.items.find(item => item.rawName === '値引');
+    assert(discount && discount.amount === -87, `値引きが保存時に変わった: ${discount && discount.amount}`);
+    assert(saved.receipt.status === 'pending', `合計が合っているのに要確認になった: ${saved.receipt.status}`);
+  });
+
+  await record('receipt_accept_button', async () => {
+    await closeModals(page);
+    await page.evaluate(() => { window.__YORYOKU__.setPage('records'); window.__YORYOKU__.setRecordTab('receipts'); });
+    await page.waitForSelector('#page-container [data-action="accept-receipt"][data-id="rc1"]');
+    await page.click('#page-container [data-action="accept-receipt"][data-id="rc1"]');
+    await page.waitForTimeout(200);
+    const call = await page.evaluate(() => (window.__TEST_CALLS__ || []).find(item => item.fn === 'updateReceiptStatus'));
+    assert(call && call.id === 'rc1' && call.status === 'accepted', `確認済みにならない: ${JSON.stringify(call)}`);
+    // 確認済みのレシートにはボタンを出さない
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      api.setReceipts([{ id: 'rc1', storeName: 'テストストア', purchasedAt: '2026-09-02', total: 193, taxTotal: 0, paymentMethod: 'card', transactionId: '', source: 'gemini', status: 'accepted', note: '', createdAt: '', createdBy: '' }]);
+    });
+    await page.waitForTimeout(150);
+    assert(await page.locator('#page-container [data-action="accept-receipt"]').count() === 0, '確認済みなのにボタンが残っている');
+  });
+
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

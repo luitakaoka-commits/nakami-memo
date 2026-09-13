@@ -413,6 +413,17 @@ async function updateReceiptItem(lineId, patch = {}) {
   return true;
 }
 
+/** レシートの状態（未確認・確認済みなど）だけを変える。明細行には触らない。 */
+async function updateReceiptStatus(receiptId, status) {
+  if (!connected() || !receiptId) return false;
+  if (!['pending', 'accepted', 'needs_review', 'ignored'].includes(status)) return false;
+  await updateDoc(doc(db, 'workspaces', currentWorkspace.id, 'receipts', receiptId), {
+    status,
+    updatedAt: new Date().toISOString()
+  });
+  return true;
+}
+
 /** レシートと、そこにぶら下がる明細行をまとめて消す。 */
 async function deleteReceipt(receiptId) {
   if (!connected() || !receiptId) return false;
@@ -510,6 +521,7 @@ export const firebaseSync = {
   deleteImportCandidate,
   saveReceipt,
   updateReceiptItem,
+  updateReceiptStatus,
   deleteReceipt,
   saveItemAlias,
   deleteItemAlias
