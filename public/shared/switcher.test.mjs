@@ -32,7 +32,7 @@ const { mountAppSwitcher, publishAppStatus, APPS, appIconMarkup } = mod;
 
 // --- バー ---
 t("3アプリが定義されている", () => eq(APPS.map((a) => a.id), ["money", "nakami", "recipe"], "id"));
-t("リンク先が正しい", () => eq(APPS.map((a) => a.href), ["/money", "/", "/recipe"], "href"));
+t("リンク先が正しい（なかみメモは入口ページではなく中身の /app）", () => eq(APPS.map((a) => a.href), ["/money", "/app", "/recipe"], "href"));
 
 const bar = mountAppSwitcher({ current: "money" });
 t("バーが body の先頭に入る", () => ok(document.body.firstChild === bar, "先頭でない"));
@@ -73,7 +73,7 @@ t("現在のアプリはリンクではなく「今ここ」が付く", () => {
 t("他の2つはリンクで、正しい行き先を持つ", () => {
   const rows = [...sheet.querySelectorAll(".appsw-row")];
   eq(rows[1].tagName, "A", "なかみメモのタグ");
-  eq(rows[1].getAttribute("href"), "/", "なかみメモの href");
+  eq(rows[1].getAttribute("href"), "/app", "なかみメモの href");
   eq(rows[2].tagName, "A", "つくりおきのタグ");
   eq(rows[2].getAttribute("href"), "/recipe", "つくりおきの href");
   ok(!rows[1].textContent.includes("今ここ") && !rows[2].textContent.includes("今ここ"), "今ここ が余計に付いている");

@@ -22,7 +22,9 @@ const STATUS_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 3;
 
 export const APPS = [
   { id: "money", name: "お金管理", href: "/money" },
-  { id: "nakami", name: "なかみメモ", href: "/" },
+  // "/" は「ログイン / アプリを開く」の入口ページなので、切り替えたら毎回そこで止まってしまう。
+  // ログインは3アプリ共通になった（2026-09-14）ので、中身の /app へ直接行く。未ログインなら /app がログインへ案内する。
+  { id: "nakami", name: "なかみメモ", href: "/app" },
   { id: "recipe", name: "つくりおきノート", href: "/recipe" },
 ];
 
