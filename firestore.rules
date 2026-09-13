@@ -1,5 +1,10 @@
 rules_version = '2';
 
+// ★ これは引っ越し前の nakami-memo プロジェクト用のルールです（2026-09-13 に公開済み）。
+//   3アプリを cash-manege 1つにまとめた（2026-09-14 決定）あとは、なかみメモも
+//   public/money/firestore.rules（cash-manege 用。なかみメモ・つくりおきノートの分も含む）を使います。
+//   引っ越しが済んで古いプロジェクトを片付けるまで、記録として残しています。
+
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {

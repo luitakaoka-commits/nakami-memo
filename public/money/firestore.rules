@@ -137,5 +137,50 @@ service cloud.firestore {
         allow delete: if isMember();
       }
     }
+
+    /* ============================================================
+     * ここから下は、なかみメモ と つくりおきノート の分（2026-09-14 追加）。
+     *
+     * 3アプリの Firebase を cash-manege 1つにまとめた（案B）。
+     * 2アプリとも「自分の uid の下だけ」を読み書きする作りなので、お金管理の workspaces とは場所がぶつからない。
+     *   なかみメモ       … users/{uid}/areas, locations, items（Phase 3 で tools, consumptions を足す）
+     *   つくりおきノート … users/{uid}/recipes, plans, shopping
+     *   なかみメモの公開閲覧 … publicLocations/{publicToken}
+     * 元はそれぞれ nakami-memo（リポジトリ直下の firestore.rules）と recipe-a18e1 のルール。
+     * ============================================================ */
+
+    // users/{uid} の下に置いてよいコレクション名。知らない名前の書き込みは断る。
+    // 足すときは public/shared/rules.test.mjs が、アプリが使う名前と揃っているかを確かめる。
+    function allowedUserCollection(name) {
+      return name in [
+        'areas', 'locations', 'items', 'tools', 'consumptions',
+        'recipes', 'plans', 'shopping'
+      ];
+    }
+
+    match /users/{userId} {
+      function isOwner() {
+        return signedIn() && request.auth.uid == userId;
+      }
+
+      allow read, write: if isOwner();
+
+      match /{collection}/{docId} {
+        allow read, write: if isOwner() && allowedUserCollection(collection);
+
+        match /{document=**} {
+          allow read, write: if isOwner() && allowedUserCollection(collection);
+        }
+      }
+    }
+
+    // なかみメモの公開閲覧専用。公開画面で見せる最小情報だけを複製する。一覧は取らせない。
+    match /publicLocations/{publicToken} {
+      allow get: if resource.data.isPublic == true;
+      allow list: if false;
+      allow create: if signedIn() && request.auth.uid == request.resource.data.ownerId;
+      allow update: if signedIn() && request.auth.uid == resource.data.ownerId && request.auth.uid == request.resource.data.ownerId;
+      allow delete: if signedIn() && request.auth.uid == resource.data.ownerId;
+    }
   }
 }

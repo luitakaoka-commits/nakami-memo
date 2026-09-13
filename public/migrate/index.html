@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>データの引っ越し</title>
+  <style>
+    :root { color-scheme: light; --ink: #2c2c2a; --muted: #5f5e5a; --line: #d3d1c7; --ok: #0f6e56; --ng: #a32d2d; --bg: #f1efe8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.7 system-ui, sans-serif; }
+    main { max-width: 40rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+    .lead { color: var(--muted); margin: 0 0 1.5rem; }
+    section { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem; margin: 0 0 1rem; }
+    h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
+    .step { display: inline-block; min-width: 1.6rem; margin-right: .4rem; padding: 0 .45rem; border-radius: 99px; background: var(--ink); color: #fff; text-align: center; font-size: .9rem; }
+    button { font: inherit; padding: .6rem 1rem; border-radius: 10px; border: 1px solid var(--ink); background: var(--ink); color: #fff; cursor: pointer; }
+    button:disabled { opacity: .35; cursor: not-allowed; }
+    .who { margin: .5rem 0 0; color: var(--muted); font-size: .92rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: .5rem; font-size: .95rem; }
+    th, td { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid var(--line); }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .ok { color: var(--ok); font-weight: 600; }
+    .ng { color: var(--ng); font-weight: 600; }
+    .note { font-size: .9rem; color: var(--muted); }
+    #log { white-space: pre-wrap; font: .85rem/1.5 ui-monospace, monospace; background: #f7f6f2; border-radius: 8px; padding: .6rem; max-height: 14rem; overflow: auto; }
+    .banner { border-color: var(--ng); color: var(--ng); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>データの引っ越し</h1>
+  <p class="lead">なかみメモ と つくりおきノート のデータを、お金管理と同じ場所（cash-manege）へ書き写します。
+    <strong>元のデータは消しません。</strong>何回やり直しても同じ結果になります。</p>
+
+  <section id="account-warning" class="banner" hidden>
+    <h2>ログインしたアカウントが違います</h2>
+    <p id="account-warning-text"></p>
+  </section>
+
+  <section>
+    <h2><span class="step">1</span>引っ越し先（お金管理）にログイン</h2>
+    <button type="button" data-login="cash">Googleでログイン</button>
+    <p class="who" id="who-cash">まだログインしていません</p>
+  </section>
+
+  <section>
+    <h2><span class="step">2</span>引っ越し元（なかみメモ）にログイン</h2>
+    <button type="button" data-login="nakami">Googleでログイン</button>
+    <p class="who" id="who-nakami">まだログインしていません</p>
+    <div id="count-nakami"></div>
+  </section>
+
+  <section>
+    <h2><span class="step">3</span>引っ越し元（つくりおきノート）にログイン</h2>
+    <button type="button" data-login="recipe">Googleでログイン</button>
+    <p class="who" id="who-recipe">まだログインしていません</p>
+    <div id="count-recipe"></div>
+  </section>
+
+  <section>
+    <h2><span class="step">4</span>書き写す</h2>
+    <p class="note">1〜3のログインが済むと押せます。書き写したあと、自動で件数を照らし合わせます。</p>
+    <button type="button" id="copy" disabled>書き写す</button>
+    <div id="result"></div>
+  </section>
+
+  <section>
+    <h2>記録</h2>
+    <div id="log">ページを開きました。</div>
+  </section>
+</main>
+<script type="module" src="./migrate.js"></script>
+</body>
+</html>

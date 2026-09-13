@@ -24,6 +24,8 @@ const SUITES = [
   { name: "recipe", cwd: path.join(ROOT, "public", "recipe"), file: "tests/row-template.test.js" },
   { name: "app-switcher", cwd: SHARED_DIR, file: "switcher.test.mjs", env: { SHARED_DIR } },
   { name: "install", cwd: SHARED_DIR, file: "install.test.mjs" },
+  { name: "rules", cwd: SHARED_DIR, file: "rules.test.mjs" },
+  { name: "migrate", cwd: SHARED_DIR, file: "migrate.test.mjs" },
 ];
 
 const failures = [];
