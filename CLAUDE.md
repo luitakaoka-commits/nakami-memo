@@ -150,7 +150,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 
 ```bash
 npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10
-npm run test:ui          # お金管理のブラウザ実測 25項目（初回だけ npx playwright install chromium）
+npm run test:ui          # お金管理のブラウザ実測 27項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
 # サーバーを起動して配信チェック（27件）とインストールの確認（14件）
