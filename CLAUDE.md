@@ -46,9 +46,9 @@ npm test
 
 | アプリ | 役割 | 実装 | Firebaseプロジェクト | パス |
 |---|---|---|---|---|
-| なかみメモ | モノの台帳 | Next.js 15 / React 19 / TS | `nakami-memo` | `/` （`src/`） |
+| なかみメモ | モノの台帳 | Next.js 15 / React 19 / TS | `cash-manege`（09-14 まで `nakami-memo`） | `/` （`src/`） |
 | お金管理 | お金の台帳 | 素のHTML+JS（IIFE） | `cash-manege` | `/money/` （`public/money/`） |
-| つくりおきノート | 料理の台帳 | 素のHTML+JS（ESM） | `recipe-a18e1` | `/recipe/` （`public/recipe/`） |
+| つくりおきノート | 料理の台帳 | 素のHTML+JS（ESM） | `cash-manege`（09-14 まで `recipe-a18e1`） | `/recipe/` （`public/recipe/`） |
 
 共通の切り替えバーは `public/shared/`。
 
