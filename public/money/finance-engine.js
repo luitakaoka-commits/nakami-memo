@@ -1518,6 +1518,14 @@
   /** 先頭に付く店舗記号（軽減税率の印など） */
   const ITEM_LEADING_MARK = /^[*＊※#＃\-‐・]+/;
 
+  /**
+   * レシートの品名の前に付く部門コード。例: "* 3271 農場物語無調整牛乳" "A* 3434 ごま団子" "7020 ミヨシ暮らしの重曹"。
+   * 店ごとに違う番号なので、残すと同じ品物でも店が変わると別物に数えられ、手入力の「牛乳」とも寄らない。
+   * 「3〜6桁の数字 + 空白 + 品名」の形のときだけ剥がす（「1日分の野菜」のような品名は空白が無いので残る）。
+   * 英字は記号が続くとき（"A*"）だけ許す。
+   */
+  const ITEM_LEADING_CODE = /^(?:[a-z]?[*＊※]+\s*)?\d{3,6}\s+(?=\S)/;
+
   /** 残す文字。ひらがなは「ゖ」まで取るので「ヴ→ゔ」も落とさない。 */
   const ITEM_ALLOWED_CHARS = /[^ぁ-ゖー一-龥0-9a-z]/g;
 
@@ -1531,6 +1539,7 @@
     let text = source.normalize('NFKC');
     text = text.replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
     text = text.toLowerCase();
+    text = text.replace(ITEM_LEADING_CODE, '');
     text = text.replace(ITEM_LEADING_MARK, '');
     // 「もやし2P 3個」のように重なることがあるので、無くなるまで剥がす
     let previous = null;

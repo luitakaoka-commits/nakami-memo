@@ -597,6 +597,30 @@ test('66. 繰り返しリスト — 表示名は正規化キーではなく最�
   equal(ranked[0].name, 'ﾓﾔｼ', '画面に出すのは最も多かった元の表記');
 });
 
+test('67. レシートの部門コードを落とす（2026-09-13 の東急ストアの実物の表記）', () => {
+  equal(engine.normalizeItemName('* 3271 農場物語無調整牛乳'), '農場物語無調整牛乳', '軽減税率の印＋コード');
+  equal(engine.normalizeItemName('A* 3434 ごま団子'), 'ごま団子', '英字＋印＋コード');
+  equal(engine.normalizeItemName('7020 ミヨシ暮らしの重曹'), 'みよし暮らしの重曹', 'コードだけ');
+  equal(engine.normalizeItemName('* 1542 味の素 50g袋'), engine.normalizeItemName('味の素 50g袋'), 'コードの有無で別物にならない');
+});
+
+test('68. 部門コードの形でないものは残す', () => {
+  equal(engine.normalizeItemName('1日分の野菜'), '1日分の野菜', '空白が無ければ品名の一部');
+  equal(engine.normalizeItemName('12 もやし'), '12もやし', '2桁はコードとみなさない');
+  equal(engine.normalizeItemName('ab 3434 ごま団子'), 'ab3434ごま団子', '記号の無い英字＋数字は剥がさない');
+  equal(engine.normalizeItemName('3434'), '3434', '数字だけなら元の値を返す');
+});
+
+test('69. 繰り返しリスト — 店のコード付きと手入力が同じ品物として数えられる', () => {
+  const items = [
+    line({ name: '* 3271 農場物語無調整牛乳', amount: 280, outcome: 'expired' }),
+    line({ name: '農場物語無調整牛乳', amount: 280, outcome: 'expired' })
+  ];
+  const ranked = engine.repeatedWasteRanking(items);
+  equal(ranked.length, 1, '1グループ');
+  equal(ranked[0].wasteCount, 2, '2回');
+});
+
 if (!failures.length) { console.log(JSON.stringify({ suite: 'receipt', total, passed: total, failed: 0 })); process.exit(0); }
 console.log(JSON.stringify({ suite: 'receipt', total, passed: total - failures.length, failed: failures.length, failures }, null, 2));
 process.exit(1);
