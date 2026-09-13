@@ -17,7 +17,7 @@ git status --porcelain             # 未コミットの有無
 git rev-parse --short HEAD origin/main   # push済みかどうか
 
 npm test
-# money 189件 → 2026-09-13 時点（外税レシートの割り振りのテスト6件を追加）
+# money 196件 → 2026-09-13 時点（外税の割り振り・部門コード・取込タイミングのテストを追加）
 #       183件 → 2026-09-10 時点（名寄せ修正 + GAS取込のテスト）
 #       158件 → GAS取込のテストが無い
 #       155件 → 名寄せの修正も無い。古いコミットを見ている
@@ -131,7 +131,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 189 / recipe 16 / app-switcher 25
+npm test                 # money 196 / recipe 16 / app-switcher 25
 npm run test:ui          # お金管理のブラウザ実測 25項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -157,7 +157,7 @@ Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環
 - `main` に 2026-09-11 の作業（CI整備・ブラウザ実測テストの修復・このファイルの追加）までマージ済み。
   **`origin/main` より先行 → push待ち**（件数は書かない。すぐ古くなるので `git rev-list --count origin/main..main` で確かめる）
 - 検証は全部通した：money 183 / recipe 16 / app-switcher 25 / ブラウザ実測 25 / tsc / eslint / next build / serving-check 17
-  （2026-09-13 に GAS取込のテストを足して money 189。GitHub Actions は 09-13 の push で緑）
+  （2026-09-13 に GAS取込とレシートのテストを足して money 196。GitHub Actions は 09-13 の push で緑）
 - `public/money/integrations/` に `gas-card-mail-import` と `gas-receipt-import` の両方がある
 - **アプリの画面や計算のコードは 2026-09-10 から変わっていない**（09-11 はテスト・CI・文書だけ）
 
@@ -247,11 +247,27 @@ GAS + Gemini。**次の一歩は Apps Script にセットアップして `dryRun
 値引き行が「その他」になる点は、ふりかえりに出ない（outcomeTracked=false）ので実害は小さいが、
 カテゴリ別の支出がわずかにずれる。直すかは次の dryRun の全体を見て決める。
 
+**4回目の dryRun（2026-09-13）で読み取りの3点確認は合格。** 小計・お預りの混入なし、値引きはマイナス、
+カテゴリは15行とも妥当（切れた品名「Vマークオニオンサ」も食品に振れていた）。
+
+**同日のユーザーの要望と決定:**
+
+- **取込は「入れ終わってから5分後にまとめて」**。5分おきに見回り、最後の追加から5分たったら取り込む
+  （`millisUntilQuiet`）。Gemini を呼ぶのは写真1枚につき1回で、見回りの間隔は無料枠に効かないとユーザーに説明済み。
+  あわせて、取込済みなら呼ばない・3回失敗で「取込失敗」へ移す・枠切れや設定ミス（429/5xx/401/403/404/キーの400）では
+  OCR に落とさずその回を止める、にした。**設計書の「無料枠切れは Drive OCR に落として止めない」を変えた**
+  （404 の件で、そのまま動いていたら全レシートが明細なしで取込済みになっていたため）。
+- **Web検索で正式な商品名を調べたい** → **保留中（ユーザーの返事待ち）**。Gemini の Google 検索グラウンディングは
+  無料枠では使えず課金の有効化が要る（料金ページ 2026-09-13 確認：月5,000回まで無料、以降 $14/1,000回、ただし有料枠のみ）。
+  課金を有効にすると読み取り自体も有料になる。無料の代案（検索なしで Gemini に読みやすい商品名を推測させる等）を提示した。
+- **品名の先頭の部門コード**（`* 3271 農場物語無調整牛乳` の `* 3271`）を `normalizeItemName` で剥がすようにした。
+  残ると店が変わるだけで別物に数えられ、手入力の品名とも寄らないため。rawName はそのまま（正規化はアプリ側、の方針どおり）。
+
 **スクリプトプロパティは `WORKSPACE_ID` と `GEMINI_API_KEY` の2つだけにする。** 2回目の dryRun で、
 `GEMINI_MODEL` に `gemini-2.5-flash` が入っていて既定の変更が効かなかった（README の表が全行入れる読み方を許していた）。
 
 コードは `public/money/integrations/gas-receipt-import/` にあります（2026-09-10 配置）。
-手順は同フォルダの `README.md`。純粋関数には `tests/gas-receipt.test.js`（31件）が付いています。
+手順は同フォルダの `README.md`。純粋関数には `tests/gas-receipt.test.js`（35件）が付いています。
 
 **`dryRun()` の結果がおかしかったら、まずこのテストを走らせてください。**
 通るなら整形・検算は正しいので、原因は `Gemini.gs` の `receiptPrompt()` 側です。
