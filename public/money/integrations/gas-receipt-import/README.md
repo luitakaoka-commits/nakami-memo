@@ -50,7 +50,7 @@ Firestore の `receipts` / `receiptItems` に入れます。
    | `GEMINI_API_KEY` | AI Studio で発行したキー | 推奨 |
    | `FIRESTORE_PROJECT_ID` | 既定 `cash-manege` | |
    | `RECEIPT_FOLDER_NAME` | 既定 `レシート` | |
-   | `GEMINI_MODEL` | 既定 `gemini-2.5-flash` | |
+   | `GEMINI_MODEL` | 既定 `gemini-3.6-flash`。**普段は入れない**（入れると既定の更新が効かなくなる） | |
 
 4. **サービス** から **Drive API** を追加する（Drive OCR のフォールバックに必要）
 5. `setup()` を実行する。初回は権限の確認が出ます
@@ -63,10 +63,16 @@ Firestore の `receipts` / `receiptItems` に入れます。
 
 ## モデルについて
 
-`GEMINI_MODEL` は差し替えられます。既定の `gemini-2.5-flash` は画像入力と
-structured output に対応していて、無料枠で十分回ります。
-精度が足りなければ新しい世代（`gemini-3.5-flash` など）に、
+既定は `gemini-3.6-flash` です。`GEMINI_MODEL` プロパティで差し替えられます。
+精度が足りなければ新しい世代（`gemini-3.8-flash` など）に、
 無料枠を節約したければ `-lite` 系に、プロパティを1つ変えるだけで切り替えられます。
+
+**モデルは予告なく新規ユーザーに閉じられることがあります。** 2026-09 に `gemini-2.5-flash` が
+公式の廃止予定表では「廃止日未定」のまま、実際には HTTP 404
+（`no longer available to new users`）を返すようになりました。
+`dryRun()` のログに 404 が出たら、エラー本文が移行先のモデル名を示しているので、それに変えてください。
+
+Gemini 3 系は temperature を既定（1.0）のまま使う前提で調整されているため、`Gemini.gs` では指定していません。
 
 ## 動きの確認
 

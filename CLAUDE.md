@@ -229,7 +229,12 @@ GAS + Gemini。**次の一歩は Apps Script にセットアップして `dryRun
 
 必要なもの: Gemini APIキー（https://aistudio.google.com/apikey）と `workspaceId`
 （**設定画面には出ません**。「あなたのメンバーID」は uid で別物。取り方は同フォルダの README）。
-どちらもスクリプトプロパティに入れます。モデルは `GEMINI_MODEL` で差し替え可能（既定 `gemini-2.5-flash`）。
+どちらもスクリプトプロパティに入れます。モデルは `GEMINI_MODEL` で差し替え可能（既定 `gemini-3.6-flash`）。
+
+**2026-09-13 の初回 dryRun**：`gemini-2.5-flash` が HTTP 404（新規ユーザーには提供終了）で、Drive OCR に落ちていた。
+公式の廃止予定表では「廃止日未定」だったので、**表を信じずに実際のエラー本文を見ること**。
+既定を `gemini-3.6-flash` に変え、Gemini 3 系の注意に従って temperature 指定（0）を外した。
+**Phase 3 の `/api/recipes/suggest` でも同じモデル名と temperature の扱いにすること。**
 
 コードは `public/money/integrations/gas-receipt-import/` にあります（2026-09-10 配置）。
 手順は同フォルダの `README.md`。純粋関数には `tests/gas-receipt.test.js`（25件）が付いています。

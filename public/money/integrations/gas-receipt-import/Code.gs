@@ -171,7 +171,9 @@ function toFirestoreFields(object) {
 var DEFAULT_PROJECT_ID = 'cash-manege';
 var DEFAULT_FOLDER_NAME = 'レシート';
 var DONE_FOLDER_NAME = '取込済み';
-var DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+// gemini-2.5-flash は 2026-09 時点で新規ユーザーに提供されなくなった（HTTP 404）。
+// エラー本文が移行先として示したのが gemini-3.6-flash。
+var DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 var MAX_FILES_PER_RUN = 10;
 
 function readConfig() {
@@ -184,7 +186,7 @@ function readConfig() {
     folderName: read('RECEIPT_FOLDER_NAME') || DEFAULT_FOLDER_NAME,
     geminiApiKey: read('GEMINI_API_KEY'),
     // モデルは世代が上がるので差し替えられるようにしておく。
-    // 例: gemini-2.5-flash / gemini-3.1-flash-lite / gemini-3.6-flash
+    // 例: gemini-3.6-flash / gemini-3.8-flash / gemini-3.1-flash-lite
     geminiModel: read('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL
   };
 }
@@ -412,7 +414,7 @@ function setup() {
 /** 保存せずに、1枚だけ読み取り結果を見る。プロンプトを調整するとき用。 */
 function dryRun() {
   var config = readConfig();
-  // どの設定で動いたかを先に出す。キーの中身は出さず、有無と長さだけ（正しいキーは39文字）。
+  // どの設定で動いたかを先に出す。キーの中身は出さず、有無と長さだけ。
   Logger.log('設定: WORKSPACE_ID=' + (config.workspaceId ? 'あり' : '未設定')
     + ' / GEMINI_API_KEY=' + (config.geminiApiKey ? 'あり（' + config.geminiApiKey.length + '文字）' : '未設定')
     + ' / モデル=' + config.geminiModel);

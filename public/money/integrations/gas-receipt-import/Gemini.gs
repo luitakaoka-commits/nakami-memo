@@ -99,7 +99,8 @@ function parseReceiptWithGemini(blob, config) {
       ]
     }],
     generationConfig: {
-      temperature: 0,               // 読み取りなので毎回同じ答えが欲しい
+      // temperature は指定しない。Gemini 3 系は既定の 1.0 前提で調整されており、
+      // 下げると繰り返しなど想定外の動きをすると公式が注意している。形は responseSchema で縛る。
       responseMimeType: 'application/json',
       responseSchema: receiptResponseSchema()
     }
