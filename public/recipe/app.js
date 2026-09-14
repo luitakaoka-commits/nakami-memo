@@ -120,6 +120,21 @@ function readLegacyData() {
   }
 }
 
+/* なかみメモのレシピ提案から保存したレシピに入っている、材料と在庫の結びつき。
+   「作った」で在庫を減らすのに使う（2026-09-15）。
+   ここで拾い直さないと、読み込みのたびに normalizeRecipe が落としてしまい、確認画面が出ない。 */
+function normalizeSourceItems(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((row) => row && typeof row.itemId === "string" && row.itemId)
+    .map((row) => ({
+      itemId: row.itemId,
+      name: String(row.name || ""),
+      unit: String(row.unit || ""),
+      use: Number(row.use) > 0 ? Number(row.use) : 0
+    }));
+}
+
 function normalizeRecipe(recipe) {
   const source = SOURCES.includes(recipe.source) ? recipe.source : "自分のレシピ";
   return {
@@ -134,7 +149,8 @@ function normalizeRecipe(recipe) {
     refUrl: String(recipe.refUrl || ""),
     image: String(recipe.image || ""),
     createdAt: Number(recipe.createdAt) || Date.now(),
-    lastCookedAt: Number(recipe.lastCookedAt) || 0
+    lastCookedAt: Number(recipe.lastCookedAt) || 0,
+    sourceItems: normalizeSourceItems(recipe.sourceItems)
   };
 }
 
