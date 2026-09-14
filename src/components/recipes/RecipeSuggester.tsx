@@ -166,7 +166,7 @@ function SuggestionCard({ recipe, pantryItems, toolNames }: {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [cooking, setCooking] = useState(false);
-  const [cooked, setCooked] = useState(false);
+  const [cooked, setCooked] = useState("");
   const [message, setMessage] = useState("");
 
   const usedTools = toolNames.filter((tool) => recipe.toolIds.includes(tool.id));
@@ -212,13 +212,13 @@ function SuggestionCard({ recipe, pantryItems, toolNames }: {
       {usedTools.length > 0 && <p className="ui-muted mt-3">使う器具：{usedTools.map((tool) => tool.name).join("、")}</p>}
 
       {message && <p role="alert" className="ui-error mt-3">{message}</p>}
-      {cooked && <p className="ui-status-note mt-3"><Check size={14} className="inline mr-1" />在庫を減らしました。</p>}
+      {cooked && <p className="ui-status-note mt-3"><Check size={14} className="inline mr-1" />{cooked}</p>}
 
       <div className="ui-form-actions mt-4">
         {savedId
           ? <Link href="/recipe" className="ui-button ui-button--secondary"><Check size={16} />つくりおきノートに保存しました</Link>
           : <button type="button" onClick={save} disabled={saving} className="ui-button ui-button--secondary"><BookmarkPlus size={16} />{saving ? "保存中" : "つくりおきノートに保存"}</button>}
-        <button type="button" onClick={() => setCooking(true)} disabled={cooked} className="ui-button ui-button--primary"><ChefHat size={16} />作った</button>
+        <button type="button" onClick={() => setCooking(true)} className="ui-button ui-button--primary"><ChefHat size={16} />作った</button>
       </div>
 
       {cooking && (
@@ -227,7 +227,12 @@ function SuggestionCard({ recipe, pantryItems, toolNames }: {
           items={pantryItems}
           savedRecipeId={savedId}
           onClose={() => setCooking(false)}
-          onDone={() => { setCooking(false); setCooked(true); }}
+          onDone={(changed) => {
+            setCooking(false);
+            setCooked(changed
+              ? `${changed}件の在庫を減らしました。`
+              : "減らす量がすべて0だったので、在庫は変えていません。");
+          }}
         />
       )}
     </article>
@@ -240,7 +245,7 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
   items: ReturnType<typeof useInventory>["items"];
   savedRecipeId: string | null;
   onClose: () => void;
-  onDone: () => void;
+  onDone: (changed: number) => void;
 }) {
   const { user } = useAuth();
   const byId = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
@@ -258,10 +263,12 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
     try {
       // 在庫の数量は、ダイアログを開いた後に別の端末で変わっているかもしれないので、最新の値で計算し直す
       const fresh = rows.map((row) => ({ ...row, available: byId.get(row.itemId)?.quantity ?? row.available }));
-      await recordCooking(user.uid, fresh, recipe.title, savedRecipeId);
-      onDone();
+      const changed = await recordCooking(user.uid, fresh, recipe.title, savedRecipeId);
+      onDone(changed);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "在庫を減らせませんでした。");
+      // 権限や通信の理由を隠すと原因にたどり着けないので、そのまま出す
+      console.error("[作った] 在庫を減らせませんでした", err);
+      setError(err instanceof Error ? `在庫を減らせませんでした（${err.message}）` : "在庫を減らせませんでした。");
       setBusy(false);
     }
   }
@@ -271,7 +278,9 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
       <section className="ui-save-dialog w-full max-w-md text-left" role="dialog" aria-modal="true" aria-label="作った食材の在庫を減らす">
         <h2 className="ui-save-dialog__title">使った量を確かめてください</h2>
         <p className="ui-muted mt-1">この量だけ在庫を減らします。0にした食材は減らしません。</p>
-        {rows.length === 0 ? <p className="ui-muted mt-4">在庫から使う食材がありません。</p> : (
+        {rows.length === 0 ? (
+          <p className="ui-muted mt-4">このレシピには、なかみメモに登録した在庫と結びついた材料がありません。材料の名前が在庫と違うか、カテゴリが「食品・飲料・調味料」になっていない可能性があります。</p>
+        ) : (
           <div className="ui-list mt-4">
             {rows.map((row, index) => (
               <label key={row.itemId} className="flex items-center justify-between gap-3">
@@ -294,6 +303,9 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
               </label>
             ))}
           </div>
+        )}
+        {rows.length > 0 && rows.every((row) => row.use === 0) && (
+          <p className="ui-status-note mt-3">減らす量がすべて0です。このまま押しても在庫は変わりません。使った量を入れてください。</p>
         )}
         {error && <p role="alert" className="ui-error mt-3">{error}</p>}
         <div className="ui-form-actions mt-5">
