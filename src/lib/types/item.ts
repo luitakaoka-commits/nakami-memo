@@ -61,6 +61,17 @@ export type Item = {
   imageUrl?: string;
   memo?: string;
   lowStockThreshold?: number | null;
+  /* ---- お金管理から来た在庫だけが持つ（「在庫に入れる」で書かれる。2026-09-16） ---- */
+  /** どのレシートの何行目から来たか（`レシートID#行番号`） */
+  purchaseRef?: string;
+  /** 買ったときの金額。捨てたときに、いくら無駄だったかを出すのに使う */
+  purchasePrice?: number;
+  /** お金管理のどの共有スペースか。結末を明細に返すときの宛先 */
+  purchaseWorkspaceId?: string;
+  /* ---- 「使い切った／捨てた」の記録（2026-09-16） ---- */
+  outcome?: string;
+  outcomeAt?: string;
+  outcomeReason?: string;
   // serverTimestamp() の直後（pending write のスナップショット）では null になる。
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;

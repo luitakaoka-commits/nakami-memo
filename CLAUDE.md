@@ -167,7 +167,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 208 / recipe 16 / recipe-stock 12 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26
+npm test                 # money 208 / recipe 16 / recipe-stock 12 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 13
 npm run test:ui          # お金管理のブラウザ実測 28項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -379,8 +379,8 @@ Firebaseプロジェクトの統合（3つ→1つ）は済み（上の表）。�
 
 | 手 | 内容 | 状態 |
 |---|---|---|
-| A | お金管理のレシート明細 →「在庫に入れる」→ なかみメモの items | 実装済（2026-09-16。実機確認待ち） |
-| B | なかみメモで「使い切った／捨てた」→ 数量0のまま残す ＋ お金管理の明細へ書き戻す | これから |
+| A | お金管理のレシート明細 →「在庫に入れる」→ なかみメモの items | 済（2026-09-16 実機確認済み） |
+| B | なかみメモで「使い切った／捨てた」→ 数量0のまま残す ＋ お金管理の明細へ書き戻す | 実装済（2026-09-16。実機確認待ち） |
 | C | つくりおきノートの買い物リストで「これ、まだ家にあります」 | これから |
 
 **A の決めごと（2026-09-16 ユーザー決定）**
@@ -395,3 +395,23 @@ Firebaseプロジェクトの統合（3つ→1つ）は済み（上の表）。�
 - 入れた明細には `inventoryItemId` が残り、二重に入れられない（ボタンが押せなくなる）。
   この書き戻しのために **`firestore.rules` の receiptItems に `inventoryItemId` を足した → Console で公開し直すこと**
 - 同じレシートに同じ品が2行あるときは1つにまとめて足す（`lineIds` に両方入る）
+
+**B の決めごと（2026-09-16）**
+
+| 場所 | 中身 |
+|---|---|
+| `src/lib/inventory/outcome-core.ts` | ネットワークを使わない部分（どの在庫に出すか・理由と結末の対応・無駄金額・買い直しで印を消す判定）。テスト13件 |
+| `src/lib/firebase/inventory-outcome.ts` | 在庫を数量0にするのと、レシート明細への書き戻しを**1つのバッチ**で行う |
+| `src/components/items/ItemOutcomeActions.tsx` | 在庫カードの「使い切った／捨てた」。捨てたときだけ理由を4択で聞く |
+
+- **モノは消さない。数量を0にして残す**（また買うから。消すと買い直しの回数が分からなくなる）
+- 書き戻し先は `inventoryItemId` が自分のIDと一致するレシート明細。**まとめた在庫なら複数行に返る**
+- 行き先の共有スペースは在庫の `purchaseWorkspaceId`（「在庫に入れる」で書く）。
+  それが無い古い在庫でも `purchaseRef` があれば、自分が入っている共有スペースを順に探す
+- 無駄金額は `wasteAmountOf` と同じ計算。**理由→結末の対応（`DISCARD_REASONS`）と割合（`WASTE_RATIO`）は
+  お金管理と同じ値を2か所に書いている。** `outcome-core.test.mjs` が `app.js` と `finance-engine.js` を
+  読んで突き合わせ、ルールの許可リストにも収まっているかを見る。片方だけ直すと落ちる
+- 買い直して数量が1以上に戻ったら印は消える（なかみメモの編集でも、お金管理の「在庫に入れる」でも）
+- 結末を返した明細は、お金管理の週1回のふりかえりに出てこなくなる（`outcome` が `in_stock` でなくなるため）
+- **つくりおきノートの「作った」で在庫が0になっても「使い切った」にはならない。** 料理で使い切ったのに
+  お金管理では「まだある」のままになる。ここはまだ穴（2026-09-16 時点で未着手）

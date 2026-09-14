@@ -467,6 +467,8 @@ async function addToInventory(plan) {
       category: row.category,
       purchaseRef: row.purchaseRef,
       purchasePrice: row.purchasePrice,
+      // なかみメモが「使い切った／捨てた」をこの共有スペースの明細へ返すのに使う
+      purchaseWorkspaceId: workspaceId,
       createdAt: now,
       updatedAt: now
     });
@@ -479,7 +481,15 @@ async function addToInventory(plan) {
   });
 
   (plan.merges || []).forEach(row => {
-    batch.update(doc(db, 'users', uid, 'items', row.itemId), { quantity: row.quantity, updatedAt: now });
+    // また買って在庫が戻るので、「使い切った／捨てた」の印は消す（残すと棚にあるのに使い切った扱いになる）。
+    batch.update(doc(db, 'users', uid, 'items', row.itemId), {
+      quantity: row.quantity,
+      purchaseWorkspaceId: workspaceId,
+      outcome: 'in_stock',
+      outcomeAt: '',
+      outcomeReason: '',
+      updatedAt: now
+    });
     (row.lineIds || []).forEach(lineId => {
       if (!lineId) return;
       batch.update(doc(db, 'workspaces', workspaceId, 'receiptItems', lineId), {

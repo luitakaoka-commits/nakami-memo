@@ -34,6 +34,13 @@ const SUITES = [
     file: "suggest-core.test.mjs",
     nodeArgs: ["--experimental-strip-types", "--no-warnings"],
   },
+  // 在庫の「使い切った／捨てた」。お金管理と同じ値を使っているかもここで見る
+  {
+    name: "inventory-outcome",
+    cwd: path.join(ROOT, "src", "lib", "inventory"),
+    file: "outcome-core.test.mjs",
+    nodeArgs: ["--experimental-strip-types", "--no-warnings"],
+  },
 ];
 
 const failures = [];

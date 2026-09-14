@@ -7,11 +7,11 @@
   <meta name="description" content="支払い・貯金・NISAを引いたあとに、今使える金額を確認するアプリ">
   <!-- 3アプリは「くらしノート」1つとしてインストールする。manifest は3アプリ共通のものを指す。 -->
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="icons/app-icon.svg?v=25" type="image/svg+xml">
+  <link rel="icon" href="icons/app-icon.svg?v=26" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icons/kurashi-note-apple-180.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="くらしノート">
-  <link rel="stylesheet" href="styles.css?v=25">
+  <link rel="stylesheet" href="styles.css?v=26">
   <title>お金管理</title>
 <link rel="stylesheet" href="../shared/app-switcher.css">
 </head>
@@ -20,7 +20,7 @@
 
   <div id="auth-screen" class="auth-screen" hidden>
     <div class="auth-panel">
-      <div class="auth-brand"><img src="icons/app-icon.svg?v=25" alt=""><strong>お金管理</strong></div>
+      <div class="auth-brand"><img src="icons/app-icon.svg?v=26" alt=""><strong>お金管理</strong></div>
       <div class="auth-lock" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></div>
       <h1>ログイン</h1>
       <div class="form-stack">
@@ -36,7 +36,7 @@
   <div id="app-shell" class="app-shell" hidden>
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="brand-mark"><img src="icons/app-icon.svg?v=25" alt=""></div>
+        <div class="brand-mark"><img src="icons/app-icon.svg?v=26" alt=""></div>
         <div>
           <strong>お金管理</strong>
           <span>家計と予定</span>
@@ -63,7 +63,7 @@
     <main class="main" id="main-content">
       <header class="topbar">
         <div class="topbar-start">
-          <div class="topbar-brand"><div class="brand-mark"><img src="icons/app-icon.svg?v=25" alt=""></div><strong>お金管理</strong></div>
+          <div class="topbar-brand"><div class="brand-mark"><img src="icons/app-icon.svg?v=26" alt=""></div><strong>お金管理</strong></div>
           <button class="icon-button menu-button" id="menu-button" aria-label="メニューを開く"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
           <div class="topbar-context">
             <div class="topbar-date" id="today-label"></div>
@@ -275,9 +275,9 @@
 
   <input id="import-file" type="file" accept="application/json" hidden>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="finance-engine.js?v=25"></script>
-  <script>window.firebaseSyncReady = import('./firebase-sync.js?v=25').then(module => module.firebaseSync);</script>
-  <script src="app.js?v=25"></script>
+  <script src="finance-engine.js?v=26"></script>
+  <script>window.firebaseSyncReady = import('./firebase-sync.js?v=26').then(module => module.firebaseSync);</script>
+  <script src="app.js?v=26"></script>
   <script type="module">
     /* 3アプリ共通の切り替えバー。app.js（IIFE）には手を入れず、ここだけで完結させる。 */
     import { mountAppSwitcher } from "../shared/app-switcher.js";

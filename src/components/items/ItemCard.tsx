@@ -6,6 +6,7 @@ import type { Item } from "@/lib/types/item";
 import { formatDate, isExpired, isExpiringSoon } from "@/lib/utils/dates";
 import { isLowStock } from "@/lib/utils/inventory";
 import { Badge } from "@/components/common/Badge";
+import { ItemOutcomeActions } from "./ItemOutcomeActions";
 
 export function ItemCard({ item, locationLabel }: { item: Item; locationLabel?: string }) {
   return (
@@ -29,6 +30,7 @@ export function ItemCard({ item, locationLabel }: { item: Item; locationLabel?: 
         </div>
         {item.memo && <p className="ui-item-card__memo">{item.memo}</p>}
         <Link href={`/app/items/${item.id}/edit`} className="ui-button ui-button--ghost mt-2">編集</Link>
+        <ItemOutcomeActions item={item} />
       </div>
     </article>
   );

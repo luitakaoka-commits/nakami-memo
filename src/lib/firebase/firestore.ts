@@ -14,6 +14,7 @@ import {
 import type { AreaInput } from "@/lib/types/area";
 import type { ItemInput } from "@/lib/types/item";
 import type { LocationInput } from "@/lib/types/location";
+import { OUTCOME_RESET, shouldResetOutcome } from "@/lib/inventory/outcome-core";
 import { createPublicToken } from "@/lib/utils/qr";
 import {
   areaDoc,
@@ -242,7 +243,10 @@ export async function updateItem(userId: string, itemId: string, input: ItemInpu
   const current = await getItem(userId, itemId);
   if (!current) throw new Error("アイテムが見つかりません。");
 
-  await updateDoc(itemDoc(userId, itemId), itemPayload(input, "update"));
+  // 数量を入れ直して在庫が戻ったなら、「使い切った／捨てた」の印は消す。
+  // 残したままだと、棚にあるのに使い切った扱いのままになる（2026-09-16）。
+  const reset = shouldResetOutcome(current, input.quantity) ? OUTCOME_RESET : {};
+  await updateDoc(itemDoc(userId, itemId), { ...itemPayload(input, "update"), ...reset });
 
   await syncPublicByLocationIfNeeded(userId, current.locationId);
   if (current.locationId !== input.locationId) {
