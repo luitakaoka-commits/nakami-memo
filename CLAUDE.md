@@ -167,7 +167,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 208 / recipe 16 / recipe-stock 12 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 13
+npm test                 # money 208 / recipe 16 / recipe-stock 20 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 14
 npm run test:ui          # お金管理のブラウザ実測 28項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -413,8 +413,10 @@ Firebaseプロジェクトの統合（3つ→1つ）は済み（上の表）。�
   読んで突き合わせ、ルールの許可リストにも収まっているかを見る。片方だけ直すと落ちる
 - 買い直して数量が1以上に戻ったら印は消える（なかみメモの編集でも、お金管理の「在庫に入れる」でも）
 - 結末を返した明細は、お金管理の週1回のふりかえりに出てこなくなる（`outcome` が `in_stock` でなくなるため）
-- **つくりおきノートの「作った」で在庫が0になっても「使い切った」にはならない。** 料理で使い切ったのに
-  お金管理では「まだある」のままになる。**ユーザー了承のうえ、手Cのあと最後に塞ぐ**（2026-09-16）
+- **料理で使い切った分も「使い切った」になる**（2026-09-16 に塞いだ）。「作った」で数量が0になった在庫は
+  `outcome: consumed` になり、お金管理の明細にも返る（無駄は0円）。**なかみメモ側（`recordCooking`）と
+  つくりおきノート側（`decrementInventory`）の両方**に入れてある。片方だけ直すと、作ったアプリによって
+  ムダ支出の出方が変わる。`outcome-core.test.mjs` と `cook-stock.test.js` が両方のファイルを見て止める
 
 **C の決めごと（2026-09-16）**
 

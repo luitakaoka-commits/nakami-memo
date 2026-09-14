@@ -10,8 +10,9 @@
 
 import { db, getIdToken } from "./firebase.js";
 import {
-  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, getDocs
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, getDocs, query, where
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { usedUpRows } from "../shared/cook-stock.js";
 
 let uid = null;
 
@@ -156,9 +157,13 @@ export async function decrementInventory(rows, recipeTitle) {
   if (!rows.length) return 0;
   const batch = writeBatch(db);
   const now = new Date();
+  /* 料理で使い切った分は、お金管理の明細にも「使い切った」を返す（2026-09-16）。
+     返さないと、使い切ったのに週1回のふりかえりで何度も聞かれる。使い切ったので無駄は0円。 */
+  const usedUp = new Set(usedUpRows(rows).map((row) => row.itemId));
   rows.forEach((row) => {
     batch.update(doc(col("items"), row.itemId), {
       quantity: Math.max(0, Math.round((row.available - row.use) * 1000) / 1000),
+      ...(usedUp.has(row.itemId) ? { outcome: "consumed", outcomeAt: now.toISOString(), outcomeReason: "" } : {}),
       updatedAt: now
     });
     batch.set(doc(col("consumptions")), {
@@ -171,6 +176,21 @@ export async function decrementInventory(rows, recipeTitle) {
       at: now
     });
   });
+  await Promise.all(usedUpRows(rows).map(async (row) => {
+    if (!row.purchaseWorkspaceId) return; /* レシートから入れた在庫でなければ返す先が無い */
+    const lines = await getDocs(query(
+      collection(db, "workspaces", row.purchaseWorkspaceId, "receiptItems"),
+      where("inventoryItemId", "==", row.itemId)
+    ));
+    lines.forEach((line) => batch.update(line.ref, {
+      outcome: "consumed",
+      outcomeAt: now.toISOString(),
+      outcomeReason: "",
+      wasteAmount: 0,
+      updatedAt: now.toISOString()
+    }));
+  }));
+
   await batch.commit();
   return rows.length;
 }

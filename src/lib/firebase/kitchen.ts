@@ -4,17 +4,20 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getDocs,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
   type DocumentData,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import type { SavedRecipe } from "@/lib/types/recipe";
 import type { Tool, ToolInput } from "@/lib/types/tool";
+import { itemOutcomePatch, receiptLinePatch } from "@/lib/inventory/outcome-core";
 import { remainingQuantity } from "@/lib/recipes/suggest-core";
 import { db } from "./client";
 import { syncPublicByLocationIfNeeded } from "./public-location";
@@ -106,6 +109,8 @@ export type CookedRow = {
   /** 単位が噛み合わないときの注意（「本」の在庫を mL で使う、など）。 */
   note?: string;
   locationId?: string;
+  /** レシートから入れた在庫だけが持つ。使い切ったときに、お金管理の明細へ返す先（2026-09-16）。 */
+  purchaseWorkspaceId?: string;
 };
 
 /**
@@ -116,9 +121,14 @@ export type CookedRow = {
 export async function recordCooking(userId: string, rows: CookedRow[], recipeTitle: string, savedRecipeId?: string | null) {
   const targets = rows.filter((row) => row.use > 0);
   const batch = writeBatch(db);
+  // 料理で使い切った分は「使い切った」として記録し、お金管理の明細にも返す（2026-09-16）。
+  // 返さないと、使い切ったのに週1回のふりかえりで何度も聞かれる。使い切ったので無駄は0円。
+  const consumed = itemOutcomePatch({ kind: "consumed" }, new Date());
   for (const row of targets) {
+    const usedUp = remainingQuantity(row.available, row.use) === 0;
     batch.update(doc(db, "users", userId, "items", row.itemId), {
       quantity: remainingQuantity(row.available, row.use),
+      ...(usedUp ? { outcome: consumed.outcome, outcomeAt: consumed.outcomeAt, outcomeReason: consumed.outcomeReason } : {}),
       updatedAt: serverTimestamp(),
     });
     batch.set(doc(collection(db, "users", userId, "consumptions")), {
@@ -134,6 +144,15 @@ export async function recordCooking(userId: string, rows: CookedRow[], recipeTit
   if (savedRecipeId) {
     batch.update(doc(db, "users", userId, "recipes", savedRecipeId), { lastCookedAt: Date.now() });
   }
+
+  for (const row of targets) {
+    if (!row.purchaseWorkspaceId || remainingQuantity(row.available, row.use) !== 0) continue;
+    const lines = await getDocs(
+      query(collection(db, "workspaces", row.purchaseWorkspaceId, "receiptItems"), where("inventoryItemId", "==", row.itemId)),
+    );
+    lines.forEach((line) => batch.update(line.ref, receiptLinePatch(line.data(), consumed)));
+  }
+
   await batch.commit();
 
   // 公開中の保管場所なら、公開ページの数量も合わせる（失敗しても在庫の更新は済んでいるので、黙って続ける）

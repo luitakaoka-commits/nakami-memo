@@ -34,6 +34,8 @@ export function planFromSourceItems(sourceItems, items) {
         unit: String(item.unit || row.unit || ""),
         available,
         use: Math.min(wanted, available),
+        /* お金管理の明細に「使い切った」を返す先。レシートから入れた在庫だけが持つ（2026-09-16） */
+        purchaseWorkspaceId: String(item.purchaseWorkspaceId || ""),
       };
     });
 }
@@ -41,4 +43,14 @@ export function planFromSourceItems(sourceItems, items) {
 /** 実際に書き込む行だけにする（0は在庫を触らない）。 */
 export function rowsToApply(rows) {
   return (rows || []).filter((row) => Number(row.use) > 0);
+}
+
+/**
+ * 料理で使い切った行（減らしたあとが0になるもの）。
+ *
+ * ここを拾わないと、料理で使い切ったのにお金管理では「まだある」のままになり、
+ * 週1回のふりかえりで何度も聞かれる。使い切ったのだから無駄は0円。
+ */
+export function usedUpRows(rows) {
+  return (rows || []).filter((row) => Number(row.use) > 0 && remainingQuantity(row.available, row.use) === 0);
 }

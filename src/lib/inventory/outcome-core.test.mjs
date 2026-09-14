@@ -126,6 +126,17 @@ t("使う結末と理由が、Firestore のルールで許されている", () =
   eq(DISCARD_REASONS.map(entry => entry.reason).filter(reason => !allowedReasons.includes(reason)), [], "ルールに無い理由を使っている");
 });
 
+t("料理で使い切ったときも「使い切った」として記録し、お金管理へ返している", () => {
+  /* 両方のアプリの「作った」が同じことをするか。片方だけ直すと、
+     つくりおきノートから作ったときだけムダ支出が消えない、という差が出る。 */
+  const kitchen = read("src", "lib", "firebase", "kitchen.ts");
+  ok(kitchen.includes("itemOutcomePatch"), "なかみメモ: 使い切りの印を付けていない");
+  ok(kitchen.includes("receiptLinePatch") && kitchen.includes("inventoryItemId"), "なかみメモ: 明細へ返していない");
+  const store = read("public", "recipe", "store.js");
+  ok(store.includes("usedUpRows"), "つくりおきノート: 使い切りを拾っていない");
+  ok(store.includes("inventoryItemId"), "つくりおきノート: 明細へ返していない");
+});
+
 t("「使い切った／捨てた」を出すカテゴリが、なかみメモのカテゴリ一覧にある", () => {
   const source = read("src", "lib", "types", "item.ts");
   const options = source.slice(source.indexOf("CATEGORY_OPTIONS"), source.indexOf("EXPIRATION_TYPE_OPTIONS"));

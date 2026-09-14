@@ -2,7 +2,7 @@
 /* つくりおきノートの「作った」で、なかみメモの在庫をどれだけ減らすかの確認。
  * 実行: node tests/cook-stock.test.js
  */
-import { planFromSourceItems, remainingQuantity, rowsToApply } from "../../shared/cook-stock.js";
+import { planFromSourceItems, remainingQuantity, rowsToApply, usedUpRows } from "../../shared/cook-stock.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -69,6 +69,22 @@ same("結びつきが無いレシピでは何も出ない", [], planFromSourceIt
 same("在庫が読めていないときも落ちない", [], planFromSourceItems(SOURCE, []));
 
 same("実際に減らすのは1以上の行だけ", ["egg", "milk"], rowsToApply(rows).map((row) => row.itemId));
+
+/* 料理で使い切った分（2026-09-16）。ここを拾わないと、使い切ったのに
+   お金管理では「まだある」のままになり、ふりかえりで何度も聞かれる。 */
+same("使い切った行だけを拾う（牛乳300mLを全部使った）", ["milk"], usedUpRows(rows).map((row) => row.itemId));
+same("まだ残る行は拾わない", false, usedUpRows(rows).some((row) => row.itemId === "egg"));
+same("もともと0の行は拾わない（減らしていないので使い切ってもいない）", false, usedUpRows(rows).some((row) => row.itemId === "bread"));
+same("お金管理へ返す先を行に持たせる", "ws-1",
+  planFromSourceItems([{ itemId: "egg", name: "卵", unit: "個", use: 1 }],
+    [{ id: "egg", name: "卵", quantity: 10, unit: "個", purchaseWorkspaceId: "ws-1" }])[0].purchaseWorkspaceId);
+same("レシートから来ていない在庫は空のまま", "", rows[0].purchaseWorkspaceId);
+
+/* 使い切りをどう書き込むかは store.js 側。使い忘れるとテストだけ通って本番で反映されない。 */
+const STORE_SOURCE = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "store.js"), "utf8");
+same("store.js が使い切りを拾っている", true, STORE_SOURCE.includes("usedUpRows"));
+same("store.js が在庫に「使い切った」を書いている", true, /outcome: "consumed"/.test(STORE_SOURCE));
+same("store.js がお金管理の明細にも返している", true, STORE_SOURCE.includes('"receiptItems"') && STORE_SOURCE.includes("inventoryItemId"));
 same("減らしたあとの数量", [9, 0, 0.9, 5], [
   remainingQuantity(10, 1),
   remainingQuantity(300, 500),

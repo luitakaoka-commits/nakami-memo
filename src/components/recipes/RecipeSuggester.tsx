@@ -338,7 +338,12 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
   const byId = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const [rows, setRows] = useState<CookedRow[]>(() =>
     defaultConsumption(recipe, items.map((item) => ({ id: item.id, name: item.name, quantity: item.quantity, unit: item.unit ?? "", category: item.category ?? "" })))
-      .map((row) => ({ ...row, locationId: byId.get(row.itemId)?.locationId })),
+      .map((row) => ({
+        ...row,
+        locationId: byId.get(row.itemId)?.locationId,
+        // 使い切ったときに、お金管理の明細へ返す先（レシートから入れた在庫だけが持つ）
+        purchaseWorkspaceId: byId.get(row.itemId)?.purchaseWorkspaceId,
+      })),
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
