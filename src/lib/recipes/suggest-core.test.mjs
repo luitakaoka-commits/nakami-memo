@@ -2,9 +2,9 @@
  * 実行: node --experimental-strip-types src/lib/recipes/suggest-core.test.mjs（npm test から呼ばれる）
  */
 import {
-  buildPrompt, createThrottle, defaultConsumption, defaultMustUseIds, documentsToObjects, normalizeOptions,
-  normalizeTools, parseAmount, pickPantry, remainingQuantity, responseSchema, sanitizeSuggestions, toTsukuriokiRecipe,
-  RECIPE_CATEGORIES,
+  amountInStockUnit, buildPrompt, canonicalUnit, convertAmount, createThrottle, defaultConsumption, defaultMustUseIds,
+  documentsToObjects, isCountUnit, normalizeOptions, normalizeTools, parseAmount, pickPantry, remainingQuantity,
+  responseSchema, sanitizeSuggestions, toTsukuriokiRecipe, RECIPE_CATEGORIES,
 } from "./suggest-core.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -188,6 +188,69 @@ t("「作った」ときに減らす量の初期値: 同じ単位はその量、
   const use = Object.fromEntries(rows.map((r) => [r.itemId, r.use]));
   eq(use, { egg: 2, soy: 0, rice: 300, moyashi: 1, milk: 1 }, "減らす量");
   eq([remainingQuantity(2, 3), remainingQuantity(1.1, 0.2), remainingQuantity(5, -1)], [0, 0.9, 5], "減らしたあと");
+});
+
+/* ---------- 単位（2026-09-15 追加。牛乳を mL で管理したい、というユーザーの指摘） ---------- */
+
+t("単位の表記ゆれをそろえる（cc・全角・大文字小文字）", () => {
+  eq([canonicalUnit("ml"), canonicalUnit("cc"), canonicalUnit("ｍｌ"), canonicalUnit("L"), canonicalUnit("キロ"), canonicalUnit("袋")],
+    ["mL", "mL", "mL", "L", "kg", "袋"], "そろえた単位");
+  eq([isCountUnit("本"), isCountUnit("パック"), isCountUnit("mL"), isCountUnit("g")], [true, true, false, false], "数える単位か");
+});
+
+t("量の単位どうしは換算する。種類が違うもの（本 ↔ mL）は換算しない", () => {
+  eq([convertAmount(200, "mL", "mL"), convertAmount(200, "mL", "L"), convertAmount(0.5, "L", "cc"), convertAmount(300, "g", "kg"), convertAmount(1.2, "kg", "g")],
+    [200, 0.2, 500, 0.3, 1200], "換算");
+  eq([convertAmount(200, "mL", "g"), convertAmount(1, "本", "mL"), convertAmount(1, "mL", "本")], [null, null, null], "換算できない組み合わせ");
+  eq([amountInStockUnit("200", "mL", "L"), amountInStockUnit("少々", "", "g"), amountInStockUnit("1/2", "L", "mL")], [0.2, null, 500], "レシピの量を在庫の単位で");
+});
+
+const drinkPantry = [
+  { id: "milk-ml", name: "牛乳(mL管理)", quantity: 1000, unit: "mL", category: "飲料" },
+  { id: "milk-bottle", name: "牛乳(本管理)", quantity: 1, unit: "本", category: "飲料" },
+  { id: "flour", name: "小麦粉", quantity: 1, unit: "kg", category: "食品" },
+  { id: "cabbage", name: "キャベツ", quantity: 1, unit: "玉", category: "食品" },
+];
+
+t("mL で管理している牛乳は、使った分だけ減る", () => {
+  const rows = defaultConsumption({ ingredients: [{ name: "牛乳", amount: "200", unit: "mL", itemId: "milk-ml", inStock: true }], usesItemIds: [] }, drinkPantry);
+  eq(rows[0].use, 200, "200mL");
+  eq(remainingQuantity(1000, rows[0].use), 800, "残り");
+});
+
+t("単位が違っても同じ種類なら換算する（在庫 kg・レシピ g）", () => {
+  const rows = defaultConsumption({ ingredients: [{ name: "小麦粉", amount: "300", unit: "g", itemId: "flour", inStock: true }], usesItemIds: [] }, drinkPantry);
+  eq(rows[0].use, 0.3, "0.3kg");
+});
+
+t("「1本」の牛乳を mL で使うときは、勝手に1本減らさず、本人に入れてもらう", () => {
+  const rows = defaultConsumption({ ingredients: [{ name: "牛乳", amount: "200", unit: "mL", itemId: "milk-bottle", inStock: true }], usesItemIds: [] }, drinkPantry);
+  eq(rows[0].use, 0, "既定では減らさない");
+  ok(rows[0].note.includes("200mL") && rows[0].note.includes("本"), `注意書き: ${rows[0].note}`);
+});
+
+t("「1玉」のキャベツを g で使うときは1玉使い切る扱い（食品は使い切るのがふつう）", () => {
+  const rows = defaultConsumption({ ingredients: [{ name: "キャベツ", amount: "200", unit: "g", itemId: "cabbage", inStock: true }], usesItemIds: [] }, drinkPantry);
+  eq(rows[0].use, 1, "1玉");
+  ok(rows[0].note, "注意書きは出す");
+});
+
+t("在庫超過の注意も単位を換算してから出す", () => {
+  const stock = [
+    { id: "milk-ml", name: "牛乳", quantity: 500, unit: "mL", category: "飲料", expiresInDays: 5 },
+  ];
+  const opts = normalizeOptions({}, stock);
+  const raw = { recipes: [{
+    title: "ミルクスープ", category: "汁物", servings: 2, estMinutes: 10,
+    ingredients: [{ name: "牛乳", amount: "1", unit: "L", itemId: "milk-ml", inStock: true }],
+    shoppingNeeded: [], steps: ["煮る"], toolIds: [], usesItemIds: ["milk-ml"],
+  }] };
+  const warnings = sanitizeSuggestions(raw, stock, [], opts).recipes[0].warnings;
+  ok(warnings.some((w) => w.includes("牛乳を1L使いますが、在庫は500mLです")), `注意: ${warnings}`);
+});
+
+t("AIへの指示に「在庫と同じ単位で書く」が入っている", () => {
+  ok(buildPrompt(pantry, tools, options).includes("量は在庫と同じ単位で書く"), "単位の指示");
 });
 
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);

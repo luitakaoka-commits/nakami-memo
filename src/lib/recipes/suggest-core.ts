@@ -218,6 +218,8 @@ export function buildPrompt(pantry: PantryItem[], tools: KitchenTool[], options:
     "- 必ず使う食材は、どれかのレシピで必ず使う。各レシピは必ず使う食材を1つ以上含める（指定がある場合）。",
     "- 使える調理器具に無い器具（オーブンなど）が要る料理は出さない。使う器具の id を toolIds に入れる。",
     "- 在庫の量を超えて使わない。卵が2個しかなければ3個以上使わない。",
+    "- 量は在庫と同じ単位で書く。在庫が mL なら mL、g なら g。在庫が「本」「パック」のように数える単位のときだけ、",
+    "  その中身の量（mL や g）で書いてよい。",
     "- 在庫から使う材料は、itemId にその食材の id を書き、inStock を true にする。",
     "- 在庫に無い材料は itemId を空文字、inStock を false にし、shoppingNeeded にも名前を入れる。",
     "- 調味料は在庫にあるものを優先する。水・塩・こしょう・砂糖・醤油・サラダ油は在庫に無くても家にあるものとして inStock を true、itemId は空文字にしてよい。",
@@ -281,6 +283,58 @@ export function parseAmount(amount: string): number | null {
   return /^\d+(\.\d+)?$/.test(value) ? Number(value) : null;
 }
 
+/* ---------- 単位 ----------
+ * 牛乳を「1000mL」で登録している人と「1本」で登録している人がいる。
+ * 量の単位（mL・g）どうしは換算できるが、「本」「パック」の中身が何mLかは分からない。
+ * だから次の2つに分けて扱う。
+ *   量の単位 … mL・L・g・kg。換算して、使った分だけ正確に減らす
+ *   数える単位 … 本・パック・袋など。何個減ったかでしか数えられない
+ */
+
+/** 表記ゆれをそろえる。cc は mL、大文字小文字・全角も同じ扱い。 */
+export function canonicalUnit(unit: string): string {
+  const value = unit.trim().replace(/[Ａ-Ｚａ-ｚ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)).toLowerCase();
+  if (["ml", "cc", "ミリリットル", "㎖", "cc.", "ｍｌ"].includes(value)) return "mL";
+  if (["l", "リットル", "ℓ", "㍑"].includes(value)) return "L";
+  if (["g", "グラム", "ｇ"].includes(value)) return "g";
+  if (["kg", "キロ", "キログラム", "㎏"].includes(value)) return "kg";
+  return unit.trim();
+}
+
+/** 同じ種類の単位どうしの換算。1mL あたり何 L か、のように「1 の何倍か」で持つ。 */
+const UNIT_SCALE: Record<string, { dimension: string; scale: number }> = {
+  mL: { dimension: "volume", scale: 1 },
+  L: { dimension: "volume", scale: 1000 },
+  g: { dimension: "weight", scale: 1 },
+  kg: { dimension: "weight", scale: 1000 },
+};
+
+/** 数えるための単位（1つ2つと数えるもの）。中身の量は分からない。 */
+const COUNT_UNITS = ["個", "本", "枚", "袋", "パック", "玉", "束", "丁", "切れ", "尾", "缶", "箱", "ロール", "食", "セット", "冊"];
+
+export function isCountUnit(unit: string): boolean {
+  return COUNT_UNITS.includes(unit.trim());
+}
+
+/**
+ * amount を fromUnit から toUnit へ換算する。できないときは null。
+ * mL ↔ L、g ↔ kg のように、同じ種類の単位のときだけ換算する（本 → mL はできない）。
+ */
+export function convertAmount(amount: number, fromUnit: string, toUnit: string): number | null {
+  const from = UNIT_SCALE[canonicalUnit(fromUnit)];
+  const to = UNIT_SCALE[canonicalUnit(toUnit)];
+  if (canonicalUnit(fromUnit) === canonicalUnit(toUnit)) return amount;
+  if (!from || !to || from.dimension !== to.dimension) return null;
+  return Math.round((amount * from.scale) / to.scale * 1000) / 1000;
+}
+
+/** レシピの「200 mL」を、在庫の単位で数えるといくつになるか。換算できなければ null。 */
+export function amountInStockUnit(ingredientAmount: string, ingredientUnit: string, stockUnit: string): number | null {
+  const amount = parseAmount(ingredientAmount);
+  if (amount === null) return null;
+  return convertAmount(amount, ingredientUnit, stockUnit);
+}
+
 export function sanitizeSuggestions(raw: unknown, pantry: PantryItem[], tools: KitchenTool[], options: SuggestOptions): SuggestResult {
   const byId = new Map(pantry.map((item) => [item.id, item]));
   const byName = new Map(pantry.map((item) => [item.name, item]));
@@ -314,9 +368,10 @@ export function sanitizeSuggestions(raw: unknown, pantry: PantryItem[], tools: K
     for (const ing of ingredients) {
       if (!ing.itemId) continue;
       const stock = byId.get(ing.itemId)!;
-      const amount = parseAmount(ing.amount);
-      if (amount !== null && stock.unit && ing.unit === stock.unit && amount > stock.quantity) {
-        warnings.push(`${stock.name}を${amount}${stock.unit}使いますが、在庫は${stock.quantity}${stock.unit}です`);
+      // mL ↔ L のような単位違いも換算して比べる。「本」と「mL」のように比べようがないときは何も言わない
+      const needed = stock.unit ? amountInStockUnit(ing.amount, ing.unit, stock.unit) : null;
+      if (needed !== null && needed > stock.quantity) {
+        warnings.push(`${stock.name}を${ing.amount}${ing.unit}使いますが、在庫は${stock.quantity}${stock.unit}です`);
       }
       if (stock.expiresInDays !== null && stock.expiresInDays < 0) {
         warnings.push(`${stock.name}は期限が切れています。状態を確かめてから使ってください`);
@@ -453,29 +508,35 @@ export function toTsukuriokiRecipe(recipe: RecipeSuggestion, toolNames: string[]
   };
 }
 
-/** 数え方が「1つ2つ」になる単位。量が書いてなくても1つ減らすのが自然なもの。 */
-const COUNT_UNITS = ["個", "本", "枚", "袋", "パック", "玉", "束", "丁", "切れ", "尾", "缶"];
-
 /**
  * 「作った」ときに、それぞれの在庫をどれだけ減らすかの初期値。画面で本人が直せる。
- * - 単位が同じで量が数字 → その量
- * - 調味料 → 減らさない（大さじ1で1本減ると困る）
- * - 数え方の単位 → 1
- * - それ以外（g で書かれた肉が「パック」で在庫にある等）→ 1
+ *
+ * - 量の単位どうし（mL と L、g と kg）は換算してその量。牛乳1000mLから200mL使えば800mL残る
+ * - 調味料は減らさない（大さじ1で1本消えると困る）
+ * - 数える単位どうし（個・本・袋…）は書かれた数
+ * - **数える単位の在庫を、量で使うとき**（牛乳「1本」に対して「200mL」など）は中身の量が分からない。
+ *   飲料は途中まで使うのがふつうなので 0 にして本人に任せ、食品（もやし1袋を200g など）は
+ *   1つ使い切る形にする。どちらも画面で直せる
  * どれも在庫の数量を超えない。
  */
 export function defaultConsumption(recipe: RecipeSuggestion, pantry: Array<Pick<PantryItem, "id" | "name" | "quantity" | "unit" | "category">>) {
   const byId = new Map(pantry.map((item) => [item.id, item]));
   const totals = new Map<string, number>();
+  const notes = new Map<string, string>();
   for (const ing of recipe.ingredients) {
     if (!ing.itemId || !byId.has(ing.itemId)) continue;
     const item = byId.get(ing.itemId)!;
+    const converted = item.unit ? amountInStockUnit(ing.amount, ing.unit, item.unit) : null;
     const amount = parseAmount(ing.amount);
     let use: number;
-    if (amount !== null && item.unit && ing.unit === item.unit) use = amount;
+    if (converted !== null) use = converted;
     else if (item.category === "調味料") use = 0;
-    else if (COUNT_UNITS.includes(item.unit) && amount !== null && (ing.unit === "" || COUNT_UNITS.includes(ing.unit))) use = amount;
-    else use = 1;
+    else if (isCountUnit(item.unit) && amount !== null && (ing.unit === "" || isCountUnit(ing.unit))) use = amount;
+    else if (isCountUnit(item.unit)) {
+      // 「1本」に対する「200mL」。中身の量が分からないので、飲み物は本人に任せる
+      use = item.category === "飲料" ? 0 : 1;
+      notes.set(item.id, `レシピは${ing.amount}${ing.unit}。在庫は「${item.unit}」単位なので、使った分を入れてください`);
+    } else use = 1;
     totals.set(item.id, (totals.get(item.id) ?? 0) + use);
   }
   for (const id of recipe.usesItemIds) {
@@ -483,7 +544,14 @@ export function defaultConsumption(recipe: RecipeSuggestion, pantry: Array<Pick<
   }
   return [...totals.entries()].map(([id, use]) => {
     const item = byId.get(id)!;
-    return { itemId: id, name: item.name, unit: item.unit, available: item.quantity, use: Math.max(0, Math.min(use, item.quantity)) };
+    return {
+      itemId: id,
+      name: item.name,
+      unit: item.unit,
+      available: item.quantity,
+      use: Math.max(0, Math.min(use, item.quantity)),
+      note: notes.get(id) ?? "",
+    };
   });
 }
 

@@ -77,6 +77,8 @@ export type CookedRow = {
   available: number;
   /** 減らす量。0 の行は触らない。 */
   use: number;
+  /** 単位が噛み合わないときの注意（「本」の在庫を mL で使う、など）。 */
+  note?: string;
   locationId?: string;
 };
 

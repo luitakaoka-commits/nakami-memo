@@ -96,6 +96,7 @@ export function RecipeSuggester() {
         <Link href="/app/tools" className="ui-button ui-button--secondary"><CookingPot size={16} />調理器具 {tools.length}件</Link>
       </div>
       <p className="ui-muted">期限が近い食材を必ず使うレシピを、AIが3つ考えます。登録した調理器具で作れるものだけを出します。</p>
+      <p className="ui-muted">牛乳や小麦粉のように少しずつ使うものは、在庫の単位を <strong>mL</strong> や <strong>g</strong> にしておくと、「作った」で使った分だけ正確に減らせます（「1本」のままだと、減らす量を自分で入れることになります）。</p>
 
       {pantry.length === 0 ? (
         <EmptyState title="使える食材がありません。カテゴリを「食品」「飲料」「調味料」にした在庫を登録してください" actionLabel="在庫を追加" href="/app/items/new" />
@@ -274,7 +275,10 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
           <div className="ui-list mt-4">
             {rows.map((row, index) => (
               <label key={row.itemId} className="flex items-center justify-between gap-3">
-                <span>{row.name}<span className="ui-muted">（在庫 {row.available}{row.unit}）</span></span>
+                <span>
+                  {row.name}<span className="ui-muted">（在庫 {row.available}{row.unit}）</span>
+                  {row.note && <span className="ui-muted block text-xs">{row.note}</span>}
+                </span>
                 <span className="flex items-center gap-1">
                   <input
                     type="number" min={0} max={row.available} step="any" inputMode="decimal" className="w-20"

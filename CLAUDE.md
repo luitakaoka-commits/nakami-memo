@@ -22,7 +22,7 @@ npm test
 #       183件 → 2026-09-10 時点（名寄せ修正 + GAS取込のテスト）
 #       158件 → GAS取込のテストが無い
 #       155件 → 名寄せの修正も無い。古いコミットを見ている
-# recipe 16件 / app-switcher 26件 / install 10件 / rules 7件 / migrate 7件 / recipes 14件 も同じコマンドで走る
+# recipe 16件 / app-switcher 26件 / install 10件 / rules 7件 / migrate 7件 / recipes 22件 も同じコマンドで走る
 # 「Cannot find package 'jsdom'」と出たら npm install が済んでいない
 ```
 
@@ -167,7 +167,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 14
+npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 22
 npm run test:ui          # お金管理のブラウザ実測 27項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -332,7 +332,7 @@ APIキーが無くても動きます。その場合は Drive OCR だけになり
 
 | 場所 | 中身 |
 |---|---|
-| `src/lib/recipes/suggest-core.ts` | ネットワークを使わない部分すべて（在庫の絞り込み・AIへの指示・返答の突き合わせ・保存形・減らす量の初期値）。テスト14件 |
+| `src/lib/recipes/suggest-core.ts` | ネットワークを使わない部分すべて（在庫の絞り込み・AIへの指示・返答の突き合わせ・単位の換算・保存形・減らす量の初期値）。テスト22件 |
 | `src/app/api/recipes/suggest/route.ts` | ID トークン確認 → 在庫と器具を Firestore REST で本人の権限で読む → Gemini → 突き合わせ |
 | `src/components/recipes/RecipeSuggester.tsx` | `/app/recipes`。条件・必ず使う食材（期限3日以内に最初から印）→ 3案 → つくりおきノートに保存／作った |
 | `src/components/recipes/ToolManager.tsx` | `/app/tools`。調理器具。0件なら「コンロ・鍋・フライパン・電子レンジ」前提 |
