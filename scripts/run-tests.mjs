@@ -23,6 +23,7 @@ const SUITES = [
   { name: "money", cwd: path.join(ROOT, "public", "money"), file: "tests/run.js" },
   { name: "recipe", cwd: path.join(ROOT, "public", "recipe"), file: "tests/row-template.test.js" },
   { name: "recipe-stock", cwd: path.join(ROOT, "public", "recipe"), file: "tests/cook-stock.test.js" },
+  { name: "recipe-pantry", cwd: path.join(ROOT, "public", "recipe"), file: "tests/pantry-check.test.js" },
   { name: "app-switcher", cwd: SHARED_DIR, file: "switcher.test.mjs", env: { SHARED_DIR } },
   { name: "install", cwd: SHARED_DIR, file: "install.test.mjs" },
   { name: "rules", cwd: SHARED_DIR, file: "rules.test.mjs" },

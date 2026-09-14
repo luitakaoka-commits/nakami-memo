@@ -9,6 +9,7 @@ import {
   readInventory, decrementInventory
 } from "./store.js";
 import { planFromSourceItems, rowsToApply } from "../shared/cook-stock.js";
+import { markPantryHits, pantryHitCount } from "../shared/pantry-check.js";
 
 const PREFS_KEY = "tsukurioki-note-prefs-v1";
 const LEGACY_KEY = "tsukurioki-note-state-v1";
@@ -465,7 +466,10 @@ function shoppingRow(item) {
     modifier: "row--check",
     lead: '<input type="checkbox" data-action="toggle-shopping" data-id="' + esc(item.id) + '" ' + (item.done ? "checked" : "") + ' />',
     title: esc(item.name),
-    meta: item.recipeTitle ? esc(item.recipeTitle) : "",
+    /* 家にまだあるものは、どのレシピの材料かより先に伝える（買う前に気づけるように） */
+    meta: item.pantryNote
+      ? '<em class="row__pantry">' + esc(item.pantryNote) + "</em>" + (item.recipeTitle ? " ／ " + esc(item.recipeTitle) : "")
+      : (item.recipeTitle ? esc(item.recipeTitle) : ""),
     trailing: '<button type="button" class="line__remove" data-action="remove-shopping" data-id="' + esc(item.id) + '" aria-label="削除">' + ICONS.close + "</button>"
   });
 }
@@ -623,14 +627,45 @@ function renderRecipeSelect() {
 
 /* ---------- 買い物リスト ---------- */
 
+/* 買い物前チェック（2026-09-16）。
+ * 買い物リストに「牛乳」と書いてあっても冷蔵庫にまだあるなら、買えば二重買いになり、
+ * 使い切れずに捨てることになる。リストの行に「家にまだあります」とだけ出す。消しも減らしもしない。
+ * 品名の突き合わせはお金管理の normalizeItemName をそのまま借りる（同じ表記ゆれの吸収を2か所に書かないため）。
+ * finance-engine.js は 80KB あるので、買い物リストを開いたときに1回だけ読む。 */
+let pantry = { items: null, normalize: null, loading: false, failed: false };
+
+function ensurePantry() {
+  if (pantry.items || pantry.loading || pantry.failed) return;
+  pantry.loading = true;
+  (async () => {
+    try {
+      if (!window.FinanceEngine) await import("../money/finance-engine.js");
+      const items = await readInventory();
+      pantry.normalize = (name) => window.FinanceEngine.normalizeItemName(name);
+      pantry.items = items;
+    } catch (error) {
+      /* 在庫が読めなくても買い物リストは使える。黙って印だけ出さない。 */
+      pantry.failed = true;
+    } finally {
+      pantry.loading = false;
+      if (state.screen === "shopping") render();
+    }
+  })();
+}
+
 function renderShopping() {
+  ensurePantry();
   if (!state.shopping.length) {
     return "<section>" + emptyBox("買い物リストは空です", "レシピの材料をまとめて入れるか、思いついたものを直接書き足せます。", '<button class="btn btn--primary" data-action="open-shopping-add">レシピの材料を入れる</button>') + shoppingInput() + "</section>";
   }
-  const todo = state.shopping.filter((item) => !item.done);
-  const done = state.shopping.filter((item) => item.done);
+  const marked = pantry.items && pantry.normalize
+    ? markPantryHits(state.shopping, pantry.items, pantry.normalize)
+    : state.shopping;
+  const todo = marked.filter((item) => !item.done);
+  const done = marked.filter((item) => item.done);
+  const athome = pantryHitCount(marked);
   return "<section>" +
-    '<div class="list-head"><span>未購入 ' + todo.length + '件</span><button class="link-btn" data-action="open-shopping-add">＋ レシピから入れる</button></div>' +
+    '<div class="list-head"><span>未購入 ' + todo.length + '件' + (athome ? '<em class="list-head__hint">' + athome + "件は家にあります</em>" : "") + '</span><button class="link-btn" data-action="open-shopping-add">＋ レシピから入れる</button></div>' +
     (todo.length ? '<div class="row-list">' + todo.map(shoppingRow).join("") + "</div>" : '<p class="note note--center">未購入のものはありません。</p>') +
     (done.length ? '<div class="list-head list-head--sub"><span>購入済み ' + done.length + '件</span><button class="link-btn" data-action="clear-done">まとめて消す</button></div><div class="row-list row-list--done">' + done.map(shoppingRow).join("") + "</div>" : "") +
     shoppingInput() + "</section>";

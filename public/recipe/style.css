@@ -57,6 +57,7 @@ body.has-action-bar #main-content { padding-bottom: 108px; }
 
 .list-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0 2px 8px; color: var(--muted); font-size: 13px; }
 .list-head--sub { padding-top: 22px; }
+.list-head__hint { margin-left: 8px; color: var(--accent-deep); font-style: normal; font-weight: 700; }
 .link-btn { padding: 4px 0; color: var(--accent-deep); font-size: 13px; font-weight: 700; }
 .link-btn:hover { text-decoration: underline; }
 .link-btn--add { display: block; margin-top: 10px; }
@@ -71,6 +72,8 @@ body.has-action-bar #main-content { padding-bottom: 108px; }
 .row__title { overflow-wrap: anywhere; font-weight: 700; line-height: 1.4; }
 .row__meta { color: var(--muted); font-size: 12px; }
 .row__sub { color: var(--faint); font-size: 11px; }
+/* 買い物前チェック。買う前に気づいてほしいので、ほかのメモより目立たせる（2026-09-16） */
+.row__pantry { color: var(--accent-deep); font-style: normal; font-weight: 700; }
 .row__go { flex: 0 0 auto; color: var(--line-strong); }
 .row__go svg { display: block; width: 18px; height: 18px; }
 .row__check { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: transparent; }
