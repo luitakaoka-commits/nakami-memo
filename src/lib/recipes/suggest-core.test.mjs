@@ -5,6 +5,7 @@ import {
   amountInStockUnit, buildPrompt, canonicalUnit, convertAmount, createThrottle, defaultConsumption, defaultMustUseIds,
   documentsToObjects, isCountUnit, normalizeOptions, normalizeTools, parseAmount, pickPantry, remainingQuantity,
   responseSchema, sanitizeSuggestions, toTsukuriokiRecipe, RECIPE_CATEGORIES,
+  clearCachedSuggestions, readCachedSuggestions, relativeTimeLabel, writeCachedSuggestions, SUGGESTION_CACHE_KEY,
 } from "./suggest-core.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -251,6 +252,55 @@ t("在庫超過の注意も単位を換算してから出す", () => {
 
 t("AIへの指示に「在庫と同じ単位で書く」が入っている", () => {
   ok(buildPrompt(pantry, tools, options).includes("量は在庫と同じ単位で書く"), "単位の指示");
+});
+
+/* ---------- 出したばかりの提案をとっておく（2026-09-15 ユーザー報告：画面を移ると消える） ---------- */
+
+function fakeStorage(initial) {
+  const map = new Map(Object.entries(initial ?? {}));
+  return {
+    map,
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => map.set(key, value),
+    removeItem: (key) => map.delete(key),
+  };
+}
+
+const sample = { recipes: [{ title: "もやし炒め", steps: ["炒める"], ingredients: [], usesItemIds: [], warnings: [], shoppingNeeded: [], toolIds: [], category: "主菜", servings: 2, estMinutes: 10 }], uncoveredMustUse: [] };
+
+t("提案をとっておいて、同じ人なら読み戻せる", () => {
+  const storage = fakeStorage();
+  writeCachedSuggestions(storage, "u1", sample, NOW);
+  const cached = readCachedSuggestions(storage, "u1", NOW + 60000);
+  eq(cached.result.recipes[0].title, "もやし炒め", "読み戻し");
+  eq(cached.savedAt, NOW, "保存した時刻");
+});
+
+t("別の人・1日以上前・壊れた中身は読み戻さない", () => {
+  const storage = fakeStorage();
+  writeCachedSuggestions(storage, "u1", sample, NOW);
+  eq(readCachedSuggestions(storage, "u2", NOW), null, "別の人");
+  eq(readCachedSuggestions(storage, "u1", NOW + 24 * 60 * 60 * 1000 + 1), null, "1日たった");
+  eq(readCachedSuggestions(fakeStorage({ [SUGGESTION_CACHE_KEY]: "{壊れた" }), "u1", NOW), null, "壊れたJSON");
+  eq(readCachedSuggestions(fakeStorage({ [SUGGESTION_CACHE_KEY]: '{"uid":"u1","savedAt":1,"result":{"recipes":[]}}' }), "u1", NOW), null, "中身が空");
+  eq(readCachedSuggestions(fakeStorage(), "u1", NOW), null, "何も無い");
+});
+
+t("提案は消せる。localStorage が使えなくても落ちない", () => {
+  const storage = fakeStorage();
+  writeCachedSuggestions(storage, "u1", sample, NOW);
+  clearCachedSuggestions(storage);
+  eq(readCachedSuggestions(storage, "u1", NOW), null, "消えている");
+  const broken = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); }, removeItem() { throw new Error("blocked"); } };
+  writeCachedSuggestions(broken, "u1", sample, NOW);
+  clearCachedSuggestions(broken);
+  eq(readCachedSuggestions(broken, "u1", NOW), null, "読めない");
+});
+
+t("いつの提案かを日本語で出す", () => {
+  const minute = 60000;
+  eq([relativeTimeLabel(NOW, NOW), relativeTimeLabel(NOW - 5 * minute, NOW), relativeTimeLabel(NOW - 90 * minute, NOW), relativeTimeLabel(NOW - 50 * 60 * minute, NOW)],
+    ["たった今", "5分前", "1時間前", "2日前"], "表示");
 });
 
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);

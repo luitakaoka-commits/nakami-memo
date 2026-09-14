@@ -13,6 +13,7 @@ import {
   type DocumentData,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
+import type { SavedRecipe } from "@/lib/types/recipe";
 import type { Tool, ToolInput } from "@/lib/types/tool";
 import { remainingQuantity } from "@/lib/recipes/suggest-core";
 import { db } from "./client";
@@ -60,6 +61,31 @@ export async function updateTool(userId: string, toolId: string, input: ToolInpu
 
 export async function deleteTool(userId: string, toolId: string) {
   await deleteDoc(doc(toolsCollection(userId), toolId));
+}
+
+/* ---------- つくりおきノートに保存したレシピ（なかみメモからは履歴として見る） ---------- */
+
+export const savedRecipesCollection = (userId: string) => collection(db, "users", userId, "recipes");
+export const savedRecipesQuery = (userId: string) => query(savedRecipesCollection(userId), orderBy("createdAt", "desc"));
+
+export function snapToSavedRecipe(snapshot: QueryDocumentSnapshot<DocumentData>): SavedRecipe {
+  const data = snapshot.data();
+  return {
+    id: snapshot.id,
+    title: String(data.title ?? "無題のレシピ"),
+    category: String(data.category ?? "その他"),
+    servings: Number(data.servings) || 0,
+    ingredients: Array.isArray(data.ingredients) ? data.ingredients.map(String) : [],
+    steps: Array.isArray(data.steps) ? data.steps.map(String) : [],
+    memo: String(data.memo ?? ""),
+    source: String(data.source ?? ""),
+    createdAt: Number(data.createdAt) || 0,
+    lastCookedAt: Number(data.lastCookedAt) || 0,
+  };
+}
+
+export async function deleteSavedRecipe(userId: string, recipeId: string) {
+  await deleteDoc(doc(savedRecipesCollection(userId), recipeId));
 }
 
 /** つくりおきノートにレシピを1件保存し、そのIDを返す。形は suggest-core の toTsukuriokiRecipe で作る。 */

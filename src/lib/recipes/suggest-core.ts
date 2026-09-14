@@ -453,6 +453,74 @@ export function documentsToObjects(documents: Array<{ name?: string; fields?: Re
     });
 }
 
+/* ---------- 出したばかりの提案を、画面を移っても残す ---------- */
+
+/**
+ * AI の提案は、アプリを切り替えたり別の画面へ行ったりすると消えてしまう（ユーザー報告 2026-09-15）。
+ * 提案そのものは一時的なもの・いつでも消せるもの、という前提のまま、端末にだけ短い間とっておく。
+ * Firestore には保存しない（保存したいレシピは、本人がつくりおきノートに保存する）。
+ */
+export const SUGGESTION_CACHE_KEY = "nakami-recipe-suggestions";
+
+/** とっておく時間。1日たった提案は在庫も期限も変わっているので出さない。 */
+export const SUGGESTION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+type MiniStorage = {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+  removeItem: (key: string) => void;
+};
+
+export type CachedSuggestions = { uid: string; savedAt: number; result: SuggestResult };
+
+export function writeCachedSuggestions(storage: MiniStorage, uid: string, result: SuggestResult, nowMs: number): void {
+  try {
+    storage.setItem(SUGGESTION_CACHE_KEY, JSON.stringify({ uid, savedAt: nowMs, result } satisfies CachedSuggestions));
+  } catch {
+    /* 提案は消えても困らないので、保存できなくても黙って続ける */
+  }
+}
+
+/** とっておいた提案。別の人のもの・古いもの・壊れているものは返さない。 */
+export function readCachedSuggestions(storage: MiniStorage, uid: string, nowMs: number): CachedSuggestions | null {
+  let parsed: unknown;
+  try {
+    const raw = storage.getItem(SUGGESTION_CACHE_KEY);
+    if (!raw) return null;
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const cached = parsed as Partial<CachedSuggestions>;
+  const recipes = cached.result?.recipes;
+  if (cached.uid !== uid || typeof cached.savedAt !== "number" || !Array.isArray(recipes) || !recipes.length) return null;
+  if (nowMs - cached.savedAt > SUGGESTION_MAX_AGE_MS) return null;
+  return {
+    uid,
+    savedAt: cached.savedAt,
+    result: { recipes, uncoveredMustUse: Array.isArray(cached.result?.uncoveredMustUse) ? cached.result.uncoveredMustUse : [] },
+  };
+}
+
+export function clearCachedSuggestions(storage: MiniStorage): void {
+  try {
+    storage.removeItem(SUGGESTION_CACHE_KEY);
+  } catch {
+    /* 消せなくても、次の提案で上書きされる */
+  }
+}
+
+/** 「3分前」「2時間前」のような表示。 */
+export function relativeTimeLabel(savedAt: number, nowMs: number): string {
+  const minutes = Math.max(0, Math.floor((nowMs - savedAt) / 60000));
+  if (minutes < 1) return "たった今";
+  if (minutes < 60) return `${minutes}分前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}時間前`;
+  return `${Math.floor(hours / 24)}日前`;
+}
+
 /* ---------- 回数の制限 ---------- */
 
 /**
