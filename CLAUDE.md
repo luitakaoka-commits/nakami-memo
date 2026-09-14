@@ -198,8 +198,10 @@ Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環
   料理で使う → 使い切った／捨てたを記録 → ムダ支出に返る → 買い物前に「家にまだあります」、の輪がつながった
 - `main` は `origin/main` と同じ（push 済み）。先行があるかは
   `git rev-list --count origin/main..main` で確かめる（件数はここに書かない。すぐ古くなる）
-- **残っているのはインストール（ユーザーの手作業）だけ。** 「くらしノート」1つとしてスマホに入れる。
-  コード側の用意（manifest・アイコン・`/start.html`）は済んでいて、`install-check.mjs` 14件が守っている
+- **インストールも完了（2026-09-16）。** 「くらしノート」1つとしてスマホに入り、ログインの持ち越し・
+  3アプリの行き来・最後に見ていたアプリからの再開まで確認済み。
+  コード側の用意（manifest・アイコン・`/start.html`）は `install-check.mjs` 14件が守っている
+- **この時点で、当初やろうとしたことは全部おわっている。** 次に何か言われたら、それは新しい要望
 - `public/money/integrations/` に `gas-card-mail-import` と `gas-receipt-import` の両方がある
 
 ### この環境の癖（毎回ひっかかるので先に書く）
@@ -234,18 +236,19 @@ Supabaseのホスト名は `next.config.ts` に直書きしてあるので、環
 
 ## 残っていること
 
-**実装として残っているものはありません（2026-09-16）。** 残りはユーザーの手作業だけです。
+**ありません（2026-09-16）。** 統合の Phase 0〜4 とインストールまで全部おわりました。
+以下は、この先さわるときの注意です。
 
-### 1. インストール ★ユーザーの手作業
+### 1. インストール済みの端末を壊さないために（毎回）
 
-3アプリを「くらしノート」1つとしてスマホに入れる。**全フェーズが終わってからにする、というユーザーの希望どおり
-2026-09-16 に解禁。** コード側の用意は済んでいる（`public/manifest.webmanifest`・`public/icons/kurashi-note-*.png`・
-`public/start.html`・`public/shared/last-app.js`）。
+2026-09-16 に「くらしノート」としてスマホに入っています。以下は**入っている端末を壊さないための注意**です。
 
-- **入れるのは `https://nakami-memo.vercel.app/start.html` を開いてから**。ここが起動地点になる
-- Android（Chrome）は「アプリをインストール」、iPhone（Safari）は共有 →「ホーム画面に追加」
-- **`manifest.webmanifest` の `id` を変えないこと。** 変えると別アプリ扱いになり、入れ直しが要る
-- お金管理の画面を直したら `sw.js` の VERSION を上げる（上げないとインストール済みの端末に届かない）
+- **`public/manifest.webmanifest` の `id` を変えないこと。** 変えると別アプリ扱いになり、入れ直しが要る
+  （`start_url` や `scope` も同じ理由で気軽に変えない）
+- **お金管理の画面ファイルを直したら `public/money/sw.js` の VERSION を上げる。**
+  上げないとインストール済みの端末に届かない（`tests/sw-version.test.js` が検出する）
+- つくりおきノートも同じく `public/recipe/sw.js` の VERSION を上げる
+- 起動地点は `https://nakami-memo.vercel.app/start.html`（最後に見ていたアプリへ移る）
 
 ### 2. push（作業のたび）★ユーザーの手作業
 
