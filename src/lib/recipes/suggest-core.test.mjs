@@ -168,8 +168,11 @@ t("つくりおきノートに保存する形が、つくりおきノートの�
     ingredients: [{ name: "もやし", amount: "1", unit: "袋", itemId: "moyashi", inStock: true }, { name: "ねぎ", amount: "", unit: "", itemId: "", inStock: false }],
     shoppingNeeded: [], steps: ["煮る"], toolIds: ["pan"], usesItemIds: [],
   }] }, pantry, tools, options).recipes[0];
-  const doc = toTsukuriokiRecipe(recipe, ["ティファール 26cm"], NOW);
-  eq(Object.keys(doc).sort(), ["category", "createdAt", "image", "ingredients", "lastCookedAt", "memo", "refUrl", "servings", "source", "steps", "title"], "項目");
+  const doc = toTsukuriokiRecipe(recipe, ["ティファール 26cm"], NOW, [{ itemId: "moyashi", name: "もやし", unit: "袋", use: 1 }]);
+  // つくりおきノートの項目 + sourceItems（在庫との結びつき。向こうで「作った」を押したときに在庫を減らすため）
+  eq(Object.keys(doc).sort(), ["category", "createdAt", "image", "ingredients", "lastCookedAt", "memo", "refUrl", "servings", "source", "sourceItems", "steps", "title"], "項目");
+  eq(doc.sourceItems, [{ itemId: "moyashi", name: "もやし", unit: "袋", use: 1 }], "在庫との結びつき");
+  eq(toTsukuriokiRecipe(recipe, [], NOW).sourceItems, [], "結びつきが無ければ空");
   eq(doc.ingredients, ["もやし 1袋", "ねぎ"], "材料は1行の文字列");
   ok(doc.memo.includes("使う器具: ティファール 26cm") && doc.memo.includes("買い足し: ねぎ"), doc.memo);
   eq([doc.source, doc.createdAt, doc.lastCookedAt], ["AIの提案", NOW, 0], "出どころと日時");

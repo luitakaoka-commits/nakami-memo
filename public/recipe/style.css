@@ -226,6 +226,17 @@ textarea { min-height: 84px; resize: vertical; }
 .sheet-list button.is-selected { color: var(--accent-deep); font-weight: 700; }
 .sheet-list button.is-selected::after { margin-left: auto; content: "✓"; color: var(--accent); }
 .sheet-list__note { margin-left: auto; color: var(--muted); font-size: 12px; }
+/* なかみメモの在庫を減らす確認（2026-09-15） */
+.stock-list { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); }
+.stock-row { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.stock-row:last-child { border-bottom: 0; }
+.stock-row__name { display: flex; flex-direction: column; font-weight: 700; }
+.stock-row__name small { color: var(--muted); font-weight: 400; }
+.stock-row__input { display: flex; align-items: center; gap: 6px; }
+.stock-row__input input { width: 84px; padding: 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); text-align: right; }
+.sheet__primary { display: block; width: 100%; margin-top: 14px; padding: 12px; border-radius: var(--radius-control); background: var(--accent); color: #fff; font-weight: 700; }
+.sheet__primary:hover { background: var(--accent-deep); }
+
 .sheet__close { display: block; width: 100%; margin-top: 14px; padding: 12px; border-radius: var(--radius-control); color: var(--muted); font-weight: 700; }
 .sheet__close:hover { background: var(--canvas); }
 

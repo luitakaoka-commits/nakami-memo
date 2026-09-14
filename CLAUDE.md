@@ -22,7 +22,7 @@ npm test
 #       183件 → 2026-09-10 時点（名寄せ修正 + GAS取込のテスト）
 #       158件 → GAS取込のテストが無い
 #       155件 → 名寄せの修正も無い。古いコミットを見ている
-# recipe 16件 / app-switcher 26件 / install 10件 / rules 7件 / migrate 7件 / recipes 26件 も同じコマンドで走る
+# recipe 16件 / recipe-stock 8件 / app-switcher 26件 / install 10件 / rules 7件 / migrate 7件 / recipes 26件 も同じコマンドで走る
 # 「Cannot find package 'jsdom'」と出たら npm install が済んでいない
 ```
 
@@ -167,7 +167,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 199 / recipe 16 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26
+npm test                 # money 199 / recipe 16 / recipe-stock 8 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26
 npm run test:ui          # お金管理のブラウザ実測 27項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -343,6 +343,11 @@ APIキーが無くても動きます。その場合は Drive OCR だけになり
   在庫超過・期限切れ・使わない指定は注意として出す、どのレシピにも入らなかった必ず使う食材を返す）
 - つくりおきノートへの保存は `source: "AIの提案"`（つくりおきノート側の SOURCES に足した）。材料は「名前 量」の1行文字列
 - 「作った」は数量0になっても在庫を消さない。調味料は既定で減らさない。保存済みならつくりおきの lastCookedAt も更新
+- **つくりおきノート側の「作った」でも在庫を減らせる**（2026-09-15 ユーザー要望）。保存時に `sourceItems`
+  （itemId・名前・単位・使う量）をレシピに一緒に入れ、つくりおきノートの `markCooked` が
+  いまの在庫と突き合わせて（`public/shared/cook-stock.js`）確認シートを出す。手で作ったレシピは今までどおり日付だけ。
+  **つくりおきノートの編集画面で保存し直すと `sourceItems` は消える**（向こうの保存する形に無いため）
+- AIの提案は端末に1日だけ残る（localStorage）。保存したレシピはレシピ画面の下に履歴として出て、そこから削除できる
 - `suggest-core.test.mjs` は `node --experimental-strip-types` で .ts をそのまま読む（run-tests.mjs の nodeArgs）
 - 連打よけ（1人1分5回）はサーバーのメモリなので、インスタンスをまたぐと効かない
 

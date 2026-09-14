@@ -5,8 +5,10 @@
 import { watchAuth, consumeRedirectResult, signIn, signOutUser, configured } from "./firebase.js";
 import {
   setUser, newId, subscribe, saveDocument, patchDocument, removeDocument,
-  saveMany, removeMany, removeCollection, uploadRecipeImage, deleteRecipeImage, onWriteError
+  saveMany, removeMany, removeCollection, uploadRecipeImage, deleteRecipeImage, onWriteError,
+  readInventory, decrementInventory
 } from "./store.js";
+import { planFromSourceItems, rowsToApply } from "../shared/cook-stock.js";
 
 const PREFS_KEY = "tsukurioki-note-prefs-v1";
 const LEGACY_KEY = "tsukurioki-note-state-v1";
@@ -640,6 +642,68 @@ function renderSettings() {
     "</section>";
 }
 
+/* ---------- 「作った」となかみメモの在庫（2026-09-15） ----------
+ * なかみメモのレシピ提案から保存したレシピには、材料と在庫の結びつき（sourceItems）が入っている。
+ * それがあるレシピは「作った」を押したときに、なかみメモの在庫も減らせるようにする。
+ * 手で作ったレシピには結びつきが無いので、今までどおり「作った日」の記録だけ。
+ */
+
+let stockSheet = null;
+
+async function markCooked(id) {
+  const recipe = state.recipes.find((item) => item.id === id);
+  if (!recipe) return;
+  recipe.lastCookedAt = Date.now();
+  patchDocument("recipes", id, { lastCookedAt: recipe.lastCookedAt });
+  render();
+
+  const source = Array.isArray(recipe.sourceItems) ? recipe.sourceItems : [];
+  if (!source.length) { showToast("作った記録をつけました", "success"); return; }
+
+  showToast("作った記録をつけました", "success");
+  try {
+    const rows = planFromSourceItems(source, await readInventory());
+    if (!rows.length) return;
+    stockSheet = { title: recipe.title, rows };
+    openSheet(stockSheetMarkup(stockSheet));
+  } catch (error) {
+    showToast("なかみメモの在庫を読めませんでした", "");
+  }
+}
+
+function stockSheetMarkup(sheetState) {
+  const rows = sheetState.rows.map((row, index) =>
+    '<label class="stock-row"><span class="stock-row__name">' + esc(row.name) +
+    '<small>在庫 ' + row.available + esc(row.unit) + "</small></span>" +
+    '<span class="stock-row__input"><input type="number" min="0" max="' + row.available + '" step="any" inputmode="decimal" data-stock-index="' + index + '" value="' + row.use + '" aria-label="' + esc(row.name) + 'を減らす量"><small>' + esc(row.unit) + "</small></span></label>"
+  ).join("");
+  return sheet("なかみメモの在庫を減らす",
+    '<p class="sheet__label">「' + esc(sheetState.title) + '」で使った量です。直してから押してください。</p>' +
+    '<div class="stock-list">' + rows + "</div>" +
+    '<button class="sheet__primary" data-action="apply-stock">在庫を減らす</button>',
+    "減らさない");
+}
+
+async function applyStockFromSheet() {
+  if (!stockSheet) return;
+  const rows = stockSheet.rows.map((row, index) => {
+    const input = document.querySelector('[data-stock-index="' + index + '"]');
+    const value = input ? Number(input.value) : row.use;
+    return { ...row, use: Math.max(0, Math.min(Number.isFinite(value) ? value : 0, row.available)) };
+  });
+  const targets = rowsToApply(rows);
+  const title = stockSheet.title;
+  stockSheet = null;
+  closeModal();
+  if (!targets.length) { showToast("減らす量が0だったので、在庫はそのままです", ""); return; }
+  try {
+    await decrementInventory(targets, title);
+    showToast(targets.length + "件の在庫を減らしました", "success");
+  } catch (error) {
+    showToast("在庫を減らせませんでした", "");
+  }
+}
+
 /* ---------- シート（並べ替え・検索設定・材料の取り込み・確認） ---------- */
 
 function sheet(title, body, closeLabel) {
@@ -652,6 +716,7 @@ function openSheet(html) {
 
 function closeModal() {
   document.querySelector("#modal-root").innerHTML = "";
+  stockSheet = null;
   pendingConfirm = null;
 }
 
@@ -942,7 +1007,8 @@ function handleAction(element) {
   }
 
   if (action === "detail") { state.detailId = id; state.returnTo = state.screen; return go("detail"); }
-  if (action === "mark-cooked") { const recipe = state.recipes.find((item) => item.id === id); if (recipe) { recipe.lastCookedAt = Date.now(); patchDocument("recipes", id, { lastCookedAt: recipe.lastCookedAt }); render(); showToast("作った記録をつけました", "success"); } return; }
+  if (action === "mark-cooked") { markCooked(id); return; }
+  if (action === "apply-stock") { applyStockFromSheet(); return; }
   if (action === "add-to-shopping") { const recipe = state.recipes.find((item) => item.id === id); if (!recipe) return; const added = pushShopping(recipe.ingredients, recipe.title); showToast(added ? added + "件を買い物リストに入れました" : "すでに全部入っています", added ? "success" : ""); return; }
   if (action === "quick-plan") { state.editingPlanId = null; state.draft = { date: todayISO(), slot: "夕食", items: [id], extras: [], memo: "" }; return go("mealCreate", "meal"); }
 

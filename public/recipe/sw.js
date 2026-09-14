@@ -3,7 +3,7 @@
    オフラインでも起動できるようにする。
    データ本体は Firestore のオフライン永続化（IndexedDB）が持つので、ここでは扱わない。 */
 
-const VERSION = "v9";
+const VERSION = "v10";
 const SHELL_CACHE = "tsukurioki-shell-" + VERSION;
 const SDK_CACHE = "tsukurioki-sdk-" + VERSION;
 

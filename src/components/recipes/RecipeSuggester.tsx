@@ -258,7 +258,12 @@ function SuggestionCard({ recipe, pantryItems, toolNames, alreadySaved }: {
     setSaving(true);
     setMessage("");
     try {
-      const id = await saveRecipeToTsukurioki(user.uid, toTsukuriokiRecipe(recipe, usedTools.map((tool) => tool.name), Date.now()));
+      // 在庫との結びつきも一緒に保存する。つくりおきノートで「作った」を押したときに在庫を減らせる
+      const sourceItems = defaultConsumption(
+        recipe,
+        pantryItems.map((item) => ({ id: item.id, name: item.name, quantity: item.quantity, unit: item.unit ?? "", category: item.category ?? "" })),
+      ).map((row) => ({ itemId: row.itemId, name: row.name, unit: row.unit, use: row.use }));
+      const id = await saveRecipeToTsukurioki(user.uid, toTsukuriokiRecipe(recipe, usedTools.map((tool) => tool.name), Date.now(), sourceItems));
       setSavedId(id);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "保存できませんでした。");

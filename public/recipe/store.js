@@ -138,6 +138,42 @@ export async function deleteRecipeImage(recipeId) {
 
 let errorHandler = () => {};
 export function onWriteError(handler) { errorHandler = handler; }
+
+/* ---------- なかみメモの在庫（2026-09-15。Firebaseを1つにまとめたので同じ users/{uid} の下にある） ---------- */
+
+/** なかみメモの在庫を全部読む。「作った」で減らす前に、いまの数量を確かめるために使う。 */
+export async function readInventory() {
+  const snap = await getDocs(col("items"));
+  return snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+}
+
+/**
+ * なかみメモの在庫を減らし、消費の記録（consumptions）を残す。
+ * まとめて1回で書くので「途中まで減る」は起きない。ここは完了を待つ（結果を画面に出すため）。
+ * rows は public/shared/cook-stock.js の planFromSourceItems が作った形。
+ */
+export async function decrementInventory(rows, recipeTitle) {
+  if (!rows.length) return 0;
+  const batch = writeBatch(db);
+  const now = new Date();
+  rows.forEach((row) => {
+    batch.update(doc(col("items"), row.itemId), {
+      quantity: Math.max(0, Math.round((row.available - row.use) * 1000) / 1000),
+      updatedAt: now
+    });
+    batch.set(doc(col("consumptions")), {
+      itemId: row.itemId,
+      itemName: row.name,
+      quantity: row.use,
+      unit: row.unit,
+      reason: "調理",
+      recipeTitle: String(recipeTitle || ""),
+      at: now
+    });
+  });
+  await batch.commit();
+  return rows.length;
+}
 function reportWriteError(error) {
   if (!error) return;
   if (error.code === "unavailable" || error.code === "failed-precondition") return; /* オフラインは後で同期される */

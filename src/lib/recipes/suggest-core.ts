@@ -554,7 +554,13 @@ export function ingredientLine(ing: SuggestedIngredient): string {
  * つくりおきノート（users/{uid}/recipes）に保存する形。public/recipe/app.js の normalizeRecipe と同じ項目。
  * source の「AIの提案」は、つくりおきノート側の SOURCES にも足してある。
  */
-export function toTsukuriokiRecipe(recipe: RecipeSuggestion, toolNames: string[], nowMillis: number) {
+export function toTsukuriokiRecipe(
+  recipe: RecipeSuggestion,
+  toolNames: string[],
+  nowMillis: number,
+  /** 材料と在庫の結びつき。つくりおきノートで「作った」を押したとき、これがあれば在庫も減らせる。 */
+  sourceItems: Array<{ itemId: string; name: string; unit: string; use: number }> = [],
+) {
   const memo = [
     "なかみメモの在庫から提案されたレシピです。",
     `目安 ${recipe.estMinutes}分`,
@@ -573,6 +579,9 @@ export function toTsukuriokiRecipe(recipe: RecipeSuggestion, toolNames: string[]
     image: "",
     createdAt: nowMillis,
     lastCookedAt: 0,
+    // つくりおきノート（public/recipe/app.js の markCooked）が読む。
+    // つくりおきノートの編集画面で保存し直すと、この項目は消える（向こうの保存する形に無いため）。
+    sourceItems: sourceItems.map((row) => ({ itemId: row.itemId, name: row.name, unit: row.unit, use: row.use })),
   };
 }
 
