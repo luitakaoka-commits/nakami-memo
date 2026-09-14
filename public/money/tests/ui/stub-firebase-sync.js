@@ -20,6 +20,16 @@ export const firebaseSync = {
   updateReceiptStatus: async (id, status) => { (window.__TEST_CALLS__ ||= []).push({ fn: 'updateReceiptStatus', id, status }); return true; },
   updateReceiptItem: async (id, patch) => { (window.__TEST_CALLS__ ||= []).push({ fn: 'updateReceiptItem', id, patch }); return true; },
   deleteReceipt: async () => true,
+  // なかみメモの在庫（2026-09-16）。読み取りは固定値、書き込みは記録するだけ
+  readInventoryLocations: async () => [
+    { id: 'loc-fridge', name: '冷蔵庫', areaName: 'キッチン', sortOrder: 1 },
+    { id: 'loc-shelf', name: '食品棚', areaName: 'キッチン', sortOrder: 2 }
+  ],
+  readInventoryItems: async () => [{ id: 'inv-moyashi', name: 'もやし', quantity: 1, unit: '袋' }],
+  addToInventory: async (plan) => {
+    (window.__TEST_CALLS__ ||= []).push({ fn: 'addToInventory', plan });
+    return { created: (plan.creates || []).length, merged: (plan.merges || []).length };
+  },
   saveItemAlias: async () => true,
   deleteItemAlias: async () => true,
   getSession: () => ({

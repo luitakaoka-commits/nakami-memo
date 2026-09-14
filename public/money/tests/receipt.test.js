@@ -621,6 +621,82 @@ test('69. 繰り返しリスト — 店のコード付きと手入力が同じ�
   equal(ranked[0].wasteCount, 2, '2回');
 });
 
+/* ---------- レシート明細 → なかみメモの在庫（2026-09-16） ---------- */
+
+const INVENTORY = [
+  { id: 'i-moyashi', name: 'もやし', quantity: 1, unit: '袋' },
+  { id: 'i-milk', name: '牛乳', quantity: 2, unit: '本' },
+  { id: 'i-nounit', name: 'ごま', quantity: 1, unit: '' }
+];
+const plan = (lines, options) => engine.planInventoryAdditions(lines, INVENTORY, { locationId: 'loc1', receiptId: 'r1', ...options });
+
+test('70. 表記が違っても同じ品物なら、在庫を増やさずに数量を足す', () => {
+  const { creates, merges } = plan([line({ id: 'l1', lineNo: 1, rawName: '* 3271 ﾓﾔｼ', name: '* 3271 ﾓﾔｼ', quantity: 2, unit: '袋', category: '食品', amount: 198 })]);
+  equal(creates.length, 0, '新しくは作らない');
+  equal(merges[0].itemId, 'i-moyashi', 'まとめ先');
+  equal(merges[0].quantity, 3, '1袋 + 2袋');
+  equal(merges[0].added, 2, '足した分');
+  deepEqual(merges[0].purchaseRefs, ['r1#1'], 'どのレシートの何行目か');
+});
+
+test('71. 別名辞書でまとめた品物にも足す（本人が「同じもの」と決めたもの）', () => {
+  const aliases = [{ aliasKey: engine.normalizeItemName('低脂肪乳'), canonicalName: '牛乳', canonicalKey: engine.normalizeItemName('牛乳') }];
+  const { creates, merges } = plan([line({ id: 'l1', lineNo: 1, rawName: '低脂肪乳', name: '低脂肪乳', quantity: 1, unit: '本', category: '飲料' })], { aliases });
+  equal(creates.length, 0, '新しくは作らない');
+  equal(merges[0].itemId, 'i-milk', '牛乳にまとめる');
+  equal(merges[0].quantity, 3, '2本 + 1本');
+});
+
+test('72. 意味の判断はしない。辞書が無ければ別の在庫として作る', () => {
+  const { creates, merges } = plan([line({ id: 'l1', lineNo: 1, rawName: '低脂肪乳', name: '低脂肪乳', quantity: 1, unit: '本', category: '飲料' })]);
+  equal(merges.length, 0, 'まとめない');
+  equal(creates[0].name, '低脂肪乳', '別の在庫');
+});
+
+test('73. 単位が食い違うときは足さずに別で作る（袋と個は数えられない）', () => {
+  const { creates, merges } = plan([line({ id: 'l1', lineNo: 1, rawName: '牛乳', name: '牛乳', quantity: 200, unit: 'mL', category: '飲料' })]);
+  equal(merges.length, 0, '本と mL は足さない');
+  equal(creates[0].unit, 'mL', '新しい在庫はレシートの単位');
+});
+
+test('74. どちらかの単位が空なら足す（単位を入れていない在庫）', () => {
+  const { merges } = plan([line({ id: 'l1', lineNo: 1, rawName: 'ごま', name: 'ごま', quantity: 1, unit: '袋', category: '食品' })]);
+  equal(merges[0].itemId, 'i-nounit', 'まとめ先');
+  equal(merges[0].unit, '袋', '単位はレシート側で補う');
+});
+
+test('75. 新しく作る在庫は、保管場所・カテゴリ・買った値段・購入元を持つ', () => {
+  const { creates } = plan([line({ id: 'l9', lineNo: 9, rawName: 'ティッシュ', name: 'ティッシュ', quantity: 1, unit: '箱', category: '消耗品', amount: 298 })]);
+  deepEqual(creates[0], {
+    lineId: 'l9', locationId: 'loc1', name: 'ティッシュ', quantity: 1, unit: '箱',
+    category: '日用品', purchaseRef: 'r1#9', purchasePrice: 298
+  }, '作る在庫');
+});
+
+test('76. カテゴリの読み替え（お金管理 → なかみメモ）', () => {
+  deepEqual(['食品', '飲料', '調味料', '日用品', '消耗品', '衣料', '書籍', '外食', '雑貨'].map(engine.inventoryCategoryOf),
+    ['食品', '飲料', '調味料', '日用品', '日用品', '衣類', '書類', 'その他', 'その他'], '読み替え');
+  deepEqual(Object.keys(engine.INVENTORY_CATEGORY_BY_RECEIPT_CATEGORY).filter(name => !engine.RECEIPT_CATEGORIES.includes(name)), [], 'お金管理に無いカテゴリを書いていない');
+});
+
+test('77. 品名の無い行と、数量が0以下の行の扱い', () => {
+  equal(plan([line({ id: 'l1', lineNo: 1, rawName: '', name: '' })]).creates.length, 0, '品名なしは入れない');
+  equal(plan([line({ id: 'l1', lineNo: 1, rawName: '新商品', name: '新商品', quantity: 0, unit: '個' })]).creates[0].quantity, 1, '数量0は1として入れる');
+});
+
+test('78. 同じレシートに同じ品物が2行あっても、まとめ先は1つに決まる', () => {
+  const lines = [
+    line({ id: 'l1', lineNo: 1, rawName: 'ﾓﾔｼ', name: 'ﾓﾔｼ', quantity: 1, unit: '袋' }),
+    line({ id: 'l2', lineNo: 2, rawName: 'もやし', name: 'もやし', quantity: 1, unit: '袋' })
+  ];
+  const { merges, creates } = plan(lines);
+  equal(creates.length, 0, '新しくは作らない');
+  equal(merges.length, 1, '1つの在庫に1回だけ書く');
+  equal(merges[0].added, 2, '2行分を足す');
+  equal(merges[0].quantity, 3, '1袋 + 1袋 + 1袋');
+  deepEqual(merges[0].purchaseRefs, ['r1#1', 'r1#2'], '2行とも購入元に残す');
+});
+
 if (!failures.length) { console.log(JSON.stringify({ suite: 'receipt', total, passed: total, failed: 0 })); process.exit(0); }
 console.log(JSON.stringify({ suite: 'receipt', total, passed: total - failures.length, failed: failures.length, failures }, null, 2));
 process.exit(1);

@@ -672,6 +672,42 @@ const closeModals = page => page.evaluate(() => {
     assert(await page.locator('#page-container [data-action="accept-receipt"]').count() === 0, '確認済みなのにボタンが残っている');
   });
 
+  await record('receipt_to_inventory', async () => {
+    // レシートの明細を、なかみメモの在庫に入れる（2026-09-16）。表記がゆれていても在庫を増やさずにまとめる
+    await closeModals(page);
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      window.__TEST_CALLS__ = [];
+      api.setReceipts([{ id: 'rc2', storeName: 'テストストア', purchasedAt: '2026-09-02', total: 396, taxTotal: 0, paymentMethod: 'cash', transactionId: '', source: 'gemini', status: 'pending', note: '', createdAt: '', createdBy: '' }]);
+      api.setReceiptItems([
+        { id: 'rc2-001', receiptId: 'rc2', lineNo: 1, rawName: '* 3271 ﾓﾔｼ', name: '* 3271 ﾓﾔｼ', quantity: 2, unit: '袋', unitPrice: 99, amount: 198, category: '食品', outcomeTracked: true, outcome: 'in_stock', outcomeAt: '', outcomeReason: '', wasteAmount: 0, note: '', createdAt: '' },
+        { id: 'rc2-002', receiptId: 'rc2', lineNo: 2, rawName: 'ティッシュ', name: 'ティッシュ', quantity: 1, unit: '箱', unitPrice: 198, amount: 198, category: '消耗品', outcomeTracked: true, outcome: 'in_stock', outcomeAt: '', outcomeReason: '', wasteAmount: 0, note: '', createdAt: '' },
+        { id: 'rc2-003', receiptId: 'rc2', lineNo: 3, rawName: '電車代', name: '電車代', quantity: 1, unit: '', unitPrice: 200, amount: 200, category: '交通', outcomeTracked: false, outcome: 'in_stock', outcomeAt: '', outcomeReason: '', wasteAmount: 0, note: '', createdAt: '' }
+      ]);
+      api.setPage('records');
+      api.setRecordTab('receipts');
+    });
+    await page.click('#page-container [data-action="add-to-inventory"][data-id="rc2"]');
+    await page.waitForSelector('#inventory-location');
+
+    const checked = await page.$$eval('[data-inventory-line]', nodes => nodes.filter(node => node.checked).map(node => node.dataset.inventoryLine));
+    assert(JSON.stringify(checked) === JSON.stringify(['rc2-001', 'rc2-002']), `食べ物と日用品だけ選ばれる: ${checked}`);
+
+    await page.selectOption('#inventory-location', 'loc-shelf');
+    await page.click('[data-action="submit-inventory"]');
+    await page.waitForTimeout(300);
+
+    const call = await page.evaluate(() => (window.__TEST_CALLS__ || []).find(item => item.fn === 'addToInventory'));
+    assert(call, '在庫に入れる処理が呼ばれていない');
+    assert(call.plan.merges.length === 1 && call.plan.merges[0].itemId === 'inv-moyashi', `表記ゆれのもやしは既存の在庫へ: ${JSON.stringify(call.plan.merges)}`);
+    assert(call.plan.merges[0].quantity === 3, `1袋 + 2袋: ${call.plan.merges[0].quantity}`);
+    assert(call.plan.creates.length === 1 && call.plan.creates[0].name === 'ティッシュ', `新しい在庫: ${JSON.stringify(call.plan.creates)}`);
+    assert(call.plan.creates[0].locationId === 'loc-shelf', '選んだ保管場所');
+    assert(call.plan.creates[0].category === '日用品', `消耗品はなかみメモの日用品へ: ${call.plan.creates[0].category}`);
+    assert(call.plan.creates[0].purchaseRef === 'rc2#2', `どのレシートの何行目か: ${call.plan.creates[0].purchaseRef}`);
+    assert(await page.locator('#inventory-modal:not([hidden])').count() === 0, '入れたあとも画面が開いたまま');
+  });
+
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

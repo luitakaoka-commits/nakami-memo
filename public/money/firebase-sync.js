@@ -287,6 +287,9 @@ const RECEIPT_ITEM_FIELDS = {
   outcomeAt: '',
   outcomeReason: '',
   wasteAmount: 0,
+  // 在庫に入れたときの、なかみメモ側の items のID（2026-09-16）。
+  // これがあると「捨てた」をなかみメモ側から書き戻せる。
+  inventoryItemId: '',
   note: '',
   createdAt: '',
   updatedAt: ''
@@ -413,6 +416,83 @@ async function updateReceiptItem(lineId, patch = {}) {
   return true;
 }
 
+/* ---------- なかみメモの在庫（2026-09-16。Firebaseを1つにまとめたので users/{uid} を直接読める） ---------- */
+
+/** なかみメモの保管場所を、エリア名つきで返す。「在庫に入れる」で選んでもらうため。 */
+async function readInventoryLocations() {
+  if (!currentUser) return [];
+  const uid = currentUser.uid;
+  const [areaSnap, locationSnap] = await Promise.all([
+    getDocs(collection(db, 'users', uid, 'areas')),
+    getDocs(collection(db, 'users', uid, 'locations'))
+  ]);
+  const areaNames = new Map(areaSnap.docs.map(entry => [entry.id, entry.data().name || '']));
+  return locationSnap.docs
+    .map(entry => ({ id: entry.id, ...entry.data() }))
+    .map(location => ({
+      id: location.id,
+      name: String(location.name || ''),
+      areaName: areaNames.get(location.areaId) || '未分類',
+      sortOrder: Number.isFinite(Number(location.sortOrder)) ? Number(location.sortOrder) : Number.POSITIVE_INFINITY
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ja'));
+}
+
+/** なかみメモの在庫。まとめ先を決めるのに使う。 */
+async function readInventoryItems() {
+  if (!currentUser) return [];
+  const snap = await getDocs(collection(db, 'users', currentUser.uid, 'items'));
+  return snap.docs.map(entry => ({ id: entry.id, ...entry.data() }));
+}
+
+/**
+ * レシートの明細を、なかみメモの在庫に入れる。
+ * plan は finance-engine の planInventoryAdditions が作ったもの（新しく作る分と、既にある在庫に足す分）。
+ * 明細側には inventoryItemId を書き戻し、どの在庫になったか分かるようにする。
+ */
+async function addToInventory(plan) {
+  if (!connected()) return { created: 0, merged: 0 };
+  const uid = currentUser.uid;
+  const workspaceId = currentWorkspace.id;
+  const now = new Date();
+  const batch = writeBatch(db);
+
+  (plan.creates || []).forEach(row => {
+    const ref = doc(collection(db, 'users', uid, 'items'));
+    batch.set(ref, {
+      locationId: row.locationId,
+      name: row.name,
+      quantity: row.quantity,
+      unit: row.unit,
+      category: row.category,
+      purchaseRef: row.purchaseRef,
+      purchasePrice: row.purchasePrice,
+      createdAt: now,
+      updatedAt: now
+    });
+    if (row.lineId) {
+      batch.update(doc(db, 'workspaces', workspaceId, 'receiptItems', row.lineId), {
+        inventoryItemId: ref.id,
+        updatedAt: now.toISOString()
+      });
+    }
+  });
+
+  (plan.merges || []).forEach(row => {
+    batch.update(doc(db, 'users', uid, 'items', row.itemId), { quantity: row.quantity, updatedAt: now });
+    (row.lineIds || []).forEach(lineId => {
+      if (!lineId) return;
+      batch.update(doc(db, 'workspaces', workspaceId, 'receiptItems', lineId), {
+        inventoryItemId: row.itemId,
+        updatedAt: now.toISOString()
+      });
+    });
+  });
+
+  await batch.commit();
+  return { created: (plan.creates || []).length, merged: (plan.merges || []).length };
+}
+
 /** レシートの状態（未確認・確認済みなど）だけを変える。明細行には触らない。 */
 async function updateReceiptStatus(receiptId, status) {
   if (!connected() || !receiptId) return false;
@@ -523,6 +603,9 @@ export const firebaseSync = {
   updateReceiptItem,
   updateReceiptStatus,
   deleteReceipt,
+  readInventoryLocations,
+  readInventoryItems,
+  addToInventory,
   saveItemAlias,
   deleteItemAlias
 };

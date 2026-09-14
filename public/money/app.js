@@ -74,6 +74,8 @@
   let openReceiptId = '';
   // レシートを開いた時点の品名（行ID→rawName）。保存時に書き換えを見つけて名寄せを学ぶ。
   let receiptOriginalNames = new Map();
+  /** 「在庫に入れる」の下書き（対象レシート・保管場所・選んだ行）。 */
+  let inventoryDraft = null;
   // 「まとめる」モーダルで選んでいる元の品名 { key, name }
   let mergeSource = null;
   let reviewQueue = [];
@@ -615,7 +617,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=24" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=25" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1197,6 +1199,7 @@
           <div class="list-actions">
             <button class="mini-button" data-action="toggle-receipt" data-id="${esc(receipt.id)}">${opened ? '閉じる' : '明細'}</button>
             ${receipt.status === 'accepted' ? '' : `<button class="mini-button" data-action="accept-receipt" data-id="${esc(receipt.id)}">確認済みにする</button>`}
+            <button class="mini-button" data-action="add-to-inventory" data-id="${esc(receipt.id)}">在庫に入れる</button>
             <button class="mini-button" data-action="edit-receipt" data-id="${esc(receipt.id)}">編集</button>
             <button class="mini-button danger" data-action="delete-receipt" data-id="${esc(receipt.id)}">削除</button>
           </div>
@@ -1429,6 +1432,91 @@
     } catch (error) {
       console.warn('レシートを保存できませんでした', error);
       showToast('レシートを保存できませんでした');
+    }
+  }
+
+  /* ---------- レシートの明細を なかみメモの在庫に入れる（2026-09-16） ----------
+   * 買ったもの → 在庫 → 捨てた → ムダ支出、の輪をつなぐ最初の1本。
+   * 在庫に入れた行には inventoryItemId を書き戻し、なかみメモ側で「捨てた」を記録したときに
+   * このレシートの明細へ返せるようにする。
+   */
+
+  /** 在庫に入れる候補の既定。食べ物・日用品で、まだ在庫に入れていない行。 */
+  function defaultInventoryLineIds(lines) {
+    return lines
+      .filter(item => !item.inventoryItemId && Number(item.amount) > 0 && finance.classifyOutcomeTracked(item))
+      .map(item => item.id);
+  }
+
+  async function openInventoryModal(receiptId) {
+    if (!receiptsAvailable()) { showToast('共有スペースに接続すると使えます'); return; }
+    const receipt = receipts.find(item => item.id === receiptId);
+    if (!receipt) return;
+    inventoryDraft = { receiptId, locations: [], items: [], selected: [], loading: true };
+    $('#inventory-modal').hidden = false;
+    renderInventoryBody();
+    try {
+      const [locations, items] = await Promise.all([cloud.readInventoryLocations(), cloud.readInventoryItems()]);
+      const lines = receiptLinesOf(receiptId);
+      inventoryDraft = { receiptId, locations, items, selected: defaultInventoryLineIds(lines), loading: false };
+    } catch (error) {
+      console.warn('なかみメモの在庫を読めませんでした', error);
+      inventoryDraft = { ...inventoryDraft, loading: false, error: 'なかみメモの在庫を読めませんでした。' };
+    }
+    renderInventoryBody();
+  }
+
+  function renderInventoryBody() {
+    const node = $('#inventory-body');
+    if (!node || !inventoryDraft) return;
+    if (inventoryDraft.loading) { node.innerHTML = '<p class="form-note">なかみメモの在庫を読んでいます…</p>'; return; }
+    if (inventoryDraft.error) { node.innerHTML = `<p class="form-note value-negative">${esc(inventoryDraft.error)}</p>`; return; }
+    if (!inventoryDraft.locations.length) {
+      node.innerHTML = '<p class="form-note">なかみメモに保管場所がありません。先に「なかみメモ → 保管場所」で1つ作ってください。</p>';
+      return;
+    }
+
+    const lines = receiptLinesOf(inventoryDraft.receiptId);
+    const rows = lines.map(item => {
+      const already = Boolean(item.inventoryItemId);
+      const checked = inventoryDraft.selected.includes(item.id);
+      return `<label class="check-row">
+        <input type="checkbox" data-inventory-line="${esc(item.id)}" ${checked ? 'checked' : ''} ${already ? 'disabled' : ''}>
+        <span>${esc(item.name || item.rawName || '品名なし')}<small>${esc(item.category || 'その他')}・${Number(item.quantity || 0)}${esc(item.unit || '')}${already ? '・在庫に入れ済み' : ''}</small></span>
+      </label>`;
+    }).join('');
+
+    node.innerHTML = `
+      <p class="form-note">選んだ品物を、なかみメモの在庫に入れます。同じ品物がすでにあれば、新しく作らずに数量を足します。</p>
+      <label><span>入れる保管場所</span><select id="inventory-location">${
+        inventoryDraft.locations.map(location => `<option value="${esc(location.id)}">${esc(location.areaName)} / ${esc(location.name)}</option>`).join('')
+      }</select></label>
+      <div class="receipt-line-list">${rows || emptyBlock('明細がありません')}</div>
+      <button class="button button-primary" data-action="submit-inventory">在庫に入れる</button>`;
+  }
+
+  async function submitInventory() {
+    if (!inventoryDraft || !receiptsAvailable()) return;
+    const locationId = $('#inventory-location')?.value || '';
+    const selected = $$('[data-inventory-line]').filter(input => input.checked && !input.disabled).map(input => input.dataset.inventoryLine);
+    if (!locationId || !selected.length) { showToast('入れる品物を選んでください'); return; }
+
+    const lines = receiptLinesOf(inventoryDraft.receiptId).filter(item => selected.includes(item.id));
+    const plan = finance.planInventoryAdditions(lines, inventoryDraft.items, {
+      aliases: itemAliases,
+      locationId,
+      receiptId: inventoryDraft.receiptId
+    });
+    try {
+      const result = await cloud.addToInventory(plan);
+      closeModal('inventory-modal');
+      inventoryDraft = null;
+      showToast(result.merged
+        ? `${result.created}件を在庫に入れ、${result.merged}件は既にある在庫に足しました`
+        : `${result.created}件を在庫に入れました`);
+    } catch (error) {
+      console.warn('在庫に入れられませんでした', error);
+      showToast('在庫に入れられませんでした');
     }
   }
 
@@ -2734,6 +2822,8 @@
     if (name === 'future-preset') { applyFuturePreset(action.dataset.preset); return; }
     if (name === 'add-receipt') { closeAddMenu(); openReceiptModal(); return; }
     if (name === 'accept-receipt') { acceptReceipt(action.dataset.id); return; }
+    if (name === 'add-to-inventory') { openInventoryModal(action.dataset.id); return; }
+    if (name === 'submit-inventory') { submitInventory(); return; }
     if (name === 'edit-receipt') { openReceiptModal(action.dataset.id); return; }
     if (name === 'delete-receipt') { deleteReceiptRow(action.dataset.id); return; }
     if (name === 'toggle-receipt') { openReceiptId = openReceiptId === action.dataset.id ? '' : action.dataset.id; renderPage(); return; }

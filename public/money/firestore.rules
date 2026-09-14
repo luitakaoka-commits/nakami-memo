@@ -93,10 +93,12 @@ service cloud.firestore {
 
         function validReceiptItem(data) {
           return data.keys().hasAll(['receiptId', 'name', 'amount', 'category', 'outcome'])
+            // inventoryItemId は「在庫に入れる」で書き込む、なかみメモ側の items のID（2026-09-16）。
+            // この [ ] の中にコメントを書かないこと。テストが中身を機械的に読むので名前として拾われる。
             && data.keys().hasOnly([
               'receiptId', 'lineNo', 'rawName', 'name', 'quantity', 'unit', 'unitPrice', 'amount',
               'category', 'outcomeTracked', 'outcome', 'outcomeAt', 'outcomeReason', 'wasteAmount',
-              'note', 'createdAt', 'updatedAt'
+              'inventoryItemId', 'note', 'createdAt', 'updatedAt'
             ])
             && data.category in ['食品', '飲料', '調味料', '日用品', '消耗品', '外食', '交通', 'サービス', '書籍', '衣料', '雑貨', 'その他']
             && data.outcome in ['in_stock', 'consumed', 'expired', 'discarded', 'unused', 'unnecessary']

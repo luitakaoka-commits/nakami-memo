@@ -167,8 +167,8 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 199 / recipe 16 / recipe-stock 12 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26
-npm run test:ui          # お金管理のブラウザ実測 27項目（初回だけ npx playwright install chromium）
+npm test                 # money 208 / recipe 16 / recipe-stock 12 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26
+npm run test:ui          # お金管理のブラウザ実測 28項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
 # サーバーを起動して配信チェック（27件）とインストールの確認（14件）
@@ -321,7 +321,9 @@ GAS + Gemini。**次の一歩は Apps Script にセットアップして `dryRun
 
 - 秘密情報は入っていない（`GEMINI_API_KEY` はスクリプトプロパティ読み）
 - カテゴリ一覧・ふりかえり対象カテゴリ・5,000円の境界が `finance-engine.js` と一致
-- `buildReceiptRecord` が作るフィールドが `firestore.rules` の `hasOnly` と完全一致（順序も）
+- `buildReceiptRecord` が作るフィールドが `firestore.rules` の `hasOnly` に収まっている
+  （2026-09-16 まで「順序も含めて完全一致」だった。`inventoryItemId` はアプリが後から書き足すもので
+  GAS は書かないため、危ない向き＝ルールに無いフィールドを書く、だけを弾く形にした）
 - `source` は `gemini` / `drive-ocr`、`status` は `pending` / `needs_review` でルールの許可内
 
 APIキーが無くても動きます。その場合は Drive OCR だけになり、明細は空・`needs_review` で入ります。
@@ -372,6 +374,24 @@ APIキーはサーバー側（API Route）でだけ読むこと。`NEXT_PUBLIC_`
 
 ### Phase 4 — 輪を閉じる
 
-Firebaseプロジェクトの統合（3つ→1つ）。これが済むまで、アプリを切り替えると
-なかみメモだけログインを求められます（uidがプロジェクト単位のため。仕様であってバグではない）。
-そのあと購入→在庫→廃棄→ムダ支出の双方向連携。
+Firebaseプロジェクトの統合（3つ→1つ）は済み（上の表）。残りは購入→在庫→廃棄→ムダ支出の双方向連携で、
+3つに分けて進めます。
+
+| 手 | 内容 | 状態 |
+|---|---|---|
+| A | お金管理のレシート明細 →「在庫に入れる」→ なかみメモの items | 実装済（2026-09-16。実機確認待ち） |
+| B | なかみメモで「使い切った／捨てた」→ 数量0のまま残す ＋ お金管理の明細へ書き戻す | これから |
+| C | つくりおきノートの買い物リストで「これ、まだ家にあります」 | これから |
+
+**A の決めごと（2026-09-16 ユーザー決定）**
+
+- 保管場所は**まとめて1つ選んでから**入れる（明細ごとに選ばせない）
+- **同じものなのに商品名が違うと在庫が増えていくのを避ける。** `planInventoryAdditions`
+  （`finance-engine.js`）が、名寄せ（`resolveItemKey`＝機械的正規化＋別名辞書）で既存の在庫と同じキーになり、
+  **かつ単位も同じ**ときだけ数量を足す。それ以外は新しい在庫として作る。
+  **意味の判断は相変わらず自動でやりません**（「牛乳」と「低脂肪乳」は別のまま。寄せたいときは別名辞書に入れる）
+- 対象はカテゴリが 食品・飲料・調味料・日用品・消耗品 の行だけ（最初から印が付く。外食や交通は付かない）。
+  お金管理の「消耗品」はなかみメモの「日用品」に寄せる（`INVENTORY_CATEGORY_BY_RECEIPT_CATEGORY`）
+- 入れた明細には `inventoryItemId` が残り、二重に入れられない（ボタンが押せなくなる）。
+  この書き戻しのために **`firestore.rules` の receiptItems に `inventoryItemId` を足した → Console で公開し直すこと**
+- 同じレシートに同じ品が2行あるときは1つにまとめて足す（`lineIds` に両方入る）

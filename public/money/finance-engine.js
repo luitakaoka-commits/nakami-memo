@@ -1426,6 +1426,89 @@
 
   const RECEIPT_OUTCOMES = Object.freeze(Object.keys(WASTE_RATIO));
 
+  /* ---------- レシート明細 → なかみメモの在庫（2026-09-16） ----------
+   * レシートの明細を「在庫に入れる」と、なかみメモの users/{uid}/items に入る。
+   * どのレシートの何行目から来たかを purchaseRef に残し、あとで「捨てた」を
+   * お金管理のムダ支出へ返せるようにする。
+   */
+
+  /** お金管理のカテゴリ → なかみメモのカテゴリ。無い組み合わせは「その他」。 */
+  const INVENTORY_CATEGORY_BY_RECEIPT_CATEGORY = Object.freeze({
+    食品: '食品', 飲料: '飲料', 調味料: '調味料', 日用品: '日用品',
+    消耗品: '日用品', 衣料: '衣類', 書籍: '書類'
+  });
+
+  function inventoryCategoryOf(receiptCategory) {
+    return INVENTORY_CATEGORY_BY_RECEIPT_CATEGORY[String(receiptCategory || '')] || 'その他';
+  }
+
+  /**
+   * 選んだ明細行を、在庫に「新しく作る分」と「すでにある在庫に足す分」に分ける。
+   *
+   * 同じ品物なのに表記が違うと在庫が増えていって見えなくなる（ユーザーの指摘 2026-09-16）ので、
+   * まとめ先は品名の名寄せ（①機械的正規化 →②別名辞書）で決める。ムダ支出の集計と同じ規則。
+   * ただし単位が食い違うとき（「袋」と「個」）は数を足せないので、別の在庫として作る。
+   *
+   * 意味の判断はしない。「牛乳」と「低脂肪乳」は、本人が辞書でまとめない限り別のまま。
+   */
+  function planInventoryAdditions(lines, items, options) {
+    const aliases = aliasIndexOf(options?.aliases);
+    const locationId = String(options?.locationId || '');
+    const receiptId = String(options?.receiptId || '');
+    const byKey = new Map();
+    (Array.isArray(items) ? items : []).forEach(item => {
+      const key = resolveItemKey(item, aliases);
+      if (key && !byKey.has(key)) byKey.set(key, item);
+    });
+
+    const creates = [];
+    const merges = [];
+    (Array.isArray(lines) ? lines : []).forEach(line => {
+      const rawName = String(line?.rawName || line?.name || '').trim();
+      if (!rawName) return;
+      const quantity = Number(line?.quantity) > 0 ? Number(line.quantity) : 1;
+      const unit = String(line?.unit || '').trim();
+      const key = resolveItemKey({ name: line?.name, rawName }, aliases);
+      const existing = byKey.get(key);
+      const sameUnit = existing && (!unit || !existing.unit || String(existing.unit).trim() === unit);
+      const purchaseRef = receiptId && line?.lineNo ? `${receiptId}#${line.lineNo}` : '';
+
+      if (existing && sameUnit) {
+        // 同じレシートに同じ品物が2行あっても、1つの在庫に1回だけ書くようにまとめる
+        // （行ごとに書くと、あとの書き込みが前の足し算を打ち消す）
+        const found = merges.find(row => row.itemId === existing.id);
+        if (found) {
+          found.added += quantity;
+          found.quantity += quantity;
+          found.lineIds.push(String(line?.id || ''));
+          if (purchaseRef) found.purchaseRefs.push(purchaseRef);
+          return;
+        }
+        merges.push({
+          itemId: existing.id,
+          lineIds: [String(line?.id || '')],
+          name: String(existing.name || rawName),
+          unit: String(existing.unit || unit),
+          added: quantity,
+          quantity: Number(existing.quantity || 0) + quantity,
+          purchaseRefs: purchaseRef ? [purchaseRef] : []
+        });
+        return;
+      }
+      creates.push({
+        lineId: String(line?.id || ''),
+        locationId,
+        name: aliases.canonicalNames.get(key) || rawName,
+        quantity,
+        unit,
+        category: inventoryCategoryOf(line?.category),
+        purchaseRef,
+        purchasePrice: Math.round(Number(line?.amount || 0))
+      });
+    });
+    return { creates, merges };
+  }
+
   /**
    * 明細行1件の無駄金額。
    * 半額扱い(unused)の端数は切り捨てる。金額が0以下、または見覚えのない outcome は0。
@@ -1698,6 +1781,8 @@
     wasteAmountOf, classifyOutcomeTracked, summarizeWaste, repeatedWasteRanking, dueForReview,
     // 品名の名寄せ
     normalizeItemName, resolveItemKey,
+    // レシート明細 → なかみメモの在庫
+    INVENTORY_CATEGORY_BY_RECEIPT_CATEGORY, inventoryCategoryOf, planInventoryAdditions,
     // 補助
     isExternalTransfer, accountDeltasFor,
     suggestShortfallResolution, simulateSpending, simulateWhatIf,

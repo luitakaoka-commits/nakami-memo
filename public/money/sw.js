@@ -5,7 +5,7 @@
 //   下の fetch はキャッシュ優先なので、上げないと一度開いた端末には古いファイルが出続ける。
 //   22 のまま finance-engine.js を2回直していて（09-09 名寄せ、09-13 部門コード）、スマホに届いていなかった。
 //   tests/sw-version.test.js が、中身が変わったのに上げ忘れていないかを確かめる。
-const VERSION = '24';
+const VERSION = '25';
 const CACHE = `okane-v${VERSION}`;
 // index.html が読み込むURL（クエリ付き）と完全に一致させる。
 // クエリが1文字でも違うと別URL扱いになり、プリキャッシュがヒットしない。

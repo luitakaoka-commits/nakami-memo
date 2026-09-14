@@ -93,7 +93,14 @@ test('4. Firestore に入れるフィールドが rules の hasOnly と一致す
     .split(',').map(item => item.trim().replace(/^'|'$/g, '')).filter(Boolean);
   const record = build();
   deepEqual(Object.keys(record.receipt), listOf('match /receipts/'), 'receipts');
-  deepEqual(Object.keys(record.items[0]), listOf('match /receiptItems/'), 'receiptItems');
+  /* 明細だけは、GAS が書かないフィールドがルールに1つある（inventoryItemId は
+     「在庫に入れる」でアプリが後から書き足す）。危ない向き——GAS がルールに無い
+     フィールドを書く——は下で弾き、逆向きは「書かないと分かっているもの」を
+     並べて確かめる。ここが増えたら本当に書き忘れていないか見ること。 */
+  const itemFields = listOf('match /receiptItems/');
+  const written = Object.keys(record.items[0]);
+  deepEqual(written.filter(key => !itemFields.includes(key)), [], 'ルールに無いフィールドを書いている');
+  deepEqual(itemFields.filter(key => !written.includes(key)), ['inventoryItemId'], 'GAS が書かないフィールド');
 });
 
 test('5. 名前も金額も無い行は落とす（読み取りのゴミ）', () => {
