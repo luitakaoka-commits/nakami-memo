@@ -708,6 +708,97 @@ const closeModals = page => page.evaluate(() => {
     assert(await page.locator('#inventory-modal:not([hidden])').count() === 0, '入れたあとも画面が開いたまま');
   });
 
+  await record('salary_record_flow', async () => {
+    // 給与の見込みを「記録」の取引として持つ（2026-09-15）。
+    // 以前は裏で足していたので直せず、給料日に実際の額が分かっても見込みが残り続けた。
+    await closeModals(page);
+    const before = await page.evaluate(() => {
+      const state = window.__YORYOKU__.getState();
+      const record = state.transactions.find(item => item.salaryPaymentMonth === '2026-09');
+      return {
+        record,
+        balance: state.accounts.find(a => a.id === 'a1').currentBalance,
+        virtualSeptember: window.__YORYOKU__.cashflowCheck().salaryEvents.filter(item => item.paymentMonth === '2026-09').length
+      };
+    });
+    // seed: 8/3 に5時間（時給1,200円）→ 9/15 支給。今日は 9/2
+    assert(before.record, '9月支給の給与が記録に作られていない');
+    assert(before.record.status === 'planned' && before.record.amount === 6000, `見込みの中身が違う: ${JSON.stringify(before.record)}`);
+    assert(before.record.dueDate === '2026-09-15' && before.record.category === '給与', `支給日かカテゴリが違う: ${JSON.stringify(before.record)}`);
+    assert(before.virtualSeptember === 0, '記録があるのに裏の見込みも足している（二重計上）');
+
+    // 記録の「未確定」に出る
+    await page.evaluate(() => { window.__YORYOKU__.setPage('records'); window.__YORYOKU__.setRecordTab('transactions'); });
+    await page.click('#page-container [data-record-filter="planned"]');
+    await page.waitForTimeout(150);
+    const listed = await page.locator(`#page-container [data-action="edit-event"][data-id="${before.record.id}"]`).count();
+    assert(listed === 1, '記録の未確定に給与の見込みが出ていない（編集できない）');
+
+    // シフト画面から、実際の額で確定する
+    await page.evaluate(() => { window.__YORYOKU__.setPage('shift'); window.__YORYOKU__.setShiftMonth('2026-09'); });
+    await page.waitForSelector('#page-container .salary-record-card');
+    await page.click(`#page-container .salary-record-card [data-action="settle-event"][data-id="${before.record.id}"]`);
+    await page.waitForSelector('#event-modal:not([hidden])');
+    assert((await page.textContent('#event-modal-title')).trim() === '給与を確定', '確定用の画面になっていない');
+    assert(await page.inputValue('#event-status') === 'settled', '状態が確定済みで開いていない');
+    assert(await page.inputValue('#event-category') === '給与', `カテゴリが給与のまま開いていない: ${await page.inputValue('#event-category')}`);
+    await page.fill('#event-amount', '5800');
+    await page.click('#event-form button[type="submit"]');
+    await page.waitForTimeout(250);
+
+    const after = await page.evaluate(id => {
+      const state = window.__YORYOKU__.getState();
+      return {
+        record: state.transactions.find(item => item.id === id),
+        balance: state.accounts.find(a => a.id === 'a1').currentBalance
+      };
+    }, before.record.id);
+    assert(after.record.status === 'settled' && after.record.amount === 5800, `確定額が入っていない: ${JSON.stringify(after.record)}`);
+    assert(after.record.salaryManual === true, '確定したのに、シフトで上書きされうる状態のまま');
+    assert(after.record.category === '給与', `編集でカテゴリが変わった: ${after.record.category}`);
+    assert(after.record.memo === '2026年8月分の給与', `確定したのにメモが見込みのまま: ${after.record.memo}`);
+    assert(after.balance === before.balance + 5800, `残高に確定額が入っていない: ${before.balance} → ${after.balance}`);
+
+    // シフト画面にも確定額と見込みとの差が出る
+    const card = await page.textContent('#page-container .salary-record-card');
+    assert(card.includes('確定した支給額') && card.includes('5,800'), `シフト画面に確定額が出ていない: ${card}`);
+    assert(card.includes('200') && card.includes('少ない'), `見込みとの差が出ていない: ${card}`);
+
+    // 確定後にシフトを足しても、確定額は変わらない
+    await page.evaluate(() => {
+      const state = window.__YORYOKU__.getState();
+      state.workEntries.push({ id: 'w-late', date: '2026-08-20', hours: 3, status: 'worked', hourlyRateOverride: 0, memo: '' });
+      window.__YORYOKU__.syncSalaryRecords();
+    });
+    const kept = await page.evaluate(id => window.__YORYOKU__.getState().transactions.find(item => item.id === id).amount, before.record.id);
+    assert(kept === 5800, `確定額がシフトで上書きされた: ${kept}`);
+
+    // 記録から消した月は、作り直さず、計算にも戻ってこない
+    await page.evaluate(() => {
+      window.__YORYOKU__.getState().workEntries.push({ id: 'w-oct', date: '2026-09-10', hours: 4, status: 'planned', hourlyRateOverride: 0, memo: '' });
+      window.__YORYOKU__.syncSalaryRecords();
+      window.__YORYOKU__.setPage('records');
+    });
+    const october = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.salaryPaymentMonth === '2026-10'));
+    assert(october && october.amount === 4800, `10月支給の見込みが作られていない: ${JSON.stringify(october)}`);
+    await page.click(`#page-container [data-action="delete-event"][data-id="${october.id}"]`);
+    await page.waitForTimeout(200);
+    const dismissed = await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      const changed = api.syncSalaryRecords();
+      const state = api.getState();
+      return {
+        changed,
+        exists: state.transactions.some(item => item.salaryPaymentMonth === '2026-10'),
+        months: state.settings.wage.dismissedSalaryMonths,
+        virtual: api.cashflowCheck().salaryEvents.filter(item => item.paymentMonth === '2026-10').length
+      };
+    });
+    assert(!dismissed.exists && !dismissed.changed, `消した見込みが作り直された: ${JSON.stringify(dismissed)}`);
+    assert(dismissed.months.includes('2026-10'), '消した月を覚えていない');
+    assert(dismissed.virtual === 0, '消した月の見込みが裏で足されている');
+  });
+
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

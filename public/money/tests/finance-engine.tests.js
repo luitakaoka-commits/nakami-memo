@@ -262,6 +262,115 @@
       equal(day.primaryBalance, 100000 + Math.round(10 * 1200), '支給日に残高が増える');
     });
 
+    /* ---------- 給与を「記録」の取引として持つ（2026-09-15） ---------- */
+
+    const salaryTx = (over = {}) => tx({
+      id: 'sal', kind: 'income', amount: 12000, transactionDate: '2026-09-15', dueDate: '2026-09-15',
+      status: 'planned', sourceAccountId: 'a1', category: '給与', salaryPaymentMonth: '2026-09', salaryManual: false, ...over
+    });
+
+    test('給与: 記録が無い今後の支給月は、見込みの取引を作る', () => {
+      const plan = engine.planSalaryRecords({
+        today: TODAY, workEntries: [work('2026-08-01', 10)], wage: { ...WAGE, depositAccountId: 'a1' }, transactions: []
+      });
+      equal(plan.creates.length, 1, '1件作る');
+      const created = plan.creates[0];
+      equal(created.salaryPaymentMonth, '2026-09', '支給月');
+      equal(created.amount, 12000, '見込み額');
+      equal(created.dueDate, '2026-09-15', '支給日');
+      equal(created.status, 'planned', '未確定');
+      equal(created.kind, 'income', '収入');
+      equal(created.category, '給与', 'カテゴリ');
+      equal(created.sourceAccountId, 'a1', '入金先');
+      equal(created.memo, '2026年8月分の給与（シフトからの見込み）', 'メモ');
+    });
+
+    test('給与: 支給日が過ぎた月は後から作らない（確定し忘れの未確定を増やさない）', () => {
+      const plan = engine.planSalaryRecords({ today: TODAY, workEntries: [work('2026-06-01', 10)], wage: WAGE, transactions: [] });
+      equal(plan.creates.length, 0, '7/15支給は過去');
+    });
+
+    test('給与: 手を入れていない未確定の見込みは、シフトの変更を追いかける', () => {
+      const plan = engine.planSalaryRecords({
+        today: TODAY, workEntries: [work('2026-08-01', 10), work('2026-08-02', 5)], wage: WAGE, transactions: [salaryTx()]
+      });
+      equal(plan.creates.length, 0, '作り直さない');
+      equal(plan.updates.length, 1, '1件直す');
+      equal(plan.updates[0].patch.amount, 18000, '15時間分に直る');
+    });
+
+    test('給与: 手で直した見込み・確定済みは、シフトが変わっても上書きしない', () => {
+      const entries = [work('2026-08-01', 10), work('2026-08-02', 5)];
+      const manual = engine.planSalaryRecords({ today: TODAY, workEntries: entries, wage: WAGE, transactions: [salaryTx({ amount: 17500, salaryManual: true })] });
+      equal(manual.updates.length + manual.removes.length + manual.creates.length, 0, '手で直した額は残す');
+      const settled = engine.planSalaryRecords({ today: TODAY, workEntries: entries, wage: WAGE, transactions: [salaryTx({ amount: 17500, status: 'settled' })] });
+      equal(settled.updates.length + settled.removes.length + settled.creates.length, 0, '確定額は残す');
+    });
+
+    test('給与: シフトが全部消えた未確定の見込みは消す。記録から消した月は作り直さない', () => {
+      const removed = engine.planSalaryRecords({ today: TODAY, workEntries: [], wage: WAGE, transactions: [salaryTx()] });
+      equal(JSON.stringify(removed.removes), JSON.stringify(['sal']), 'シフトが無くなった見込みは消す');
+      const dismissed = engine.planSalaryRecords({
+        today: TODAY, workEntries: [work('2026-08-01', 10)], wage: { ...WAGE, dismissedSalaryMonths: ['2026-09'] }, transactions: []
+      });
+      equal(dismissed.creates.length, 0, '消した月は作らない');
+    });
+
+    test('給与: 記録がある月は、裏での見込みを足さない（二重に数えない）', () => {
+      const accounts = [account('a1', '生活費口座', 'primary', 100000)];
+      const input = {
+        today: TODAY, endDate: '2026-09-30', deadline: '2026-09-30', accounts, defenseLine: 0,
+        workEntries: [work('2026-08-01', 10)], wage: { ...WAGE, depositAccountId: 'a1' },
+        transactions: [salaryTx({ amount: 11500, salaryManual: true })]
+      };
+      const check = engine.calculateCashflowCheck(input);
+      equal(check.salaryEvents.length, 0, '見込みは足さない');
+      equal(check.timeline.find(item => item.date === '2026-09-15').primaryBalance, 111500, '記録の額（直した額）だけ増える');
+      const spendable = engine.calculateSpendableAmount(input);
+      equal(spendable.salaryTotal, 0, '裏の見込みは0');
+      equal(spendable.incomeTotal, 11500, '記録の給与を収入として数える');
+    });
+
+    test('給与: 記録から消した月は、裏での見込みにも戻ってこない', () => {
+      const input = {
+        today: TODAY, endDate: '2026-09-30', deadline: '2026-09-30', accounts: [account('a1', '生活費口座', 'primary', 100000)], defenseLine: 0,
+        workEntries: [work('2026-08-01', 10)], wage: { ...WAGE, depositAccountId: 'a1', dismissedSalaryMonths: ['2026-09'] }, transactions: []
+      };
+      equal(engine.calculateCashflowCheck(input).salaryEvents.length, 0, '支払い能力チェックに入らない');
+      equal(engine.calculateSpendableAmount(input).salaryTotal, 0, '使える金額に入らない');
+    });
+
+    test('給与: 確定済みの給与は、残高に入っているので予定として数えない', () => {
+      const accounts = [account('a1', '生活費口座', 'primary', 111500)];
+      const spendable = engine.calculateSpendableAmount({
+        today: TODAY, deadline: '2026-09-30', accounts, defenseLine: 0,
+        workEntries: [work('2026-08-01', 10)], wage: WAGE,
+        transactions: [salaryTx({ amount: 11500, status: 'settled' })]
+      });
+      equal(spendable.salaryTotal + spendable.incomeTotal, 0, '見込みも予定収入も足さない');
+      equal(spendable.total, 111500, '残高だけ');
+    });
+
+    test('給与: 「見込みを使える額に含めない」設定なら、未確定の給与の取引も外す', () => {
+      const spendable = engine.calculateSpendableAmount({
+        today: TODAY, deadline: '2026-09-30', accounts: [account('a1', '生活費口座', 'primary', 100000)], defenseLine: 0,
+        includeSalary: false, workEntries: [work('2026-08-01', 10)], wage: WAGE, transactions: [salaryTx()]
+      });
+      equal(spendable.incomeTotal, 0, '給与の取引を外す');
+      equal(spendable.total, 100000, '残高だけ');
+    });
+
+    test('給与: シフト画面に出す状態（確定額と見込みの差）', () => {
+      const salary = engine.calculateSalaryByPaymentMonth([work('2026-08-01', 10)], '2026-09', WAGE);
+      const settled = engine.salaryRecordSummary([salaryTx({ amount: 11500, status: 'settled' })], '2026-09', salary, WAGE);
+      equal(settled.status, 'settled', '確定済み');
+      equal(settled.amount, 11500, '確定額');
+      equal(settled.difference, -500, '見込みより500円少ない');
+      equal(engine.salaryRecordSummary([salaryTx({ salaryManual: true })], '2026-09', salary, WAGE).status, 'manual', '直した見込み');
+      equal(engine.salaryRecordSummary([], '2026-09', salary, { dismissedSalaryMonths: ['2026-09'] }).status, 'dismissed', '消した月');
+      equal(engine.salaryRecordSummary([salaryTx({ status: 'cancelled' })], '2026-09', salary, WAGE).status, 'none', '取消は無いものとして扱う');
+    });
+
     test('不足解消の提案が振替元と金額を返す', () => {
       const accounts = [
         account('a1', '生活費口座', 'primary', 100000),

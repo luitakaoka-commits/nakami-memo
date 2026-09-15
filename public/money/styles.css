@@ -1149,3 +1149,16 @@ button.legend-row.active { background: rgba(42, 120, 214, .12); }
 .review-choices .button { width: 100%; min-height: 3rem; }
 .review-choices-reason { grid-template-columns: repeat(2, 1fr); }
 .waste-card .summary-strip { margin-bottom: .4rem; }
+
+/* ===== シフト画面の「記録の給与」（2026-09-15） =====
+   見込みは記録の取引として持つ。確定したら確定額と見込みとの差をここに出す。 */
+.salary-record-card { padding: 1.3rem 1.45rem; margin-bottom: .4rem; }
+.salary-record-card > .list-card-header { padding: 0 0 .7rem; }
+.salary-record-amount { display: grid; gap: .25rem; }
+.salary-record-amount strong { font-size: 1.6rem; line-height: 1.2; }
+.salary-record-amount small { color: var(--muted); }
+.salary-record-card .hero-actions { margin-top: .9rem; }
+.salary-record-settled { box-shadow: inset 4px 0 0 var(--positive), var(--shadow-card); }
+@media (max-width: 520px) {
+  .salary-record-card { padding: 1.2rem; }
+}

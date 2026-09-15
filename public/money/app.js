@@ -115,7 +115,9 @@
           closingDay: 0,
           paymentDay: 25,
           paymentMonthOffset: 1,
-          includeForecastInSpendable: false
+          includeForecastInSpendable: false,
+          // 記録から給与の見込みを消した支給月。シフトから作り直さないために覚えておく（2026-09-15）
+          dismissedSalaryMonths: []
         }
       }
     };
@@ -182,6 +184,9 @@
       lendingAmount: Number(source.lendingAmount || 0),
       affectsForecast: source.affectsForecast !== false,
       recurringPlanId: source.recurringPlanId || '',
+      // シフトから作った給与の取引だけが持つ。どの支給月か（'YYYY-MM'）と、手で直したか（2026-09-15）
+      salaryPaymentMonth: source.salaryPaymentMonth || '',
+      salaryManual: source.salaryManual === true,
       settledAt: source.settledAt || '',
       createdAt: source.createdAt || now,
       updatedAt: source.updatedAt || now
@@ -589,6 +594,8 @@
     localStorage.setItem(CLOUD_USER_KEY, user.uid);
     await cloud.connect(state, applyRemoteState, handleCloudStatus, handleImportCandidates, handleReceipts, handleReceiptItems, handleItemAliases);
     state.mode = 'cloud';
+    // 以前は給与の見込みを裏で足していた。起動時に、今後の支給月の見込みを記録の取引としてそろえる（2026-09-15）
+    if (syncSalaryRecords()) persist();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     $('#auth-screen').hidden = true;
     if (state.meta.onboarded) showApp(); else renderOnboarding();
@@ -617,7 +624,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=26" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=27" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -786,6 +793,15 @@
     return CHECK_STATUS[check?.verdict] || CHECK_STATUS.ok;
   }
 
+  /** 給与の状態ごとの見出し（finance.salaryRecordSummary の status） */
+  const SALARY_STATUS_LABELS = {
+    settled: '確定した支給額',
+    manual: '記録で直した見込み額',
+    planned: '予定を含む見込み',
+    dismissed: '予定を含む見込み（記録からは削除済み）',
+    none: '予定を含む見込み'
+  };
+
   /** 支給月別の給与見込み（ホーム・シフトで共通に使う） */
   function nextSalary(baseDate = today()) {
     const wage = state.settings.wage;
@@ -798,6 +814,48 @@
     return salary;
   }
 
+  /**
+   * シフトから求めた給与の見込みを、「記録」の取引としてそろえる（2026-09-15）。
+   * 決め方は finance.planSalaryRecords が持つ（手で直したもの・確定済みは触らない、消した月は作り直さない）。
+   * 変えたら true を返す。保存（persist）は呼ぶ側が行う。
+   */
+  function syncSalaryRecords() {
+    if (!state || !Array.isArray(state.transactions)) return false;
+    const wage = state.settings.wage;
+    const plan = finance.planSalaryRecords({
+      today: today(), workEntries: state.workEntries, wage, transactions: state.transactions, holidayOptions: holidayOptions()
+    });
+    if (!plan.creates.length && !plan.updates.length && !plan.removes.length) return false;
+    const fallbackAccount = primaryAccount()?.id || state.accounts[0]?.id || '';
+    plan.creates.forEach(partial => {
+      state.transactions.push(createTransaction({ ...partial, sourceAccountId: partial.sourceAccountId || fallbackAccount }));
+    });
+    plan.updates.forEach(({ id, patch }) => {
+      const target = state.transactions.find(item => item.id === id);
+      if (target) Object.assign(target, patch, { updatedAt: nowIso() });
+    });
+    if (plan.removes.length) {
+      const removing = new Set(plan.removes);
+      state.transactions = state.transactions.filter(item => !removing.has(item.id));
+    }
+    return true;
+  }
+
+  /** その支給月の給与が、記録でどうなっているか（シフト・ホームで使う） */
+  function salaryRecordState(paymentMonth, salary) {
+    return finance.salaryRecordSummary(state.transactions, paymentMonth, salary, state.settings.wage);
+  }
+
+  /** 記録から消した給与の見込みを、シフトから作り直せるようにする */
+  function restoreSalaryRecord(paymentMonth) {
+    const wage = state.settings.wage;
+    wage.dismissedSalaryMonths = (wage.dismissedSalaryMonths || []).filter(month => month !== paymentMonth);
+    const before = state.transactions.length;
+    syncSalaryRecords();
+    persist(); renderPage();
+    showToast(state.transactions.length > before ? '給与の見込みを記録に戻しました' : '支給日が過ぎているため、記録には戻せませんでした');
+  }
+
   /* ================= ホーム ================= */
 
   function renderHome() {
@@ -807,6 +865,7 @@
     const status = statusFor(spendable?.total ?? 0);
     const checkStatus = checkStatusOf(check);
     const salary = nextSalary();
+    const salaryRecord = salaryRecordState(salary.paymentMonth, salary);
     const wageConfigured = Number(state.settings.wage.hourlyRate || 0) > 0;
 
     const upcoming = sortedTransactions(state.transactions.filter(item => item.status === 'planned' && item.dueDate >= today())).slice(0, 4);
@@ -858,7 +917,7 @@
           <button class="button button-quiet button-small" data-page="shift">シフトを見る</button>
         </div>
         ${wageConfigured ? `<div class="wage-grid">
-          <div class="wage-main"><span>予定を含む見込み</span><strong>${formatFlowAmount(salary.totalAmount, 'in')}</strong><small>${formatDate(salary.workStartDate)}〜${formatDate(salary.workEndDate)}・${formatHours(salary.totalHours)}</small></div>
+          <div class="wage-main"><span>${esc(SALARY_STATUS_LABELS[salaryRecord.status])}</span><strong>${formatFlowAmount(salaryRecord.amount, 'in')}</strong><small>${formatDate(salary.workStartDate)}〜${formatDate(salary.workEndDate)}・${formatHours(salary.totalHours)}</small></div>
           <div class="wage-stat"><span>勤務済み</span><strong>${formatFlowAmount(salary.confirmedAmount, 'in')}</strong><small>${formatHours(salary.workedHours)}</small></div>
           <div class="wage-stat"><span>勤務予定</span><strong>${formatFlowAmount(salary.plannedAmount, 'in')}</strong><small>${formatHours(salary.plannedHours)}</small></div>
         </div>` : `<div class="wage-setup"><div><strong>時給を設定してください</strong><p>時給を設定すると、シフトから見込み額を計算します。</p></div><button class="button button-primary button-small" data-page="settings">給与設定へ</button></div>`}
@@ -2136,12 +2195,50 @@
     return [...months].sort();
   }
 
+  /**
+   * シフト画面の「記録の給与」カード（2026-09-15）。
+   * 見込みは記録の取引として持つので、直す・消す・確定するは記録の側で行う。
+   * 確定したら、確定した支給額と見込みとの差をここに出す。
+   */
+  function renderSalaryRecordCard(summary, paymentMonth) {
+    const record = summary.record;
+    const editButton = record ? `<button class="button button-quiet button-small" data-action="edit-event" data-id="${record.id}">記録で直す</button>` : '';
+    if (summary.status === 'settled') {
+      const diff = summary.difference;
+      const diffText = diff === 0 ? '見込みどおり' : `見込みより${formatAbsoluteYen(Math.abs(diff))}${diff > 0 ? '多い' : '少ない'}`;
+      return `<section class="card salary-record-card salary-record-settled">
+        <div class="list-card-header"><div><span class="eyebrow">記録の給与・${record.settledAt ? `${formatDate(record.settledAt, true)}に確定` : '確定済み'}</span><h2>確定した支給額</h2></div><span class="badge badge-settled">確定済み</span></div>
+        <div class="salary-record-amount"><strong class="value-positive">${formatDisplayedAmount(summary.amount)}</strong><small>${esc(diffText)}（シフトからの見込み ${formatAbsoluteYen(summary.forecast)}）</small></div>
+        <div class="hero-actions">${editButton}</div>
+      </section>`;
+    }
+    if (summary.status === 'manual' || summary.status === 'planned') {
+      const note = summary.status === 'manual'
+        ? '記録で金額や日付を直しているので、シフトを変えてもこの額のままです。'
+        : 'シフトを変えると、この額も自動で変わります。給料日に実際の額が分かったら「確定」から直してください。';
+      return `<section class="card salary-record-card">
+        <div class="list-card-header"><div><span class="eyebrow">記録の給与・${formatDate(record.dueDate, true)}入金予定</span><h2>${esc(SALARY_STATUS_LABELS[summary.status])}</h2></div><span class="badge badge-planned">未確定</span></div>
+        <div class="salary-record-amount"><strong class="value-positive">${formatDisplayedAmount(summary.amount)}</strong><small>${esc(note)}</small></div>
+        <div class="hero-actions"><button class="button button-primary button-small" data-action="settle-event" data-id="${record.id}">実際の額で確定</button>${editButton}</div>
+      </section>`;
+    }
+    if (summary.status === 'dismissed') {
+      return `<section class="card salary-record-card">
+        <div class="list-card-header"><div><span class="eyebrow">記録の給与</span><h2>この月の見込みは記録から削除しました</h2></div></div>
+        <p class="form-note">使える金額や支払い能力チェックにも入っていません。</p>
+        <div class="hero-actions"><button class="button button-quiet button-small" data-action="restore-salary" data-month="${paymentMonth}">見込みを記録に戻す</button></div>
+      </section>`;
+    }
+    return '';
+  }
+
   function renderShift() {
     const wage = state.settings.wage;
     const paymentMonth = currentShiftPaymentMonth();
     const salary = finance.calculateSalaryByPaymentMonth(state.workEntries, paymentMonth, wage, holidayOptions());
     const movedForward = salary.paymentDate !== salary.scheduledPaymentDate;
     const needsRate = !Number(wage.hourlyRate) && !salary.entries.some(entry => entry.rate > 0);
+    const salaryRecord = salaryRecordState(paymentMonth, salary);
 
     const options = shiftPaymentMonthOptions(paymentMonth)
       .map(key => `<option value="${key}"${key === paymentMonth ? ' selected' : ''}>${formatMonthLabel(key)}支給</option>`)
@@ -2163,6 +2260,8 @@
           <div><span>支給予定日</span><strong>${formatDate(salary.paymentDate, true)}</strong><small>${movedForward ? `${formatDate(salary.scheduledPaymentDate)}が休日のため前営業日` : '基本支給日どおり'}</small></div>
         </div>
       </section>
+
+      ${renderSalaryRecordCard(salaryRecord, paymentMonth)}
 
       <section class="summary-strip">
         <div class="stat-card"><span>勤務済み額</span><strong class="value-positive">${formatDisplayedAmount(salary.confirmedAmount)}</strong></div>
@@ -2261,9 +2360,12 @@
             ? `<button type="button" class="badge badge-muted badge-toggle" data-action="toggle-details" data-id="${transaction.id}" aria-expanded="${expanded}">請求総額 ・ 明細${details.length}件<span class="badge-caret">${expanded ? '▲' : '▼'}</span></button>`
             : '<span class="badge badge-muted">請求総額</span>'))
         : '';
+      const salaryBadge = transaction.salaryPaymentMonth
+        ? `<span class="badge badge-muted">${transaction.status === 'settled' ? 'シフトの給与' : transaction.salaryManual ? 'シフトの給与・直した額' : 'シフトからの見込み'}</span>`
+        : '';
       const settleButton = transaction.status === 'planned' ? `<button class="mini-button" data-action="settle-event" data-id="${transaction.id}">確定</button>` : '';
       const detailPanel = expanded ? renderStatementDetailPanel(transaction, details) : '';
-      return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${formatDate(transaction.dueDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact ? `<div class="list-actions">${settleButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button></div>` : ''}</div></div>${detailPanel}</div>`;
+      return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${formatDate(transaction.dueDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge} ${salaryBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact ? `<div class="list-actions">${settleButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button></div>` : ''}</div></div>${detailPanel}</div>`;
     }).join('');
   }
 
@@ -2388,10 +2490,12 @@
         : ['saving', 'nisa'].includes(kind) ? '予定で保存します。確定すると残高に反映します。' : '予定で保存します。確定すると残高に反映します。';
   }
 
-  function openEventModal(id = '', presetKind = 'payment') {
+  function openEventModal(id = '', presetKind = 'payment', presetStatus = '') {
     const modal = $('#event-modal');
     const transaction = id ? state.transactions.find(item => item.id === id) : null;
-    $('#event-modal-title').textContent = transaction ? '予定を編集' : '予定を追加';
+    $('#event-modal-title').textContent = transaction
+      ? (transaction.salaryPaymentMonth && presetStatus === 'settled' ? '給与を確定' : '予定を編集')
+      : '予定を追加';
     $('#event-id').value = transaction?.id || '';
     $('#event-kind').value = transaction?.kind || presetKind;
     $('#event-date').value = transaction?.dueDate || dateAdd(today(), 7);
@@ -2412,10 +2516,17 @@
     populateAccountSelect('#event-destination', true);
     $('#event-source').value = transaction?.sourceAccountId || primaryAccount()?.id || state.accounts[0]?.id || '';
     $('#event-destination').value = transaction?.destinationAccountId || '';
+    if (presetStatus === 'settled') $('#event-status').value = 'settled';
     updateEventKindUi();
     syncCardSourceAccount();
+    if (transaction?.salaryPaymentMonth) {
+      $('#event-form-note').textContent = presetStatus === 'settled'
+        ? 'シフトからの見込み額が入っています。給与明細や通帳の、実際に振り込まれた額に直してから保存してください。確定すると入金先口座の残高に反映し、シフト画面にも確定額が出ます。'
+        : 'シフトから作った給与の見込みです。金額か日付を直して保存すると、シフトを変えてもこの額のままになります。';
+    }
     modal.hidden = false;
     $('#event-amount').focus();
+    if (presetStatus === 'settled') $('#event-amount').select();
   }
 
   function closeModal(id) { const modal = $(`#${id}`); if (modal) modal.hidden = true; }
@@ -2516,8 +2627,16 @@
       id: id || '', kind: $('#event-kind').value, amount: Number($('#event-amount').value || 0), dueDate: $('#event-date').value,
       transactionDate: eventUsageDateValue(), transactionAt: current?.transactionAt || '', absorbedBy: current?.absorbedBy || '', dateEstimated: false,
       entryType: eventEntryTypeValue(), origin: current?.origin || '',
-      status: eventStatusValue(current), sourceAccountId: $('#event-source').value, destinationAccountId: $('#event-destination').value || '', transferType: $('#event-transfer-type').value || 'internal', destinationName: $('#event-recipient').value.trim(), cardId: $('#event-kind').value === 'payment' ? ($('#event-card').value || '') : '', category: $('#event-category').value, memo: $('#event-memo').value.trim(), lendingAmount: Math.min(Number($('#event-lending').value || 0), Number($('#event-amount').value || 0)), affectsForecast: !$('#event-exclude').checked, recurringPlanId: current?.recurringPlanId || '', settledAt: current?.settledAt || '', createdAt: current?.createdAt || '', updatedAt: nowIso()
+      status: eventStatusValue(current), sourceAccountId: $('#event-source').value, destinationAccountId: $('#event-destination').value || '', transferType: $('#event-transfer-type').value || 'internal', destinationName: $('#event-recipient').value.trim(), cardId: $('#event-kind').value === 'payment' ? ($('#event-card').value || '') : '', category: $('#event-category').value, memo: $('#event-memo').value.trim(), lendingAmount: Math.min(Number($('#event-lending').value || 0), Number($('#event-amount').value || 0)), affectsForecast: !$('#event-exclude').checked, recurringPlanId: current?.recurringPlanId || '', settledAt: current?.settledAt || '', createdAt: current?.createdAt || '', updatedAt: nowIso(),
+      salaryPaymentMonth: current?.salaryPaymentMonth || '', salaryManual: current?.salaryManual === true
     });
+    // シフトから作った給与を、金額か日付を変えて保存したか、一度でも確定したら、もうシフトでは上書きしない
+    if (current?.salaryPaymentMonth && (next.amount !== Number(current.amount) || next.dueDate !== current.dueDate
+      || current.status === 'settled' || next.status === 'settled')) {
+      next.salaryManual = true;
+    }
+    // 確定した給与はもう見込みではないので、自動で付けたメモの「（シフトからの見込み）」を外す
+    if (next.salaryPaymentMonth && next.status === 'settled') next.memo = next.memo.replace('（シフトからの見込み）', '');
     if (!next.amount || !next.dueDate || !next.sourceAccountId) { showToast('日付・金額・口座を入力してください'); return; }
     if (next.kind === 'transfer' && next.transferType === 'internal' && (!next.destinationAccountId || next.destinationAccountId === next.sourceAccountId)) { showToast('自分の別口座を移動先に指定してください'); return; }
     if (next.kind === 'transfer' && next.transferType === 'external' && !next.destinationName) { showToast('振込先の名前を入力してください'); return; }
@@ -2544,12 +2663,17 @@
     persist(); closeModal('event-modal'); renderPage();
     showToast(absorbedCount
       ? `確定しました。メール取込の明細${absorbedCount}件を内訳にまとめました`
-      : (current ? '予定を更新しました' : '予定を追加しました'));
+      : next.salaryPaymentMonth && !wasSettled && willSettle
+        ? `給与を${formatAbsoluteYen(next.amount)}で確定しました。残高とシフト画面に反映しました`
+        : (current ? '予定を更新しました' : '予定を追加しました'));
   }
 
   function settleEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction || transaction.status !== 'planned') return;
+    // 給与の見込みはシフトからの計算なので、実際の支給額と違うことが多い。
+    // そのまま確定させず、確定済みにした編集画面を開いて額を直してもらう（2026-09-15）
+    if (transaction.salaryPaymentMonth) { openEventModal(id, transaction.kind, 'settled'); return; }
     const settleError = validateSettlement(transaction);
     if (settleError) { showToast(settleError); openEventModal(id); return; }
     transaction.status = 'settled'; transaction.settledAt = today(); transaction.updatedAt = nowIso(); applyEffect(transaction);
@@ -2561,8 +2685,14 @@
   function deleteEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction) return;
-    if (!window.confirm(`${transaction.memo || kindMeta(transaction.kind).label}を削除しますか？${transaction.status === 'settled' ? '\n確定済みのため、残高も元に戻します。' : ''}`)) return;
+    const salaryNote = transaction.salaryPaymentMonth ? '\nこの月の給与は、シフトから作り直しません（シフト画面から戻せます）。' : '';
+    if (!window.confirm(`${transaction.memo || kindMeta(transaction.kind).label}を削除しますか？${transaction.status === 'settled' ? '\n確定済みのため、残高も元に戻します。' : ''}${salaryNote}`)) return;
     if (transaction.status === 'settled') revertEffect(transaction);
+    // 消した給与の月は覚えておく。覚えないと、シフトから同じ見込みがすぐ作り直される
+    if (transaction.salaryPaymentMonth) {
+      const wage = state.settings.wage;
+      wage.dismissedSalaryMonths = [...new Set([...(wage.dismissedSalaryMonths || []), transaction.salaryPaymentMonth])];
+    }
     // 総額を消すと内訳の行き場が無くなるため、吸収していた明細は未確定へ戻す
     releaseStatementDetails(id);
     state.transactions = state.transactions.filter(item => item.id !== id);
@@ -2679,6 +2809,7 @@
     if (!next.date || next.hours <= 0 || next.hours > 24) { showToast('勤務日と勤務時間を確認してください'); return; }
     if (current) state.workEntries = state.workEntries.map(item => item.id === id ? next : item);
     else state.workEntries.push(next);
+    syncSalaryRecords();
     persist(); closeModal('work-modal'); renderPage(); showToast(current ? '勤務を更新しました' : '勤務を記録しました');
   }
 
@@ -2687,6 +2818,7 @@
     if (!current) return;
     if (!window.confirm(`${formatDate(current.date, true)}の勤務を削除しますか？`)) return;
     state.workEntries = state.workEntries.filter(item => item.id !== id);
+    syncSalaryRecords();
     persist(); renderPage(); showToast('勤務を削除しました');
   }
 
@@ -2704,6 +2836,8 @@
     };
     if (next.hourlyRate < 0 || next.salaryPaymentDay < 1 || next.salaryPaymentDay > 31) { showToast('時給と給料日を確認してください'); return; }
     state.settings.wage = next;
+    // 時給や給料日が変わると、手を入れていない見込みの額と日付も変わる
+    syncSalaryRecords();
     persist(); renderPage(); showToast('給与設定を保存しました');
   }
 
@@ -2812,6 +2946,7 @@
     if (name === 'edit-event') openEventModal(action.dataset.id);
     if (name === 'delete-event') deleteEvent(action.dataset.id);
     if (name === 'settle-event') settleEvent(action.dataset.id);
+    if (name === 'restore-salary') restoreSalaryRecord(action.dataset.month);
     if (name === 'add-account') { closeAddMenu(); openAccountModal(); }
     if (name === 'edit-account') openAccountModal(action.dataset.id);
     if (name === 'delete-account') deleteAccount(action.dataset.id);
@@ -2909,7 +3044,7 @@
     } catch (error) {
       showAuth(`Firebaseに接続できません: ${authErrorMessage(error)}`);
     }
-    window.__YORYOKU__ = { getState: () => state, getCloudSession: () => cloud?.getSession() || null, getNextDeadline, pendingExp, buildEngineInput, spendableAmount, cashflowCheck, today, createTransaction, applyEffect, revertEffect, validateSettlement, setPage: page => { currentPage = page; renderPage(); }, setShiftMonth: month => { shiftPaymentMonth = month; renderPage(); }, setImportCandidates: handleImportCandidates, acceptCandidate, stripCandidate, setReceipts: handleReceipts, setReceiptItems: handleReceiptItems, setItemAliases: handleItemAliases, wasteRanking, learnItemAliases, setRecordTab: tab => { recordTab = tab === 'receipts' ? 'receipts' : 'transactions'; renderPage(); }, dueReviewItems, reviewWindowOpen, receiptsAvailable, openReceiptModal, openReviewModal, answerReview, answerReviewReason, saveReceiptForm, normalizeState, emptyState, nextCardPaymentDate: finance.nextCardPaymentDate, simulateSpending: finance.simulateSpending, aggregateCardBills: finance.aggregateCardBills, calculateWageForecast: finance.calculateWageForecast, seedDemo: () => { state = seedDemoState(); persist(); showApp(); } };
+    window.__YORYOKU__ = { getState: () => state, getCloudSession: () => cloud?.getSession() || null, getNextDeadline, pendingExp, buildEngineInput, spendableAmount, cashflowCheck, today, createTransaction, syncSalaryRecords, applyEffect, revertEffect, validateSettlement, setPage: page => { currentPage = page; renderPage(); }, setShiftMonth: month => { shiftPaymentMonth = month; renderPage(); }, setImportCandidates: handleImportCandidates, acceptCandidate, stripCandidate, setReceipts: handleReceipts, setReceiptItems: handleReceiptItems, setItemAliases: handleItemAliases, wasteRanking, learnItemAliases, setRecordTab: tab => { recordTab = tab === 'receipts' ? 'receipts' : 'transactions'; renderPage(); }, dueReviewItems, reviewWindowOpen, receiptsAvailable, openReceiptModal, openReviewModal, answerReview, answerReviewReason, saveReceiptForm, normalizeState, emptyState, nextCardPaymentDate: finance.nextCardPaymentDate, simulateSpending: finance.simulateSpending, aggregateCardBills: finance.aggregateCardBills, calculateWageForecast: finance.calculateWageForecast, seedDemo: () => { state = seedDemoState(); persist(); showApp(); } };
   }
 
   run();

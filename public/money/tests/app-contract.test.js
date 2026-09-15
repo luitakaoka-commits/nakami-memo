@@ -88,7 +88,7 @@ const TRANSACTION_FIELDS = [
   'id', 'kind', 'amount', 'dueDate', 'transactionDate', 'transactionAt', 'absorbedBy',
   'entryType', 'origin', 'dateEstimated', 'status', 'sourceAccountId', 'destinationAccountId',
   'transferType', 'destinationName', 'cardId', 'category', 'memo', 'lendingAmount',
-  'affectsForecast', 'recurringPlanId', 'settledAt', 'createdAt', 'updatedAt'
+  'affectsForecast', 'recurringPlanId', 'salaryPaymentMonth', 'salaryManual', 'settledAt', 'createdAt', 'updatedAt'
 ];
 
 const SAMPLE_TRANSACTION = {
@@ -96,7 +96,9 @@ const SAMPLE_TRANSACTION = {
   transactionAt: '2026-08-20T01:23:00.000Z', absorbedBy: 'st1', entryType: 'itemized', origin: 'mail-import',
   dateEstimated: true, status: 'planned', sourceAccountId: 'a1', destinationAccountId: 'a2',
   transferType: 'internal', destinationName: '家族', cardId: 'c1', category: '食費', memo: 'スーパー',
-  lendingAmount: 200, affectsForecast: false, recurringPlanId: 'p1', settledAt: '2026-09-10',
+  lendingAmount: 200, affectsForecast: false, recurringPlanId: 'p1',
+  // 給与の取引の目印（2026-09-15）。読み込みのたびに落ちると、確定済みの給与がシフトの見込みで作り直される
+  salaryPaymentMonth: '2026-09', salaryManual: true, settledAt: '2026-09-10',
   createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-02T00:00:00.000Z'
 };
 

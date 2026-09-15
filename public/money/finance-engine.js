@@ -407,21 +407,139 @@
     };
   }
 
-  /** 指定期間に支給日が入る給与をまとめて求める */
+  /**
+   * 指定期間に支給日が入る給与をまとめて求める。
+   * options.recordedMonths（支給月の Set）に入っている月は飛ばす。
+   * その月は「記録」に給与の取引があり、そちらで数えるため（二重に数えない）。
+   */
   function collectSalaryEvents(workEntries = [], wageSettings = {}, fromDate, toDate, options = {}) {
     const results = [];
     if (!fromDate || !toDate || fromDate > toDate) return results;
+    const recorded = options.recordedMonths instanceof Set ? options.recordedMonths : new Set();
     // 支給日が期間内に入りうる支給月を、前後1か月の余裕をもって走査する
     let cursor = shiftMonthKey(monthKeyOf(fromDate), -1);
     const last = shiftMonthKey(monthKeyOf(toDate), 1);
     let guard = 0;
     while (cursor <= last && guard < 48) {
-      const salary = calculateSalaryByPaymentMonth(workEntries, cursor, wageSettings, options);
-      if (salary.paymentDate >= fromDate && salary.paymentDate <= toDate && salary.totalAmount > 0) results.push(salary);
+      if (!recorded.has(cursor)) {
+        const salary = calculateSalaryByPaymentMonth(workEntries, cursor, wageSettings, options);
+        if (salary.paymentDate >= fromDate && salary.paymentDate <= toDate && salary.totalAmount > 0) results.push(salary);
+      }
       cursor = shiftMonthKey(cursor, 1);
       guard += 1;
     }
     return results;
+  }
+
+  /* ---------- 給与を「記録」の取引として持つ（2026-09-15） ----------
+   * 以前はシフトから求めた見込み額を計算のたびに裏で足していたので、
+   * 記録に出ず、直すことも消すこともできなかった。給料日に実際の額が分かっても見込みが残り続けた。
+   *
+   * いまは支給月ごとに「給与」の取引（kind: income, salaryPaymentMonth: 'YYYY-MM'）を1件持つ。
+   *  - 未確定で手を入れていない間は、シフトが変わるたびに額と支給日を追いかける
+   *  - 金額や日付を手で直したら（salaryManual）、もうシフトでは上書きしない
+   *  - 確定したら一切触らない。確定額はシフト画面にも出す
+   *  - 記録から消した月は dismissedMonths に残し、作り直さない
+   * 記録がある月は、裏での見込みの足し込み（collectSalaryEvents）から外す。
+   */
+
+  /** 取消以外の給与の取引がある支給月 */
+  function recordedSalaryMonths(transactions = []) {
+    return new Set((transactions || [])
+      .filter(item => item && item.salaryPaymentMonth && item.status !== 'cancelled')
+      .map(item => item.salaryPaymentMonth));
+  }
+
+  /**
+   * 裏での見込みの足し込みから外す支給月。
+   * 記録に給与の取引がある月（そちらで数える）と、記録から消した月（本人が「無い」と決めた）。
+   */
+  function salaryMonthsOutsideForecast(transactions = [], wage = {}) {
+    const months = recordedSalaryMonths(transactions);
+    (Array.isArray(wage?.dismissedSalaryMonths) ? wage.dismissedSalaryMonths : []).forEach(month => months.add(month));
+    return months;
+  }
+
+  /** その支給月の給与の取引（取消は除く） */
+  function salaryRecordOf(transactions = [], paymentMonth) {
+    return (transactions || []).find(item => item
+      && item.salaryPaymentMonth === paymentMonth && item.status !== 'cancelled') || null;
+  }
+
+  function salaryMemoOf(workMonth) {
+    const { year, monthIndex } = parseMonthKey(workMonth);
+    return `${year}年${monthIndex + 1}月分の給与（シフトからの見込み）`;
+  }
+
+  /**
+   * シフトと記録を突き合わせて、給与の取引をどう直すかを返す（書き込みはしない）。
+   * 戻り値: { creates: [取引の材料], updates: [{ id, patch }], removes: [id] }
+   *
+   * 作るのは支給日が今日以降の月だけ。過去の月を後から作ると、確定し忘れの未確定が大量に出るため。
+   */
+  function planSalaryRecords(input = {}) {
+    const today = input.today;
+    const workEntries = input.workEntries || [];
+    const wage = input.wage || {};
+    const transactions = input.transactions || [];
+    const options = input.holidayOptions || {};
+    const dismissed = new Set(Array.isArray(wage.dismissedSalaryMonths) ? wage.dismissedSalaryMonths : []);
+    const creates = [];
+    const updates = [];
+    const removes = [];
+
+    const months = new Set();
+    workEntries.forEach(entry => { if (entry && entry.date) months.add(paymentMonthForWorkDate(entry.date, wage)); });
+    transactions.forEach(item => { if (item && item.salaryPaymentMonth) months.add(item.salaryPaymentMonth); });
+
+    [...months].sort().forEach(month => {
+      const salary = calculateSalaryByPaymentMonth(workEntries, month, wage, options);
+      const record = salaryRecordOf(transactions, month);
+      if (!record) {
+        if (dismissed.has(month) || salary.totalAmount <= 0) return;
+        if (today && salary.paymentDate < today) return;
+        creates.push({
+          kind: 'income',
+          amount: salary.totalAmount,
+          dueDate: salary.paymentDate,
+          transactionDate: salary.paymentDate,
+          status: 'planned',
+          category: '給与',
+          memo: salaryMemoOf(salary.workMonth),
+          sourceAccountId: wage.depositAccountId || '',
+          salaryPaymentMonth: month,
+          salaryManual: false
+        });
+        return;
+      }
+      if (record.status !== 'planned' || record.salaryManual) return;
+      if (salary.totalAmount <= 0) { removes.push(record.id); return; }
+      if (Number(record.amount) !== salary.totalAmount || record.dueDate !== salary.paymentDate) {
+        updates.push({
+          id: record.id,
+          patch: { amount: salary.totalAmount, dueDate: salary.paymentDate, transactionDate: salary.paymentDate }
+        });
+      }
+    });
+
+    return { creates, updates, removes };
+  }
+
+  /**
+   * シフト画面に出す、その支給月の給与の状態。
+   * status: 'settled'（確定済み）/ 'manual'（記録で直した見込み）/ 'planned'（シフトどおりの見込み）
+   *         / 'dismissed'（記録から消した）/ 'none'（まだ記録が無い）
+   */
+  function salaryRecordSummary(transactions = [], paymentMonth, salary, wage = {}) {
+    const record = salaryRecordOf(transactions, paymentMonth);
+    const forecast = Number(salary?.totalAmount || 0);
+    if (!record) {
+      const dismissed = Array.isArray(wage.dismissedSalaryMonths) && wage.dismissedSalaryMonths.includes(paymentMonth);
+      return { status: dismissed ? 'dismissed' : 'none', record: null, amount: forecast, forecast, difference: 0 };
+    }
+    const amount = Number(record.amount || 0);
+    const status = record.status === 'settled' ? 'settled' : record.salaryManual ? 'manual' : 'planned';
+    return { status, record, amount, forecast, difference: amount - forecast };
   }
 
   /* ============================================================
@@ -745,6 +863,7 @@
       && transaction.status === 'planned'
       && transaction.affectsForecast !== false
       && !suppressedIds.has(transaction.id)
+      && (includeSalary || !transaction.salaryPaymentMonth)
       && transaction.dueDate >= today
       && transaction.dueDate <= endDate);
 
@@ -752,8 +871,10 @@
       input.recurringPlans || [], today, endDate, input.transactions || []
     );
 
+    // 記録に給与の取引がある月は、その取引（realTransactions）で数える。裏での見込みは足さない
     const salaryEvents = includeSalary
-      ? collectSalaryEvents(input.workEntries || [], input.wage || {}, today, endDate, holidayOptions)
+      ? collectSalaryEvents(input.workEntries || [], input.wage || {}, today, endDate,
+        { ...holidayOptions, recordedMonths: salaryMonthsOutsideForecast(input.transactions, input.wage) })
       : [];
 
     const depositAccountId = (input.wage && input.wage.depositAccountId) || (primary ? primary.id : '');
@@ -959,9 +1080,11 @@
     const spendableIds = new Set(spendable.map(item => item.id));
     const cashAvailable = spendable.reduce((sum, item) => sum + Number(item.currentBalance || 0), 0);
 
+    // 「給料見込みを使える額に含めない」設定のときは、未確定の給与の取引も外す
     const withinRange = transaction => transaction
       && transaction.status === 'planned'
       && transaction.affectsForecast !== false
+      && (includeSalary || !transaction.salaryPaymentMonth)
       && transaction.dueDate >= today
       && transaction.dueDate <= deadline;
 
@@ -996,7 +1119,8 @@
     const nisaTotal = nisaItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
     const salaryEvents = includeSalary
-      ? collectSalaryEvents(input.workEntries || [], input.wage || {}, today, deadline, holidayOptions)
+      ? collectSalaryEvents(input.workEntries || [], input.wage || {}, today, deadline,
+        { ...holidayOptions, recordedMonths: salaryMonthsOutsideForecast(input.transactions, input.wage) })
       : [];
     const salaryTotal = salaryEvents.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
 
@@ -1770,6 +1894,7 @@
     summarizePeriod,
     // 給与
     calculateSalaryPaymentDate, calculateSalaryByPaymentMonth, paymentMonthForWorkDate, collectSalaryEvents,
+    recordedSalaryMonths, salaryMonthsOutsideForecast, salaryRecordOf, planSalaryRecords, salaryRecordSummary,
     // 予定
     expandScheduledTransactions,
     // 2つの主計算（必ず別関数・別結果）

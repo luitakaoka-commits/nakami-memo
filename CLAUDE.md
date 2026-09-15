@@ -93,6 +93,13 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   **意味の判断を自動でやらない**。「牛乳」と「低脂肪乳」を同じにしてよいかは本人にしか決められない。
   逆に寄せすぎると粒度が粗くなって行動につながらない
 - **レシートは記録ページ内のタブ**。ボトムナビは5項目のまま。口座はナビに残す
+- **給料の見込みは「記録」の取引として持つ**（2026-09-15 ユーザー要望）。以前はシフトから求めた額を計算のたびに
+  裏で足していたので、記録に出ず直せず、給料日に実際の額が分かっても見込みが残り続けた。
+  いまは支給月ごとに `kind: income`・`salaryPaymentMonth: 'YYYY-MM'` の取引を1件持つ（決め方は `finance-engine.js` の
+  `planSalaryRecords`）。手を入れていない未確定はシフトを追いかけ、金額か日付を直すか確定したら（`salaryManual`）上書きしない。
+  記録から消した月は `settings.wage.dismissedSalaryMonths` に残して作り直さない。**記録がある月・消した月は裏での足し込み
+  （`collectSalaryEvents`）から外す**（外さないと二重計上）。作るのは支給日が今日以降の月だけ。
+  確定は編集画面を「確定済み」で開いて実際の額に直してもらい、シフト画面に確定額と見込みとの差を出す
 - **3アプリは「くらしノート」1つとしてインストールする**（2026-09-14）。manifest は `public/manifest.webmanifest`
   の1つだけで、3アプリのページはすべてそれを指す（`id: "/"`・`scope: "/"`。**id を変えると別アプリ扱いになり入れ直しが要る**）。
   起動は `/start.html` で、最後に切り替えバーを出したアプリへ移る（`public/shared/last-app.js`、初回はお金管理）。
@@ -167,8 +174,8 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 208 / recipe 16 / recipe-stock 20 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 14
-npm run test:ui          # お金管理のブラウザ実測 28項目（初回だけ npx playwright install chromium）
+npm test                 # money 218 / recipe 16 / recipe-stock 20 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 14
+npm run test:ui          # お金管理のブラウザ実測 29項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
 # サーバーを起動して配信チェック（27件）とインストールの確認（14件）
