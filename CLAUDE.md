@@ -93,6 +93,9 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   **意味の判断を自動でやらない**。「牛乳」と「低脂肪乳」を同じにしてよいかは本人にしか決められない。
   逆に寄せすぎると粒度が粗くなって行動につながらない
 - **レシートは記録ページ内のタブ**。ボトムナビは5項目のまま。口座はナビに残す
+- **レシート一覧は「未確認」と「確認済み」を別のタブに分ける**（2026-09-15 ユーザー要望）。
+  未確認 = `pending`・`needs_review`（要確認もまだ見ていないので未確認の側）、確認済み = `accepted`。
+  「無視」（`ignored`）のタブは1件以上あるときだけ出す。開いたときは未確認
 - **レシートの値引き行は、すぐ上の商品にまとめて1つの品物として扱う**（2026-09-15 ユーザー決定）。
   **保存データは印字どおり**（編集画面で読み取りミスを直せるように）で、読むときに `finance-engine.js` の
   `foldReceiptDiscounts` がまとめる。GAS の取込は変えていないので、取込済みのレシートも同じ扱いになる。
@@ -181,7 +184,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 
 ```bash
 npm test                 # money 227 / recipe 16 / recipe-stock 20 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 17
-npm run test:ui          # お金管理のブラウザ実測 30項目（初回だけ npx playwright install chromium）
+npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
 # サーバーを起動して配信チェック（27件）とインストールの確認（14件）

@@ -72,6 +72,8 @@
   let itemAliases = [];
   let receiptDraft = null;
   let openReceiptId = '';
+  // レシート一覧で見ている側（未確認／確認済み／無視）。確認済みにしたものは未確認の一覧から消える（2026-09-15）
+  let receiptListTab = 'unchecked';
   // レシートを開いた時点の品名（行ID→rawName）。保存時に書き換えを見つけて名寄せを学ぶ。
   let receiptOriginalNames = new Map();
   /** 「在庫に入れる」の下書き（対象レシート・保管場所・選んだ行）。 */
@@ -624,7 +626,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=28" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=29" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1158,6 +1160,24 @@
     ignored: { label: '無視', className: 'badge-muted' }
   };
 
+  /**
+   * レシート一覧の置き場所（2026-09-15）。未確認と確認済みを同じ一覧に並べると、
+   * 見終わったものに埋もれて、まだ見ていないレシートを探しにくい。
+   * 「要確認」（取込で合計が合わなかったもの）はまだ見ていないので未確認の側に置く。
+   * 「無視」は、1件でもあるときだけタブを出す。
+   */
+  const RECEIPT_LIST_TABS = [
+    { key: 'unchecked', label: '未確認', statuses: ['pending', 'needs_review'], empty: ['未確認のレシートはありません', '取り込んだレシートや追加したレシートは、確認済みにするまでここに並びます。'] },
+    { key: 'checked', label: '確認済み', statuses: ['accepted'], empty: ['確認済みのレシートはありません', '未確認の一覧で「確認済みにする」を押すと、ここに移ります。'] },
+    { key: 'ignored', label: '無視', statuses: ['ignored'], empty: ['無視したレシートはありません', ''] }
+  ];
+
+  /** そのレシートがどのタブに入るか。知らない状態は未確認として扱う（見落とさないように）。 */
+  function receiptListTabOf(receipt) {
+    const status = String(receipt?.status || 'pending');
+    return (RECEIPT_LIST_TABS.find(tab => tab.statuses.includes(status)) || RECEIPT_LIST_TABS[0]).key;
+  }
+
   const OUTCOME_LABELS = {
     in_stock: 'まだある',
     consumed: '使った',
@@ -1256,7 +1276,13 @@
       return '<section class="card empty"><div><strong>共有スペースに接続すると使えます</strong>レシートの明細は端末ではなく共有スペースに保存します。設定からGoogleでログインし、共有スペースを選んでください。</div></section>';
     }
 
-    const rows = sortedReceipts().map(receipt => {
+    const counts = Object.fromEntries(RECEIPT_LIST_TABS.map(tab => [tab.key, 0]));
+    receipts.forEach(receipt => { counts[receiptListTabOf(receipt)] += 1; });
+    const visibleTabs = RECEIPT_LIST_TABS.filter(tab => tab.key !== 'ignored' || counts.ignored > 0 || receiptListTab === 'ignored');
+    const currentTab = RECEIPT_LIST_TABS.find(tab => tab.key === receiptListTab) || RECEIPT_LIST_TABS[0];
+    const tabButtons = visibleTabs.map(tab => `<button type="button" class="filter-button ${tab.key === currentTab.key ? 'active' : ''}" data-action="receipt-list-tab" data-tab="${tab.key}" aria-pressed="${tab.key === currentTab.key}">${tab.label} ${counts[tab.key]}件</button>`).join('');
+
+    const rows = sortedReceipts().filter(receipt => receiptListTabOf(receipt) === currentTab.key).map(receipt => {
       const lines = receiptLinesOf(receipt.id);
       const folded = finance.foldReceiptDiscounts(lines);
       const productCount = folded.filter(item => !item.adjustment).length;
@@ -1289,8 +1315,11 @@
       ${renderReviewPrompt()}
       <section class="card info-card"><p class="check-detail">レシートの明細は<strong>共有スペースにだけ</strong>保存します。今使える金額や支払い能力チェックには影響しません。捨てた記録は、「取引」タブの「ムダ支出」に集計されます。</p></section>
       <section class="card list-card">
-        <div class="list-card-header"><div><span class="eyebrow">${receipts.length}件</span><h2>レシート一覧</h2></div><button class="button button-quiet button-small" data-action="add-receipt">レシートを追加</button></div>
-        <div class="receipt-list">${rows || emptyBlock('レシートがありません', '「レシートを追加」から店名・日付・合計と明細行を入力してください。')}</div>
+        <div class="list-card-header"><div><span class="eyebrow">${currentTab.label} ${counts[currentTab.key]}件</span><h2>レシート一覧</h2></div><button class="button button-quiet button-small" data-action="add-receipt">レシートを追加</button></div>
+        <div class="filters receipt-list-tabs">${tabButtons}</div>
+        <div class="receipt-list">${rows || (receipts.length
+          ? emptyBlock(currentTab.empty[0], currentTab.empty[1])
+          : emptyBlock('レシートがありません', '「レシートを追加」から店名・日付・合計と明細行を入力してください。'))}</div>
       </section>`;
   }
 
@@ -1624,7 +1653,8 @@
     if (!receiptsAvailable() || !receiptId) return;
     try {
       await cloud.updateReceiptStatus(receiptId, 'accepted');
-      showToast('確認済みにしました');
+      // 一覧から消えるので、どこへ行ったかを伝える
+      showToast('確認済みにしました。「確認済み」の一覧に移りました');
     } catch (error) {
       console.warn('レシートを確認済みにできませんでした', error);
       showToast('確認済みにできませんでした');
@@ -2999,6 +3029,7 @@
     if (name === 'submit-inventory') { submitInventory(); return; }
     if (name === 'edit-receipt') { openReceiptModal(action.dataset.id); return; }
     if (name === 'delete-receipt') { deleteReceiptRow(action.dataset.id); return; }
+    if (name === 'receipt-list-tab') { receiptListTab = RECEIPT_LIST_TABS.some(tab => tab.key === action.dataset.tab) ? action.dataset.tab : 'unchecked'; openReceiptId = ''; renderPage(); return; }
     if (name === 'toggle-receipt') { openReceiptId = openReceiptId === action.dataset.id ? '' : action.dataset.id; renderPage(); return; }
     if (name === 'add-receipt-line') { addReceiptLine(); return; }
     if (name === 'remove-receipt-line') { removeReceiptLine(action.dataset.index); return; }

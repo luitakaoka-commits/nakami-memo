@@ -708,6 +708,44 @@ const closeModals = page => page.evaluate(() => {
     assert(await page.locator('#inventory-modal:not([hidden])').count() === 0, '入れたあとも画面が開いたまま');
   });
 
+  await record('receipt_list_tabs', async () => {
+    // 未確認と確認済みを別々の一覧に置く（2026-09-15）
+    await closeModals(page);
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      const receipt = (id, storeName, status) => ({ id, storeName, purchasedAt: '2026-09-02', total: 100, taxTotal: 0, paymentMethod: 'cash', transactionId: '', source: 'gemini', status, note: '', createdAt: '', createdBy: '' });
+      api.setReceipts([receipt('tab-p', '未確認ストア', 'pending'), receipt('tab-n', '要確認ストア', 'needs_review'), receipt('tab-a', '確認済みストア', 'accepted')]);
+      api.setReceiptItems([]);
+      api.setPage('records');
+      api.setRecordTab('receipts');
+    });
+    await page.waitForSelector('#page-container [data-action="receipt-list-tab"]');
+    const stores = () => page.$$eval('#page-container .receipt-row .candidate-head strong', nodes => nodes.map(node => node.textContent.trim()));
+    const tabs = await page.$$eval('#page-container [data-action="receipt-list-tab"]', nodes => nodes.map(node => node.textContent.trim()));
+    assert(JSON.stringify(tabs) === JSON.stringify(['未確認 2件', '確認済み 1件']), `タブが違う（無視が0件なら出さない）: ${tabs}`);
+    const unchecked = await stores();
+    assert(JSON.stringify(unchecked.sort()) === JSON.stringify(['未確認ストア', '要確認ストア'].sort()), `未確認の一覧に確認済みが混ざっている: ${unchecked}`);
+
+    await page.click('#page-container [data-action="receipt-list-tab"][data-tab="checked"]');
+    await page.waitForTimeout(150);
+    const checked = await stores();
+    assert(JSON.stringify(checked) === JSON.stringify(['確認済みストア']), `確認済みの一覧が違う: ${checked}`);
+    assert(await page.locator('#page-container [data-action="accept-receipt"]').count() === 0, '確認済みの一覧に「確認済みにする」が出ている');
+
+    // 確認済みにしたら未確認の一覧から消え、確認済みの側に移る
+    await page.click('#page-container [data-action="receipt-list-tab"][data-tab="unchecked"]');
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      const receipt = (id, storeName, status) => ({ id, storeName, purchasedAt: '2026-09-02', total: 100, taxTotal: 0, paymentMethod: 'cash', transactionId: '', source: 'gemini', status, note: '', createdAt: '', createdBy: '' });
+      api.setReceipts([receipt('tab-p', '未確認ストア', 'accepted'), receipt('tab-n', '要確認ストア', 'needs_review'), receipt('tab-a', '確認済みストア', 'accepted')]);
+    });
+    await page.waitForTimeout(150);
+    assert(JSON.stringify(await stores()) === JSON.stringify(['要確認ストア']), '確認済みにしたのに未確認の一覧に残っている');
+    const moved = await page.$$eval('#page-container [data-action="receipt-list-tab"]', nodes => nodes.map(node => node.textContent.trim()));
+    assert(JSON.stringify(moved) === JSON.stringify(['未確認 1件', '確認済み 2件']), `件数が移っていない: ${moved}`);
+  });
+
   await record('receipt_discount_folded', async () => {
     // 値引き行は、すぐ上の商品にまとめて1つの品物として扱う（2026-09-15）。
     // 以前は「値引」も1品に数え、在庫にもでき、捨てたときのムダ支出は値引き前の額だった

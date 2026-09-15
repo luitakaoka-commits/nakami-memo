@@ -1162,3 +1162,14 @@ button.legend-row.active { background: rgba(42, 120, 214, .12); }
 @media (max-width: 520px) {
   .salary-record-card { padding: 1.2rem; }
 }
+
+/* ===== レシート一覧の「未確認／確認済み」（2026-09-15） ===== */
+.receipt-list-tabs { padding: 0 1.3rem .9rem; margin: 0; }
+/* 白いカードの中なので、上の「取引／レシート」（.range-card）と同じ配色にする。暗い背景用のままだと選んでいない側が見えない */
+.receipt-list-tabs { display: flex; flex-wrap: wrap; gap: .4rem; }
+.receipt-list-tabs .filter-button { border-color: var(--line-strong); background: var(--surface-soft, #f2f5f2); color: var(--muted); backdrop-filter: none; }
+.receipt-list-tabs .filter-button:hover { color: var(--ink); }
+.receipt-list-tabs .filter-button.active { border-color: var(--ink); background: var(--ink); color: white; box-shadow: none; }
+@media (max-width: 520px) {
+  .receipt-list-tabs { padding-inline: 1.2rem; }
+}
