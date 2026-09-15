@@ -110,6 +110,36 @@ export function receiptLinePatch(line: { amount?: unknown }, patch: ItemOutcomeP
   };
 }
 
+export type ReceiptLineRef = { id: string; receiptId?: string; amount?: unknown };
+
+/**
+ * 1つの在庫に結びついたレシート明細の全部に返す内容（2026-09-15）。
+ *
+ * お金管理は値引き行をすぐ上の商品にまとめて扱い、在庫に入れるときは値引き行にも同じ在庫のIDを書く。
+ * だから「198円のもやし」と「値引 −50円」の2行が見つかる。行ごとに無駄を出すと 198円 になってしまうので、
+ * レシートごとに金額を足し（148円）、いちばん金額の大きい行（商品の行）にまとめて無駄を載せ、ほかの行は0円にする。
+ * 結末（使い切った・捨てた）は全部の行に同じものを書く。
+ */
+export function receiptLinePatches(lines: ReceiptLineRef[], patch: ItemOutcomePatch) {
+  const byReceipt = new Map<string, ReceiptLineRef[]>();
+  (lines || []).forEach((line) => {
+    const key = String(line?.receiptId ?? "");
+    byReceipt.set(key, [...(byReceipt.get(key) ?? []), line]);
+  });
+  const patches: Array<{ id: string; patch: ReceiptLinePatch }> = [];
+  let wasteTotal = 0;
+  byReceipt.forEach((group) => {
+    const net = group.reduce((sum, line) => sum + (Number.isFinite(Number(line.amount)) ? Number(line.amount) : 0), 0);
+    const primary = group.reduce((best, line) => (Number(line.amount) > Number(best.amount) ? line : best), group[0]);
+    group.forEach((line) => {
+      const linePatch = receiptLinePatch({ amount: line === primary ? net : 0 }, patch);
+      if (line === primary) wasteTotal += linePatch.wasteAmount;
+      patches.push({ id: line.id, patch: linePatch });
+    });
+  });
+  return { patches, wasteTotal };
+}
+
 /**
  * また買って在庫が戻ったときに消す内容。
  * 「使い切った」の印が残ったままだと、棚にあるのに使い切った扱いのままになる。

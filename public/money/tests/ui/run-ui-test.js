@@ -708,6 +708,66 @@ const closeModals = page => page.evaluate(() => {
     assert(await page.locator('#inventory-modal:not([hidden])').count() === 0, '入れたあとも画面が開いたまま');
   });
 
+  await record('receipt_discount_folded', async () => {
+    // 値引き行は、すぐ上の商品にまとめて1つの品物として扱う（2026-09-15）。
+    // 以前は「値引」も1品に数え、在庫にもでき、捨てたときのムダ支出は値引き前の額だった
+    await closeModals(page);
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      window.__TEST_CALLS__ = [];
+      const base = { receiptId: 'rc3', quantity: 1, unitPrice: 0, outcomeTracked: true, outcome: 'in_stock', outcomeAt: '', outcomeReason: '', wasteAmount: 0, note: '', createdAt: '' };
+      api.setReceipts([{ id: 'rc3', storeName: '値引きストア', purchasedAt: '2026-09-02', total: 406, taxTotal: 0, paymentMethod: 'cash', transactionId: '', source: 'gemini', status: 'pending', note: '', createdAt: '', createdBy: '' }]);
+      api.setReceiptItems([
+        { ...base, id: 'rc3-001', lineNo: 1, rawName: 'もやし', name: 'もやし', unit: '袋', amount: 198, category: '食品' },
+        { ...base, id: 'rc3-002', lineNo: 2, rawName: '値引', name: '値引', unit: '', amount: -50, category: '食品' },
+        { ...base, id: 'rc3-003', lineNo: 3, rawName: '牛乳', name: '牛乳', unit: '本', amount: 258, category: '飲料' }
+      ]);
+      api.setPage('records');
+      api.setRecordTab('receipts');
+    });
+    await page.waitForSelector('#page-container [data-action="toggle-receipt"][data-id="rc3"]');
+    const summaryText = await page.textContent('#page-container .receipt-row .candidate-main');
+    assert(summaryText.includes('2品（値引き1件を含む）'), `値引きが1品に数えられている: ${summaryText}`);
+    assert(!summaryText.includes('合っていません'), '値引きをまとめたら合計が合わなくなった');
+
+    await page.click('#page-container [data-action="toggle-receipt"][data-id="rc3"]');
+    await page.waitForSelector('#page-container .receipt-line-view');
+    const lineTexts = await page.$$eval('#page-container .receipt-line-view', nodes => nodes.map(node => node.textContent));
+    assert(lineTexts.length === 2, `明細が値引きの行を含んだまま: ${lineTexts.length}件`);
+    assert(lineTexts[0].includes('148') && lineTexts[0].includes('値引き'), `もやしが値引き後の額になっていない: ${lineTexts[0]}`);
+
+    // 在庫に入れる画面に値引きの行は出ず、値引き後の値段で入る
+    await page.click('#page-container [data-action="add-to-inventory"][data-id="rc3"]');
+    await page.waitForSelector('#inventory-location');
+    const listed = await page.$$eval('[data-inventory-line]', nodes => nodes.map(node => node.dataset.inventoryLine));
+    assert(JSON.stringify(listed) === JSON.stringify(['rc3-001', 'rc3-003']), `在庫に入れる画面に値引きの行がある: ${listed}`);
+    await page.click('[data-action="submit-inventory"]');
+    await page.waitForTimeout(300);
+    const call = await page.evaluate(() => (window.__TEST_CALLS__ || []).find(item => item.fn === 'addToInventory'));
+    const rows = [...call.plan.creates, ...call.plan.merges];
+    const moyashi = rows.find(row => (row.lineIds || []).includes('rc3-001'));
+    assert(moyashi && moyashi.lineIds.includes('rc3-002'), `値引き行に在庫のIDを書き戻していない: ${JSON.stringify(moyashi)}`);
+    assert(!rows.some(row => row.name === '値引'), '「値引」という在庫を作ろうとしている');
+    const created = call.plan.creates.find(row => row.lineId === 'rc3-001');
+    if (created) assert(created.purchasePrice === 148, `値引き後の値段になっていない: ${created.purchasePrice}`);
+
+    // 捨てたら、ムダ支出は値引き後の額
+    await closeModals(page);
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      const base = { receiptId: 'rc3', quantity: 1, unitPrice: 0, outcomeTracked: true, outcomeReason: '', wasteAmount: 0, note: '', createdAt: '' };
+      api.setReceiptItems([
+        { ...base, id: 'rc3-001', lineNo: 1, rawName: 'もやし', name: 'もやし', unit: '袋', amount: 198, category: '食品', outcome: 'expired', outcomeAt: '2026-09-02T01:00:00.000Z' },
+        { ...base, id: 'rc3-002', lineNo: 2, rawName: '値引', name: '値引', unit: '', amount: -50, category: '食品', outcome: 'in_stock', outcomeAt: '' },
+        { ...base, id: 'rc3-003', lineNo: 3, rawName: '牛乳', name: '牛乳', unit: '本', amount: 258, category: '飲料', outcome: 'in_stock', outcomeAt: '' }
+      ]);
+      api.setRecordTab('transactions');
+    });
+    await page.waitForSelector('#page-container .waste-card');
+    const wasteText = await page.textContent('#page-container .waste-card .summary-strip');
+    assert(wasteText.includes('148') && !wasteText.includes('198'), `ムダ支出が値引き前の額: ${wasteText}`);
+  });
+
   await record('salary_record_flow', async () => {
     // 給与の見込みを「記録」の取引として持つ（2026-09-15）。
     // 以前は裏で足していたので直せず、給料日に実際の額が分かっても見込みが残り続けた。

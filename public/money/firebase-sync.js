@@ -472,12 +472,14 @@ async function addToInventory(plan) {
       createdAt: now,
       updatedAt: now
     });
-    if (row.lineId) {
-      batch.update(doc(db, 'workspaces', workspaceId, 'receiptItems', row.lineId), {
+    // 商品にまとめた値引き行にも同じ在庫のIDを書く。なかみメモが「捨てた」を返すとき、値引き後の額で無駄を出せる
+    const lineIds = Array.isArray(row.lineIds) && row.lineIds.length ? row.lineIds : [row.lineId];
+    lineIds.filter(Boolean).forEach(lineId => {
+      batch.update(doc(db, 'workspaces', workspaceId, 'receiptItems', lineId), {
         inventoryItemId: ref.id,
         updatedAt: now.toISOString()
       });
-    }
+    });
   });
 
   (plan.merges || []).forEach(row => {

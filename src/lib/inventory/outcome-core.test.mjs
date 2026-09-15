@@ -7,7 +7,7 @@
 import {
   CONSUMABLE_CATEGORIES, DISCARD_REASONS, OUTCOMES, OUTCOME_RESET, WASTE_RATIO,
   canRecordOutcome, itemOutcomePatch, outcomeLabel, outcomeOfDiscardReason,
-  receiptLinePatch, shouldResetOutcome, wasteAmountOf,
+  receiptLinePatch, receiptLinePatches, shouldResetOutcome, wasteAmountOf,
 } from "./outcome-core.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -78,6 +78,35 @@ t("レシート明細に返す内容", () => {
     wasteAmount: 298,
     updatedAt: "2026-09-16T02:00:00.000Z",
   }, "中身");
+});
+
+t("値引き行も結びついていたら、レシートごとに値引き後の額で無駄を出す（2026-09-15）", () => {
+  const patch = itemOutcomePatch({ kind: "discarded", reason: "期限切れ" }, NOW);
+  const { patches, wasteTotal } = receiptLinePatches([
+    { id: "moyashi", receiptId: "r1", amount: 198 },
+    { id: "discount", receiptId: "r1", amount: -50 },
+  ], patch);
+  eq(wasteTotal, 148, "198円 − 50円");
+  eq(patches.map((row) => [row.id, row.patch.wasteAmount, row.patch.outcome]), [["moyashi", 148, "expired"], ["discount", 0, "expired"]], "商品の行に載せ、値引き行は0円。結末は両方に書く");
+});
+
+t("別のレシートで買い足してまとめた在庫は、レシートごとに分けて出す", () => {
+  const patch = itemOutcomePatch({ kind: "discarded", reason: "期限切れ" }, NOW);
+  const { patches, wasteTotal } = receiptLinePatches([
+    { id: "a", receiptId: "r1", amount: 98 },
+    { id: "b", receiptId: "r2", amount: 98 },
+    { id: "b-discount", receiptId: "r2", amount: -20 },
+  ], patch);
+  eq(wasteTotal, 176, "98円 + (98円 − 20円)");
+  eq(patches.find((row) => row.id === "a").patch.wasteAmount, 98, "1回目の購入はそのまま");
+  eq(patches.find((row) => row.id === "b").patch.wasteAmount, 78, "2回目は値引き後");
+});
+
+t("値引き行があっても、使い切ったなら無駄は0円", () => {
+  const { wasteTotal } = receiptLinePatches([
+    { id: "m", receiptId: "r1", amount: 198 }, { id: "d", receiptId: "r1", amount: -50 },
+  ], itemOutcomePatch({ kind: "consumed" }, NOW));
+  eq(wasteTotal, 0, "0円");
 });
 
 t("また買って在庫が戻ったら、結末の印は消す", () => {

@@ -624,7 +624,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=27" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=28" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1180,24 +1180,39 @@
     return Boolean(cloud && cloud.getSession && cloud.getSession()?.workspace);
   }
 
-  /** 明細行に、そのレシートの購入日と店名を写す。純粋関数へはこの形で渡す。 */
+  /**
+   * 明細行に、そのレシートの購入日と店名を写す。純粋関数へはこの形で渡す。
+   * 値引き行はすぐ上の商品にまとめ、商品ではない行（会計全体の値引きなど）は外す（2026-09-15）。
+   * ふりかえり・ムダ支出・繰り返し捨てているものは、すべてここを通るので値引きを商品に数えない。
+   */
   function decoratedReceiptItems() {
     const byId = new Map(receipts.map(receipt => [receipt.id, receipt]));
-    return receiptItems.map(item => {
-      const receipt = byId.get(item.receiptId);
-      return {
+    const byReceipt = new Map();
+    receiptItems.forEach(item => {
+      if (!byReceipt.has(item.receiptId)) byReceipt.set(item.receiptId, []);
+      byReceipt.get(item.receiptId).push(item);
+    });
+    return [...byReceipt.entries()].flatMap(([receiptId, lines]) => {
+      const receipt = byId.get(receiptId);
+      return finance.receiptProductLines(lines).map(item => ({
         ...item,
         purchasedAt: receipt?.purchasedAt || '',
         storeName: receipt?.storeName || '',
         receiptStatus: receipt?.status || ''
-      };
+      }));
     });
   }
 
+  /** 保存されているとおり（印字どおり）の明細行。編集画面と、合計の突き合わせに使う。 */
   function receiptLinesOf(receiptId) {
     return receiptItems
       .filter(item => item.receiptId === receiptId)
       .sort((a, b) => (Number(a.lineNo) || 0) - (Number(b.lineNo) || 0));
+  }
+
+  /** 値引きをすぐ上の商品にまとめた明細行。一覧・在庫・結末の変更に使う。 */
+  function foldedReceiptLinesOf(receiptId) {
+    return finance.foldReceiptDiscounts(receiptLinesOf(receiptId));
   }
 
   function sortedReceipts() {
@@ -1243,6 +1258,9 @@
 
     const rows = sortedReceipts().map(receipt => {
       const lines = receiptLinesOf(receipt.id);
+      const folded = finance.foldReceiptDiscounts(lines);
+      const productCount = folded.filter(item => !item.adjustment).length;
+      const discountCount = lines.filter(item => Number(item.amount) < 0).length;
       const status = RECEIPT_STATUS[receipt.status] || RECEIPT_STATUS.pending;
       const opened = openReceiptId === receipt.id;
       const lineSum = lines.reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -1251,7 +1269,7 @@
         <div class="candidate-row">
           <div class="candidate-main">
             <div class="candidate-head"><strong>${esc(receipt.storeName || '店名なし')}</strong><span class="badge ${status.className}">${status.label}</span></div>
-            <small>${formatDate(receipt.purchasedAt, true)}・${formatAbsoluteYen(receipt.total)}・明細${lines.length}件・${esc(PAYMENT_METHODS[receipt.paymentMethod] || '不明')}</small>
+            <small>${formatDate(receipt.purchasedAt, true)}・${formatAbsoluteYen(receipt.total)}・${productCount}品${discountCount ? `（値引き${discountCount}件を含む）` : ''}・${esc(PAYMENT_METHODS[receipt.paymentMethod] || '不明')}</small>
             ${mismatched ? `<small class="value-negative">明細の合計 ${formatAbsoluteYen(lineSum)} が合計金額と合っていません</small>` : ''}
             ${receipt.note ? `<small>${esc(receipt.note)}</small>` : ''}
           </div>
@@ -1263,7 +1281,7 @@
             <button class="mini-button danger" data-action="delete-receipt" data-id="${esc(receipt.id)}">削除</button>
           </div>
         </div>
-        ${opened ? `<div class="receipt-line-list">${lines.map(renderReceiptLineView).join('') || emptyBlock('明細がありません', '「編集」から明細行を追加できます。')}</div>` : ''}
+        ${opened ? `<div class="receipt-line-list">${folded.map(renderReceiptLineView).join('') || emptyBlock('明細がありません', '「編集」から明細行を追加できます。')}</div>` : ''}
       </div>`;
     }).join('');
 
@@ -1276,14 +1294,24 @@
       </section>`;
   }
 
-  /** 一覧に出す明細行1件。結末はこの場で変えられる。 */
+  /**
+   * 一覧に出す明細行1件。結末はこの場で変えられる。
+   * item は foldReceiptDiscounts を通したもの。値引きは商品の行に「値引き −50円」と添えて出し、
+   * 商品にまとめられない値引き（会計全体の値引きなど）は結末を選ばせない。
+   */
   function renderReceiptLineView(item) {
+    if (item.adjustment) {
+      return `<div class="receipt-line-view receipt-line-adjustment">
+        <div class="receipt-line-main"><strong>${esc(item.name || item.rawName || '値引き')}</strong><small>${formatAbsoluteYen(item.amount)}・会計全体の値引き（品物ではないので、ふりかえり・在庫の対象外）</small></div>
+      </div>`;
+    }
     const waste = finance.wasteAmountOf(item);
     const outcome = item.outcome || 'in_stock';
     const options = Object.entries(OUTCOME_LABELS)
       .map(([value, label]) => `<option value="${value}" ${outcome === value ? 'selected' : ''}>${label}</option>`).join('');
+    const discount = item.discountAmount ? `（${formatAbsoluteYen(item.grossAmount)}から値引き${formatAbsoluteYen(Math.abs(item.discountAmount))}）` : '';
     return `<div class="receipt-line-view">
-      <div class="receipt-line-main"><strong>${esc(item.name || item.rawName || '品名なし')}</strong><small>${esc(item.category || 'その他')}・${Number(item.quantity || 0)}${esc(item.unit || '')}・${formatAbsoluteYen(item.amount)}${item.outcomeTracked ? '' : '・ふりかえり対象外'}${waste ? `・ムダ ${formatAbsoluteYen(waste)}` : ''}</small></div>
+      <div class="receipt-line-main"><strong>${esc(item.name || item.rawName || '品名なし')}</strong><small>${esc(item.category || 'その他')}・${Number(item.quantity || 0)}${esc(item.unit || '')}・${formatAbsoluteYen(item.amount)}${discount}${item.outcomeTracked ? '' : '・ふりかえり対象外'}${waste ? `・ムダ ${formatAbsoluteYen(waste)}` : ''}</small></div>
       <select class="receipt-line-outcome" data-line-outcome data-id="${esc(item.id)}" aria-label="${esc(item.name || item.rawName || '明細')}の結末">${options}</select>
     </div>`;
   }
@@ -1500,6 +1528,14 @@
    * このレシートの明細へ返せるようにする。
    */
 
+  /**
+   * 在庫に入れる画面に並べる行。値引きは商品にまとめ（値段は値引き後）、値引きだけの行は出さない。
+   * 出すと手でチェックでき、「値引」という在庫が作られてしまう。
+   */
+  function inventoryLinesOf(receiptId) {
+    return foldedReceiptLinesOf(receiptId).filter(item => !item.adjustment);
+  }
+
   /** 在庫に入れる候補の既定。食べ物・日用品で、まだ在庫に入れていない行。 */
   function defaultInventoryLineIds(lines) {
     return lines
@@ -1516,7 +1552,7 @@
     renderInventoryBody();
     try {
       const [locations, items] = await Promise.all([cloud.readInventoryLocations(), cloud.readInventoryItems()]);
-      const lines = receiptLinesOf(receiptId);
+      const lines = inventoryLinesOf(receiptId);
       inventoryDraft = { receiptId, locations, items, selected: defaultInventoryLineIds(lines), loading: false };
     } catch (error) {
       console.warn('なかみメモの在庫を読めませんでした', error);
@@ -1535,7 +1571,7 @@
       return;
     }
 
-    const lines = receiptLinesOf(inventoryDraft.receiptId);
+    const lines = inventoryLinesOf(inventoryDraft.receiptId);
     const rows = lines.map(item => {
       const already = Boolean(item.inventoryItemId);
       const checked = inventoryDraft.selected.includes(item.id);
@@ -1560,7 +1596,7 @@
     const selected = $$('[data-inventory-line]').filter(input => input.checked && !input.disabled).map(input => input.dataset.inventoryLine);
     if (!locationId || !selected.length) { showToast('入れる品物を選んでください'); return; }
 
-    const lines = receiptLinesOf(inventoryDraft.receiptId).filter(item => selected.includes(item.id));
+    const lines = inventoryLinesOf(inventoryDraft.receiptId).filter(item => selected.includes(item.id));
     const plan = finance.planInventoryAdditions(lines, inventoryDraft.items, {
       aliases: itemAliases,
       locationId,
@@ -1611,8 +1647,10 @@
   /** 一覧の結末セレクトから直接変えたとき */
   async function setReceiptOutcome(lineId, value) {
     if (!receiptsAvailable()) return;
-    const item = receiptItems.find(row => row.id === lineId);
-    if (!item) return;
+    const raw = receiptItems.find(row => row.id === lineId);
+    if (!raw) return;
+    // 値引きをまとめた後の行で無駄の額を出す（値引きされた商品を捨てたら、値引き後の額が無駄）
+    const item = foldedReceiptLinesOf(raw.receiptId).find(row => row.id === lineId) || raw;
     const outcome = OUTCOME_LABELS[value] ? value : 'in_stock';
     try {
       await cloud.updateReceiptItem(lineId, {

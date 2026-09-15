@@ -9,7 +9,7 @@ import {
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import type { Item } from "@/lib/types/item";
-import { itemOutcomePatch, receiptLinePatch, type OutcomeChoice } from "@/lib/inventory/outcome-core";
+import { itemOutcomePatch, receiptLinePatches, type OutcomeChoice } from "@/lib/inventory/outcome-core";
 import { db } from "./client";
 import { itemDoc } from "./refs";
 
@@ -65,15 +65,18 @@ export async function recordItemOutcome(userId: string, item: Item, choice: Outc
   const batch = writeBatch(db);
   batch.update(itemDoc(userId, item.id), { ...patch, updatedAt: serverTimestamp() });
 
-  let linesUpdated = 0;
-  let wasteTotal = 0;
-  for (const line of await findReceiptLines(userId, item)) {
-    const linePatch = receiptLinePatch(line.data(), patch);
-    batch.update(line.ref, linePatch);
-    linesUpdated += 1;
-    wasteTotal += linePatch.wasteAmount;
-  }
+  // 値引き行も同じ在庫に結びついているので、レシートごとに値引き後の額で無駄を出す
+  const lines = await findReceiptLines(userId, item);
+  const refs = new Map(lines.map((line) => [line.id, line.ref]));
+  const { patches, wasteTotal } = receiptLinePatches(
+    lines.map((line) => ({ id: line.id, receiptId: line.data().receiptId, amount: line.data().amount })),
+    patch,
+  );
+  patches.forEach(({ id, patch: linePatch }) => {
+    const ref = refs.get(id);
+    if (ref) batch.update(ref, linePatch);
+  });
 
   await batch.commit();
-  return { linesUpdated, wasteTotal };
+  return { linesUpdated: patches.length, wasteTotal };
 }

@@ -1575,6 +1575,57 @@
    *
    * 意味の判断はしない。「牛乳」と「低脂肪乳」は、本人が辞書でまとめない限り別のまま。
    */
+  /* ---------- 値引き行を商品にまとめる（2026-09-15） ----------
+   * レシートの値引きは「値引 -50」のように商品の下に別の行で印字され、取込でもマイナスの行として入る。
+   * そのまま数えると、値引きが1つの商品に数えられ（明細の件数・ふりかえり・在庫）、
+   * 値引きされた商品を捨てたときのムダ支出も値引き前の額になる。
+   *
+   * 保存データは印字どおりに残し（編集画面で読み取りミスを直せるように）、読むときにここでまとめる。
+   *  - マイナスの行は、すぐ上の商品にまとめて1行にする（金額は値引き後。198円 − 50円 → 148円）
+   *  - まとめられない値引き（すぐ上が商品でない・小計や会計全体の値引き・商品の額を超える）は
+   *    「商品ではない行」（adjustment）として別に残す。ふりかえり・在庫・件数の対象にしない
+   * 合計金額は変わらない（足し算の順番が変わるだけ）。
+   */
+
+  /** 会計全体にかかる値引きの名前。商品にはまとめない。 */
+  const RECEIPT_WHOLE_DISCOUNT_NAME = /小計|合計|会計|全品|お買上|お買い上げ|クーポン/;
+
+  function foldReceiptDiscounts(lines = []) {
+    const sorted = (Array.isArray(lines) ? lines : [])
+      .filter(Boolean)
+      .slice()
+      .sort((a, b) => (Number(a.lineNo) || 0) - (Number(b.lineNo) || 0));
+    const folded = [];
+    sorted.forEach(line => {
+      const amount = Math.round(Number(line.amount || 0));
+      if (!(amount < 0)) {
+        folded.push({ ...line, amount, grossAmount: amount, discountAmount: 0, discountLineIds: [], adjustment: false });
+        return;
+      }
+      const name = String(line.rawName || line.name || '');
+      const previous = folded[folded.length - 1];
+      const attachable = previous && !previous.adjustment
+        && !RECEIPT_WHOLE_DISCOUNT_NAME.test(name.normalize('NFKC'))
+        && previous.amount + amount >= 0;
+      if (attachable) {
+        previous.amount += amount;
+        previous.discountAmount += amount;
+        previous.discountLineIds.push(String(line.id || ''));
+        return;
+      }
+      folded.push({
+        ...line, amount, grossAmount: amount, discountAmount: 0, discountLineIds: [],
+        adjustment: true, outcomeTracked: false
+      });
+    });
+    return folded;
+  }
+
+  /** まとめたあとの、商品の行だけ（値引きだけの行を除く） */
+  function receiptProductLines(lines = []) {
+    return foldReceiptDiscounts(lines).filter(line => !line.adjustment);
+  }
+
   function planInventoryAdditions(lines, items, options) {
     const aliases = aliasIndexOf(options?.aliases);
     const locationId = String(options?.locationId || '');
@@ -1590,6 +1641,10 @@
     (Array.isArray(lines) ? lines : []).forEach(line => {
       const rawName = String(line?.rawName || line?.name || '').trim();
       if (!rawName) return;
+      // 値引きだけの行は品物ではないので在庫にしない
+      if (line?.adjustment || Number(line?.amount) < 0) return;
+      // 商品にまとめた値引き行にも、同じ在庫のIDを書き戻す（なかみメモが値引き後の額で無駄を出せるように）
+      const lineIds = [String(line?.id || ''), ...(Array.isArray(line?.discountLineIds) ? line.discountLineIds : [])].filter(Boolean);
       const quantity = Number(line?.quantity) > 0 ? Number(line.quantity) : 1;
       const unit = String(line?.unit || '').trim();
       const key = resolveItemKey({ name: line?.name, rawName }, aliases);
@@ -1604,13 +1659,13 @@
         if (found) {
           found.added += quantity;
           found.quantity += quantity;
-          found.lineIds.push(String(line?.id || ''));
+          found.lineIds.push(...lineIds);
           if (purchaseRef) found.purchaseRefs.push(purchaseRef);
           return;
         }
         merges.push({
           itemId: existing.id,
-          lineIds: [String(line?.id || '')],
+          lineIds: lineIds.slice(),
           name: String(existing.name || rawName),
           unit: String(existing.unit || unit),
           added: quantity,
@@ -1621,6 +1676,8 @@
       }
       creates.push({
         lineId: String(line?.id || ''),
+        // 商品にまとめた値引き行を含む、書き戻す明細のID（先頭が商品の行）
+        lineIds,
         locationId,
         name: aliases.canonicalNames.get(key) || rawName,
         quantity,
@@ -1908,6 +1965,8 @@
     normalizeItemName, resolveItemKey,
     // レシート明細 → なかみメモの在庫
     INVENTORY_CATEGORY_BY_RECEIPT_CATEGORY, inventoryCategoryOf, planInventoryAdditions,
+    // 値引き行を商品にまとめる
+    foldReceiptDiscounts, receiptProductLines,
     // 補助
     isExternalTransfer, accountDeltasFor,
     suggestShortfallResolution, simulateSpending, simulateWhatIf,

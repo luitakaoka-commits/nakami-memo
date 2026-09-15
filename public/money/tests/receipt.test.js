@@ -668,7 +668,8 @@ test('74. どちらかの単位が空なら足す（単位を入れていない�
 test('75. 新しく作る在庫は、保管場所・カテゴリ・買った値段・購入元を持つ', () => {
   const { creates } = plan([line({ id: 'l9', lineNo: 9, rawName: 'ティッシュ', name: 'ティッシュ', quantity: 1, unit: '箱', category: '消耗品', amount: 298 })]);
   deepEqual(creates[0], {
-    lineId: 'l9', locationId: 'loc1', name: 'ティッシュ', quantity: 1, unit: '箱',
+    // lineIds は 2026-09-15 に追加（商品にまとめた値引き行にも在庫のIDを書き戻すため）
+    lineId: 'l9', lineIds: ['l9'], locationId: 'loc1', name: 'ティッシュ', quantity: 1, unit: '箱',
     category: '日用品', purchaseRef: 'r1#9', purchasePrice: 298
   }, '作る在庫');
 });
@@ -695,6 +696,96 @@ test('78. 同じレシートに同じ品物が2行あっても、まとめ先は
   equal(merges[0].added, 2, '2行分を足す');
   equal(merges[0].quantity, 3, '1袋 + 1袋 + 1袋');
   deepEqual(merges[0].purchaseRefs, ['r1#1', 'r1#2'], '2行とも購入元に残す');
+});
+
+/* ---------- 値引き行を商品にまとめる（2026-09-15） ---------- */
+
+const printed = (lineNo, name, amount, category = '食品') => line({ id: `p${lineNo}`, lineNo, rawName: name, name, amount, category });
+
+test('79. 値引きは、すぐ上の商品にまとめて1行にする（金額は値引き後）', () => {
+  const folded = engine.foldReceiptDiscounts([printed(1, 'もやし', 198), printed(2, '値引', -50, 'その他'), printed(3, '牛乳', 258, '飲料')]);
+  equal(folded.length, 2, '3行が2行になる');
+  equal(folded[0].name, 'もやし', '商品の名前のまま');
+  equal(folded[0].amount, 148, '198円 − 50円');
+  equal(folded[0].grossAmount, 198, '値引き前の額も残す');
+  equal(folded[0].discountAmount, -50, '値引き額');
+  deepEqual(folded[0].discountLineIds, ['p2'], 'まとめた値引き行');
+  equal(folded[0].category, '食品', 'カテゴリは商品のもの（値引き行の「その他」にしない）');
+  equal(folded[1].amount, 258, '値引きの無い商品はそのまま');
+});
+
+test('80. まとめても合計は変わらない。行の並び順（lineNo）で判定する', () => {
+  const lines = [printed(3, '値引', -30, 'その他'), printed(1, 'パン', 150), printed(2, '卵', 248)];
+  const folded = engine.foldReceiptDiscounts(lines);
+  equal(folded.reduce((sum, item) => sum + item.amount, 0), 368, '合計');
+  equal(folded.find(item => item.name === '卵').amount, 218, '並べ替えたうえで、すぐ上の卵にまとめる');
+});
+
+test('81. 1つの商品に値引きが2回あっても、両方まとめる', () => {
+  const folded = engine.foldReceiptDiscounts([printed(1, '肉', 600), printed(2, '値引', -100), printed(3, '割引', -50)]);
+  equal(folded.length, 1, '1行');
+  equal(folded[0].amount, 450, '600 − 100 − 50');
+});
+
+test('82. 会計全体の値引き・上に商品が無い値引き・商品の額を超える値引きは、商品ではない行として残す', () => {
+  const whole = engine.foldReceiptDiscounts([printed(1, 'パン', 150), printed(2, '小計値引', -20, 'その他')]);
+  equal(whole.length, 2, '小計値引はまとめない');
+  equal(whole[1].adjustment, true, '商品ではない行');
+  equal(whole[1].outcomeTracked, false, 'ふりかえりに出さない');
+  equal(whole[0].amount, 150, 'パンは値引きされない');
+  equal(engine.foldReceiptDiscounts([printed(1, 'クーポン', -100), printed(2, 'パン', 150)])[0].adjustment, true, '上に商品が無い');
+  equal(engine.foldReceiptDiscounts([printed(1, 'ガム', 100), printed(2, '値引', -150)])[1].adjustment, true, '商品の額を超える');
+  const afterWhole = engine.foldReceiptDiscounts([printed(1, 'パン', 150), printed(2, '小計値引', -20), printed(3, '値引', -10)]);
+  equal(afterWhole.filter(item => item.adjustment).length, 2, '商品ではない行の下の値引きも、商品にはまとめない');
+});
+
+test('83. 商品の行だけを取り出すと、件数に値引きが入らない', () => {
+  const products = engine.receiptProductLines([printed(1, 'もやし', 198), printed(2, '値引', -50), printed(3, '牛乳', 258), printed(4, '小計値引', -20)]);
+  deepEqual(products.map(item => item.name), ['もやし', '牛乳'], '商品は2件');
+});
+
+test('84. 値引きされた商品を捨てたら、ムダ支出は値引き後の額', () => {
+  const folded = engine.receiptProductLines([
+    { ...printed(1, 'もやし', 198), outcome: 'expired' },
+    { ...printed(2, '値引', -50), outcome: 'in_stock' }
+  ]);
+  equal(engine.wasteAmountOf(folded[0]), 148, '148円');
+  const summary = engine.summarizeWaste(folded.map(item => ({ ...item, purchasedAt: '2026-09-01' })), { from: '2026-09-01', to: '2026-09-30' });
+  equal(summary.total, 148, 'ムダ支出の合計');
+  equal(summary.count, 1, '明細は1件');
+});
+
+test('84b. ふりかえりに「値引」は出ない（値引き行のカテゴリが「食品」と読まれても）', () => {
+  const lines = [
+    { ...printed(1, 'もやし', 198), purchasedAt: '2026-08-20', outcomeTracked: true },
+    { ...printed(2, '値引', -50, '食品'), purchasedAt: '2026-08-20', outcomeTracked: true },
+    { ...printed(3, '小計値引', -20, '食品'), purchasedAt: '2026-08-20', outcomeTracked: true }
+  ];
+  const due = engine.dueForReview(engine.receiptProductLines(lines), { today: '2026-08-30' });
+  deepEqual(due.map(item => item.name), ['もやし'], 'もやしだけ');
+  equal(due[0].amount, 148, '値引き後の額でたずねる');
+});
+
+test('85. 在庫に入れるときは値引き後の値段で、値引き行にも同じ在庫を書き戻す。値引きだけの行は在庫にしない', () => {
+  const folded = engine.foldReceiptDiscounts([
+    line({ id: 'd1', lineNo: 1, rawName: 'ティッシュ', name: 'ティッシュ', quantity: 1, unit: '箱', category: '消耗品', amount: 298 }),
+    line({ id: 'd2', lineNo: 2, rawName: '値引', name: '値引', quantity: 1, unit: '', category: 'その他', amount: -30 }),
+    line({ id: 'd3', lineNo: 3, rawName: '小計値引', name: '小計値引', quantity: 1, unit: '', category: 'その他', amount: -10 })
+  ]);
+  const { creates, merges } = plan(folded);
+  equal(creates.length, 1, '値引きだけの行は在庫にしない');
+  equal(merges.length, 0, 'まとめ先なし');
+  equal(creates[0].purchasePrice, 268, '値引き後の値段');
+  deepEqual(creates[0].lineIds, ['d1', 'd2'], '値引き行にも書き戻す');
+  equal(plan([line({ id: 'x', lineNo: 1, rawName: '値引', name: '値引', amount: -50 })]).creates.length, 0, 'まとめていないマイナスの行も在庫にしない');
+});
+
+test('86. 既にある在庫にまとめるときも、値引き行のIDを一緒に書き戻す', () => {
+  const folded = engine.foldReceiptDiscounts([
+    line({ id: 'm1', lineNo: 1, rawName: 'もやし', name: 'もやし', quantity: 1, unit: '袋', amount: 98 }),
+    line({ id: 'm2', lineNo: 2, rawName: '値引', name: '値引', amount: -20 })
+  ]);
+  deepEqual(plan(folded).merges[0].lineIds, ['m1', 'm2'], '商品と値引き');
 });
 
 if (!failures.length) { console.log(JSON.stringify({ suite: 'receipt', total, passed: total, failed: 0 })); process.exit(0); }
