@@ -584,6 +584,32 @@ export function nextGeminiStep(input: {
   return { action: "stop" };
 }
 
+/**
+ * Google のモデル一覧（models.list の返事）から、予備に使うモデルを選ぶ（2026-09-22）。
+ * 名前を推測で書いておくと、実在しないときに黙って飛ばされ、混雑に弱いままになった。
+ * いま使える（generateContent ができる）安定版の flash 系だけを選び、混雑に強い lite を先に、
+ * 同じ種類なら新しい版を先に並べる。本来のモデルは除く。
+ */
+export function pickFallbackModels(
+  listed: Array<{ name?: unknown; supportedGenerationMethods?: unknown }>,
+  primary: string,
+  limit = 2,
+): string[] {
+  const version = (name: string) => Number(/^gemini-(\d+(?:\.\d+)?)-/.exec(name)?.[1] ?? 0);
+  return (listed || [])
+    .filter((model) => Array.isArray(model?.supportedGenerationMethods) && model.supportedGenerationMethods.includes("generateContent"))
+    .map((model) => String(model?.name ?? "").replace(/^models\//, ""))
+    // 安定版の名前だけ（preview・exp・画像生成・音声などを除く）
+    .filter((name) => /^gemini-\d+(?:\.\d+)?-flash(?:-lite)?$/.test(name) && name !== primary)
+    .sort((a, b) => Number(b.endsWith("-lite")) - Number(a.endsWith("-lite")) || version(b) - version(a))
+    .slice(0, limit);
+}
+
+/** 試したAIと結果を1行にする（例「gemini-3.6-flash（503）・gemini-3.1-flash-lite（503）」） */
+export function triedModelsSummary(tried: Array<{ model: string; status: number }>): string {
+  return (tried || []).map((entry) => `${entry.model}（${entry.status}）`).join("・");
+}
+
 /** Google の返事にある短い説明（英語）を取り出す。画面に添えて、写真だけで原因が分かるようにする */
 export function geminiErrorDetail(bodyText: string): string {
   try {

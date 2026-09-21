@@ -182,12 +182,16 @@ HTML内の `styles.css` が `/money/styles.css` ではなく `/styles.css` に�
 
 **レシピ提案の「AIがエラーを返しました」は、Gemini 側の返事の番号で原因が違う（2026-09-22）。**
 同じ日にやり直しを入れても 503 が続いた（日本の深夜＝アメリカの昼で、Google 側が混む。無料枠は後回しにされやすい）。
-いまは `route.ts` が、本来のモデル（`gemini-3.6-flash`）で1回やり直し、だめなら**予備のモデルに切り替える**
-（既定 `gemini-3.8-flash` → `gemini-3.1-flash-lite`。環境変数 `GEMINI_FALLBACK_MODELS` で差し替え可。
-**予備のモデル名は実在を確かめていない**ので、無ければ 404 で黙って次へ進む）。429 もモデルごとの上限なので次へ。
-401/403（APIキー）は止める。予備で答えたときは画面に「予備のAI（モデル名）で考えました」と出る。
-全部だめなとき、画面の文には番号（例「（503）」）と Google の説明（英語の1文）が入るので、写真をもらえば原因が分かる。
-決め方は `suggest-core.ts` の `geminiModelChain` / `nextGeminiStep` / `geminiErrorDetail` / `geminiErrorMessage`。
+Google の説明は「This model is currently experiencing high demand.」（利用集中）だった。
+いまは `route.ts` が、本来のモデル（`gemini-3.6-flash`）で1回やり直し、だめなら**予備のモデルに切り替える**。
+予備は、そのとき初めて **Google のモデル一覧（models.list、無料）から選ぶ**（`pickFallbackModels`：
+安定版の flash 系だけ、混雑に強い lite を先に、新しい版を先に、最大2つ）。名前を推測で書くと、無いときに黙って
+飛ばされていた。一覧が取れないときだけ `DEFAULT_GEMINI_FALLBACK_MODELS` を使う。環境変数 `GEMINI_FALLBACK_MODELS`
+（カンマ区切り）があれば一覧を見ずにそれを使う。429 もモデルごとの上限なので次へ。401/403（APIキー）は止める。
+予備で答えたときは画面に「予備のAI（モデル名）で考えました」と出る。
+全部だめなとき、画面の文には番号（例「（503）」）・Google の説明（英語の1文）・**試したAIと結果**が入るので、
+写真をもらえば原因が分かる。決め方は `suggest-core.ts` の `geminiModelChain` / `nextGeminiStep` /
+`pickFallbackModels` / `triedModelsSummary` / `geminiErrorDetail` / `geminiErrorMessage`。
 
 **ルールはデプロイしないと効かない。** リポジトリの `firestore.rules` はただのファイルです。
 Firebase Console で公開するまで反映されません。レシートが保存できなかった原因はこれでした。
@@ -210,7 +214,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 33 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 35 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 

@@ -7,7 +7,7 @@ import {
   responseSchema, sanitizeSuggestions, toTsukuriokiRecipe, RECIPE_CATEGORIES,
   clearCachedSuggestions, readCachedSuggestions, relativeTimeLabel, writeCachedSuggestions, SUGGESTION_CACHE_KEY,
   geminiErrorMessage, isRetryableGeminiStatus,
-  DEFAULT_GEMINI_FALLBACK_MODELS, geminiErrorDetail, geminiModelChain, nextGeminiStep,
+  DEFAULT_GEMINI_FALLBACK_MODELS, geminiErrorDetail, geminiModelChain, nextGeminiStep, pickFallbackModels, triedModelsSummary,
 } from "./suggest-core.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -339,6 +339,30 @@ t("予備が無い（404）・無料枠切れ（429）・頼み方の誤り（40
 t("返事を待つ時間（20秒）が残らないなら、もう試さない", () => {
   eq(nextGeminiStep({ modelCount: 3, modelIndex: 0, attemptOnModel: 0, status: 503, remainingMs: 21_000 }), { action: "try", modelIndex: 1, waitMs: 0 }, "待つ余裕は無いが、待たずに予備へは行ける");
   eq(nextGeminiStep({ modelCount: 3, modelIndex: 0, attemptOnModel: 1, status: 503, remainingMs: 15_000 }), { action: "stop" }, "15秒しか無いなら止める");
+});
+
+t("予備のモデルは Google の一覧から選ぶ：安定版の flash 系だけ、lite を先に、新しい版を先に、本来のモデルは除く", () => {
+  const gen = ["generateContent"];
+  const listed = [
+    { name: "models/gemini-3.6-flash", supportedGenerationMethods: gen },
+    { name: "models/gemini-3.1-flash-lite", supportedGenerationMethods: gen },
+    { name: "models/gemini-3.8-flash", supportedGenerationMethods: gen },
+    { name: "models/gemini-3.6-flash-lite", supportedGenerationMethods: gen },
+    { name: "models/gemini-3.9-flash-preview-09-2026", supportedGenerationMethods: gen },
+    { name: "models/gemini-3.6-flash-image", supportedGenerationMethods: gen },
+    { name: "models/text-embedding-005", supportedGenerationMethods: ["embedContent"] },
+    { name: "models/gemini-3.7-flash", supportedGenerationMethods: ["countTokens"] },
+    { name: "models/gemini-3.6-pro", supportedGenerationMethods: gen },
+  ];
+  eq(pickFallbackModels(listed, "gemini-3.6-flash"), ["gemini-3.6-flash-lite", "gemini-3.1-flash-lite"], "lite を新しい順に2つ");
+  eq(pickFallbackModels(listed, "gemini-3.6-flash", 4), ["gemini-3.6-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"], "続けて flash（preview・画像・pro・生成できないものは除く）");
+  eq(pickFallbackModels([], "gemini-3.6-flash"), [], "一覧が空");
+  eq(pickFallbackModels([{ name: 42 }, null].filter(Boolean), "gemini-3.6-flash"), [], "壊れた一覧でも落ちない");
+});
+
+t("試したAIと結果を1行にする", () => {
+  eq(triedModelsSummary([{ model: "gemini-3.6-flash", status: 503 }, { model: "gemini-3.6-flash-lite", status: 503 }]), "gemini-3.6-flash（503）・gemini-3.6-flash-lite（503）", "並べる");
+  eq(triedModelsSummary([]), "", "空");
 });
 
 t("Google の説明を短く取り出す（壊れた返事でも落ちない）", () => {

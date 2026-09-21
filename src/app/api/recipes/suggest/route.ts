@@ -9,6 +9,8 @@ import {
   geminiErrorMessage,
   geminiModelChain,
   nextGeminiStep,
+  pickFallbackModels,
+  triedModelsSummary,
   normalizeOptions,
   normalizeTools,
   pickPantry,
@@ -83,19 +85,45 @@ async function readUserCollection(uid: string, idToken: string, name: string) {
   return all;
 }
 
+/**
+ * 予備のモデルを、Google のモデル一覧から選ぶ（2026-09-22）。
+ * 名前を推測で書いておくと、無くなっていたときに黙って飛ばされて、混雑に弱いままだった。
+ * 一覧を取れなかったときだけ、書いておいた名前（DEFAULT_GEMINI_FALLBACK_MODELS）を使う。
+ */
+async function listFallbackModels(apiKey: string): Promise<string[]> {
+  try {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+      headers: { "x-goog-api-key": apiKey },
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`models.list ${response.status}`);
+    const body = (await response.json()) as { models?: Array<{ name?: string; supportedGenerationMethods?: string[] }> };
+    const picked = pickFallbackModels(body.models ?? [], GEMINI_MODEL);
+    console.info("[api/recipes/suggest] 予備のモデル", picked);
+    if (picked.length) return picked;
+  } catch (error) {
+    console.error("[api/recipes/suggest] モデル一覧を取れません", error);
+  }
+  return [...DEFAULT_GEMINI_FALLBACK_MODELS];
+}
+
 async function askGemini(prompt: string): Promise<{ data: unknown; model: string }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ApiError("レシピ提案の設定がまだです（サーバーに GEMINI_API_KEY がありません）。", 500);
 
   // 関数の持ち時間（maxDuration 60秒）の中で、Google 側が混んでいれば1回やり直し、
-  // それでもだめなら予備のモデルに切り替える（2026-09-22。決め方は suggest-core の nextGeminiStep）
-  const models = geminiModelChain(GEMINI_MODEL, process.env.GEMINI_FALLBACK_MODELS ?? DEFAULT_GEMINI_FALLBACK_MODELS);
+  // それでもだめなら予備のモデルに切り替える（2026-09-22。決め方は suggest-core の nextGeminiStep）。
+  // 予備は、GEMINI_FALLBACK_MODELS があればそれ、無ければ本来のモデルが断られたときに Google の一覧から選ぶ
+  const configured = process.env.GEMINI_FALLBACK_MODELS;
+  const models = geminiModelChain(GEMINI_MODEL, configured);
+  let fallbacksLoaded = Boolean(configured);
   const deadline = Date.now() + GEMINI_TIMEOUT_MS;
   let modelIndex = 0;
   let attemptOnModel = 0;
   let response: Response;
   let bodyText = "";
   let lastFailure = { status: 0, detail: "" };
+  const tried: Array<{ model: string; status: number }> = [];
   for (;;) {
     const model = models[modelIndex];
     const controller = new AbortController();
@@ -121,13 +149,22 @@ async function askGemini(prompt: string): Promise<{ data: unknown; model: string
     bodyText = await response.text();
     if (response.ok) break;
     console.error("[api/recipes/suggest] Gemini がエラーを返しました", model, `${attemptOnModel + 1}回目`, response.status, bodyText.slice(0, 500));
+    tried.push({ model, status: response.status });
     // 予備のモデルが無い（404）だけなら、利用者に伝える失敗は、その前の本当の失敗（503 など）のほうにする
     if (!(response.status === 404 && lastFailure.status)) {
       lastFailure = { status: response.status, detail: geminiErrorDetail(bodyText) };
     }
-    const step = nextGeminiStep({ modelCount: models.length, modelIndex, attemptOnModel, status: response.status, remainingMs: deadline - Date.now() });
+    let step = nextGeminiStep({ modelCount: models.length, modelIndex, attemptOnModel, status: response.status, remainingMs: deadline - Date.now() });
+    // 本来のモデルで粘りきったら、ここで初めて予備を Google の一覧から選んで足す
+    if (step.action === "stop" && !fallbacksLoaded && response.status !== 401 && response.status !== 403) {
+      fallbacksLoaded = true;
+      models.push(...(await listFallbackModels(apiKey)).filter((name) => !models.includes(name)));
+      step = nextGeminiStep({ modelCount: models.length, modelIndex, attemptOnModel, status: response.status, remainingMs: deadline - Date.now() });
+    }
     if (step.action === "stop") {
-      const message = geminiErrorMessage(lastFailure.status) + (lastFailure.detail ? ` ／ Google の説明: ${lastFailure.detail}` : "");
+      const message = geminiErrorMessage(lastFailure.status)
+        + (lastFailure.detail ? ` ／ Google の説明: ${lastFailure.detail}` : "")
+        + (tried.length > 1 ? ` ／ 試したAI: ${triedModelsSummary(tried)}` : "");
       throw new ApiError(message, lastFailure.status === 429 ? 429 : 502);
     }
     attemptOnModel = step.modelIndex === modelIndex ? attemptOnModel + 1 : 0;
