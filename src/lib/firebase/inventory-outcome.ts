@@ -2,7 +2,6 @@ import {
   collection,
   getDocs,
   query,
-  serverTimestamp,
   where,
   writeBatch,
   type DocumentData,
@@ -11,6 +10,7 @@ import {
 import type { Item } from "@/lib/types/item";
 import { itemOutcomePatch, receiptLinePatches, type OutcomeChoice } from "@/lib/inventory/outcome-core";
 import { db } from "./client";
+import { syncPublicByLocationIfNeeded } from "./public-location";
 import { itemDoc } from "./refs";
 
 export type OutcomeResult = {
@@ -20,18 +20,6 @@ export type OutcomeResult = {
   wasteTotal: number;
 };
 
-/**
- * 「使い切った」「捨てた」を記録する（Phase 4 手B）。
- *
- * 1. 在庫は**数量0にして残す**（消さない）
- * 2. その在庫のもとになったレシート明細（inventoryItemId が一致する行）に結末と無駄金額を返す
- *
- * 2 を探すのに workspace のIDが要る。「在庫に入れる」でお金管理が
- * purchaseWorkspaceId を在庫に書いているので、それを使う。無い在庫（手で足したもの、
- * この機能より前に入れたもの）は 1 だけ行う。
- *
- * 1 と 2 は同じバッチなので、途中で片方だけ書かれることはない。
- */
 /**
  * その在庫のもとになったレシート明細を探す。
  *
@@ -60,10 +48,22 @@ async function findReceiptLines(userId: string, item: Item) {
   return found;
 }
 
+/**
+ * 「使い切った」「捨てた」を記録する（Phase 4 手B）。
+ *
+ * 1. その在庫のもとになったレシート明細（inventoryItemId が一致する行）に結末と無駄金額を返す
+ * 2. 在庫からは消す（2026-09-21 から。以前は数量0にして残していたが、0のモノが並んで見づらかった）
+ *
+ * 1 を探すのに workspace のIDが要る。「在庫に入れる」でお金管理が
+ * purchaseWorkspaceId を在庫に書いているので、それを使う。無い在庫（手で足したもの、
+ * この機能より前に入れたもの）は 2 だけ行う。
+ *
+ * 1 と 2 は同じバッチなので、明細に返らないまま在庫だけ消える、ということは起きない。
+ */
 export async function recordItemOutcome(userId: string, item: Item, choice: OutcomeChoice): Promise<OutcomeResult> {
   const patch = itemOutcomePatch(choice, new Date());
   const batch = writeBatch(db);
-  batch.update(itemDoc(userId, item.id), { ...patch, updatedAt: serverTimestamp() });
+  batch.delete(itemDoc(userId, item.id));
 
   // 値引き行も同じ在庫に結びついているので、レシートごとに値引き後の額で無駄を出す
   const lines = await findReceiptLines(userId, item);
@@ -78,5 +78,7 @@ export async function recordItemOutcome(userId: string, item: Item, choice: Outc
   });
 
   await batch.commit();
+  // 公開中の保管場所なら、公開ページからも消す（失敗しても記録は済んでいるので、黙って続ける）
+  await syncPublicByLocationIfNeeded(userId, item.locationId).catch(() => undefined);
   return { linesUpdated: patches.length, wasteTotal };
 }

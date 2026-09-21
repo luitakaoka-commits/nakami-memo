@@ -57,7 +57,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     if (expiring) { publish(`期限が近い ${expiring}件`); return; }
 
     const low = value.items.filter(isLowStock).length;
-    if (low) { publish(`在庫が少ない ${low}件`); return; }
+    if (low) { publish(`買い替え時 ${low}件`); return; }
 
     publish(value.items.length ? `在庫 ${value.items.length}件` : "在庫はまだありません");
   }, [value.items, value.loading]);

@@ -314,10 +314,10 @@ function SuggestionCard({ recipe, pantryItems, toolNames, alreadySaved }: {
           items={pantryItems}
           savedRecipeId={savedId}
           onClose={() => setCooking(false)}
-          onDone={(changed) => {
+          onDone={({ changed, removed }) => {
             setCooking(false);
             setCooked(changed
-              ? `${changed}件の在庫を減らしました。`
+              ? `${changed}件の在庫を減らしました。${removed ? `使い切った${removed}件は在庫から消しました。` : ""}`
               : "減らす量がすべて0だったので、在庫は変えていません。");
           }}
         />
@@ -332,7 +332,7 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
   items: ReturnType<typeof useInventory>["items"];
   savedRecipeId: string | null;
   onClose: () => void;
-  onDone: (changed: number) => void;
+  onDone: (result: { changed: number; removed: number }) => void;
 }) {
   const { user } = useAuth();
   const byId = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);

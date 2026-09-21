@@ -9,7 +9,7 @@ import type { Item } from "@/lib/types/item";
 /**
  * 在庫の「使い切った／捨てた」（Phase 4 手B）。
  *
- * 押すと数量が0になり、モノ自体は残る。レシートから入れた在庫なら、
+ * 押すと在庫から消える（2026-09-21 から。以前は数量0で残していた）。レシートから入れた在庫なら、
  * お金管理のレシート明細にも結末と無駄金額が返る（返ったときだけ、いくら無駄だったかを出す）。
  */
 export function ItemOutcomeActions({ item }: { item: Item }) {
@@ -31,12 +31,13 @@ export function ItemOutcomeActions({ item }: { item: Item }) {
       const result = await recordItemOutcome(user.uid, item, choice);
       setAsking(false);
       // 何が起きたかを出す。黙って数量が0になるだけだと、お金管理へ返ったのか分からない。
+      // 在庫からは消える（2026-09-21 から）。一覧の再描画でカードごと消えるまでの一瞬だけ見える
       setDone(
         result.linesUpdated === 0
-          ? "記録しました。"
+          ? "記録して、在庫から消しました。"
           : result.wasteTotal > 0
-            ? `記録しました。お金管理のムダ支出に ${result.wasteTotal.toLocaleString("ja-JP")}円 が入ります。`
-            : "記録しました。お金管理では無駄なしとして数えます。",
+            ? `在庫から消しました。お金管理のムダ支出に ${result.wasteTotal.toLocaleString("ja-JP")}円 が入ります。`
+            : "在庫から消しました。お金管理では無駄なしとして数えます。",
       );
     } catch (err) {
       setFailure(err instanceof Error ? err.message : "記録できませんでした。");

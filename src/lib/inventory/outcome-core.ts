@@ -68,9 +68,8 @@ export type ItemOutcomePatch = {
 };
 
 /**
- * 在庫側に書く内容。
- * **数量を0にするだけで、モノ自体は消さない。** 同じものをまた買うので、
- * 消してしまうと次に買ったときに名前から作り直すことになり、買い直しの回数も分からなくなる。
+ * 結末の内容（お金管理の明細へ返すもとになる）。
+ * 在庫そのものは、記録と同時に消す（2026-09-21 から。以前は数量0にして残していた）。
  */
 export function itemOutcomePatch(choice: OutcomeChoice, now: Date): ItemOutcomePatch {
   const outcome = choice.kind === "consumed" ? "consumed" : outcomeOfDiscardReason(choice.reason);
@@ -138,6 +137,38 @@ export function receiptLinePatches(lines: ReceiptLineRef[], patch: ItemOutcomePa
     });
   });
   return { patches, wasteTotal };
+}
+
+/* ---------- 在庫が0になったら消す・買い替えアラーム（2026-09-21 ユーザー決定） ----------
+ * 以前は「数量0にしてモノは残す」だったが、実際に使うと0のモノが並んで見づらかった。
+ * いまは、どの経路（使い切った／捨てた・「作った」・編集）でも0になったら在庫から消す。
+ * 残りが少なくなったら知らせたいモノには、本人が選んで「買い替えアラーム」を付ける。
+ * 全部に付けると0のモノを残していたのと同じになるので、既定では付けない。
+ */
+
+/** この数量なら在庫から消す（0以下。小数の誤差は丸めてから判定する） */
+export function isOutOfStock(quantity: unknown): boolean {
+  const value = Math.round(Number(quantity ?? 0) * 1000) / 1000;
+  return !Number.isFinite(value) || value <= 0;
+}
+
+/** 数量が0以下のまま残っているモノ（この仕組みより前に0にしたもの） */
+export function outOfStockItems<T extends { quantity?: unknown }>(items: T[]): T[] {
+  return (items || []).filter((item) => isOutOfStock(item?.quantity));
+}
+
+/**
+ * 買い替えアラームの入力を確かめる。問題があれば画面に出す文を返し、無ければ空文字。
+ * 0以下は付けても鳴らない（0になった時点で消えるため）ので受け付けない。
+ */
+export function restockAlarmError(enabled: boolean, threshold: unknown): string {
+  if (!enabled) return "";
+  const value = Number(threshold);
+  if (threshold === "" || threshold === null || threshold === undefined || !Number.isFinite(value)) {
+    return "買い替えアラームの数を入れてください。";
+  }
+  if (value <= 0) return "買い替えアラームは1以上（0より大きい数）にしてください。0になると在庫から消えるため、0では知らせられません。";
+  return "";
 }
 
 /**

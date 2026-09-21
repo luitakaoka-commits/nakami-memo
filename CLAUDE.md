@@ -93,6 +93,13 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   **意味の判断を自動でやらない**。「牛乳」と「低脂肪乳」を同じにしてよいかは本人にしか決められない。
   逆に寄せすぎると粒度が粗くなって行動につながらない
 - **レシートは記録ページ内のタブ**。ボトムナビは5項目のまま。口座はナビに残す
+- **なかみメモの在庫は、0になったら消す**（2026-09-21 ユーザー決定。Phase 4 手B の「数量0で残す」を覆した）。
+  0のモノが並ぶと冗長で見づらかったため。使い切った／捨てた・なかみメモの「作った」・つくりおきノートの「作った」・
+  編集で数量0、のどれでも消える（判定は `src/lib/inventory/outcome-core.ts` の `isOutOfStock`）。お金管理の明細への書き戻しは消す前に同じバッチで行う。
+  前から0のまま残っているモノは**勝手には消さず**、ホームの「まとめて在庫から消す」（`OutOfStockCleanup`）を本人が押す。
+  **買い替えアラーム**は、切らしたくないモノにだけ本人が付ける（全部に付けたら0で残すのと同じになるため、既定は付けない）。
+  保存先は以前からの `lowStockThreshold`（付けないときは null、0以下は受け付けない＝0で消えるので鳴らない）。表示は「買い替え時」。
+  **アラームを付けたモノも0になれば消える**（本人の決定どおり「0になったらすべて削除」。アラームは0になる前に知らせるためのもの）
 - **レシート一覧は「未確認」と「確認済み」を別のタブに分ける**（2026-09-15 ユーザー要望）。
   未確認 = `pending`・`needs_review`（要確認もまだ見ていないので未確認の側）、確認済み = `accepted`。
   「無視」（`ignored`）のタブは1件以上あるときだけ出す。開いたときは未確認
@@ -183,7 +190,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 20 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 17
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 21
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
@@ -427,7 +434,7 @@ Firebaseプロジェクトの統合（3つ→1つ）は済み（上の表）。�
 | `src/lib/firebase/inventory-outcome.ts` | 在庫を数量0にするのと、レシート明細への書き戻しを**1つのバッチ**で行う |
 | `src/components/items/ItemOutcomeActions.tsx` | 在庫カードの「使い切った／捨てた」。捨てたときだけ理由を4択で聞く |
 
-- **モノは消さない。数量を0にして残す**（また買うから。消すと買い直しの回数が分からなくなる）
+- ~~モノは消さない。数量を0にして残す~~ → **2026-09-21 に変更：在庫が0になったら消す**（下の「在庫0で消す」を参照）
 - 書き戻し先は `inventoryItemId` が自分のIDと一致するレシート明細。**まとめた在庫なら複数行に返る**
 - 行き先の共有スペースは在庫の `purchaseWorkspaceId`（「在庫に入れる」で書く）。
   それが無い古い在庫でも `purchaseRef` があれば、自分が入っている共有スペースを順に探す

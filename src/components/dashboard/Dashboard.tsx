@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 import { ItemCard } from "@/components/items/ItemCard";
+import { OutOfStockCleanup } from "@/components/items/OutOfStockCleanup";
 
 export function Dashboard() {
   const { areas, locations, itemsWithLocation, loading, error } = useInventory();
@@ -46,10 +47,12 @@ export function Dashboard() {
         <div className="ui-stat"><span className="ui-stat__label">アイテム</span><strong className="ui-stat__value">{itemsWithLocation.length}</strong></div>
         <div className="ui-stat"><span className="ui-stat__label">保管場所</span><strong className="ui-stat__value">{locations.length}</strong></div>
         <div className="ui-stat"><span className="ui-stat__label">期限</span><strong className="ui-stat__value">{expiringAll.length}</strong></div>
-        <div className="ui-stat"><span className="ui-stat__label">少ない</span><strong className="ui-stat__value">{lowStockAll.length}</strong></div>
+        <div className="ui-stat"><span className="ui-stat__label">買い替え</span><strong className="ui-stat__value">{lowStockAll.length}</strong></div>
       </div>
 
       {areas.length === 0 ? <EmptyState title="エリアがありません" actionLabel="エリアを追加" href="/app/areas" /> : locations.length === 0 ? <EmptyState title="保管場所がありません" actionLabel="保管場所を追加" href="/app/locations/new" /> : null}
+
+      <OutOfStockCleanup items={itemsWithLocation} />
 
       <div className="ui-grid-two">
         <section className="ui-section">
@@ -58,8 +61,8 @@ export function Dashboard() {
         </section>
 
         <section className="ui-section">
-          <div className="ui-section__head"><div className="flex items-center gap-2"><PackageSearch size={18} className="text-[var(--brand)]" /><h2 className="ui-section__title">残り少ないもの</h2></div><Link href="/app/low-stock" className="ui-button ui-button--ghost">すべて</Link></div>
-          <div className="ui-list">{lowStockItems.length ? lowStockItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={locationLabelOf(item)} />) : <p className="ui-muted">該当なし</p>}</div>
+          <div className="ui-section__head"><div className="flex items-center gap-2"><PackageSearch size={18} className="text-[var(--brand)]" /><h2 className="ui-section__title">買い替え時のもの</h2></div><Link href="/app/low-stock" className="ui-button ui-button--ghost">すべて</Link></div>
+          <div className="ui-list">{lowStockItems.length ? lowStockItems.map((item) => <ItemCard key={item.id} item={item} locationLabel={locationLabelOf(item)} />) : <p className="ui-muted">該当なし。買い替えアラームを付けたモノが残り少なくなると、ここに出ます。</p>}</div>
         </section>
       </div>
 

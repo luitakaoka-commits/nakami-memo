@@ -157,13 +157,14 @@ export async function decrementInventory(rows, recipeTitle) {
   if (!rows.length) return 0;
   const batch = writeBatch(db);
   const now = new Date();
-  /* 料理で使い切った分は、お金管理の明細にも「使い切った」を返す（2026-09-16）。
-     返さないと、使い切ったのに週1回のふりかえりで何度も聞かれる。使い切ったので無駄は0円。 */
+  /* 料理で使い切った在庫は、なかみメモから消す（2026-09-21 から。以前は0で残していたが見づらかった）。
+     お金管理の明細には「使い切った」を返す（2026-09-16）。返さないと、使い切ったのに
+     週1回のふりかえりで何度も聞かれる。使い切ったので無駄は0円。 */
   const usedUp = new Set(usedUpRows(rows).map((row) => row.itemId));
   rows.forEach((row) => {
-    batch.update(doc(col("items"), row.itemId), {
+    if (usedUp.has(row.itemId)) batch.delete(doc(col("items"), row.itemId));
+    else batch.update(doc(col("items"), row.itemId), {
       quantity: Math.max(0, Math.round((row.available - row.use) * 1000) / 1000),
-      ...(usedUp.has(row.itemId) ? { outcome: "consumed", outcomeAt: now.toISOString(), outcomeReason: "" } : {}),
       updatedAt: now
     });
     batch.set(doc(col("consumptions")), {

@@ -8,7 +8,7 @@ import {
   saveMany, removeMany, removeCollection, uploadRecipeImage, deleteRecipeImage, onWriteError,
   readInventory, decrementInventory
 } from "./store.js";
-import { planFromSourceItems, rowsToApply } from "../shared/cook-stock.js";
+import { planFromSourceItems, rowsToApply, usedUpRows } from "../shared/cook-stock.js";
 import { markPantryHits, pantryHitCount } from "../shared/pantry-check.js";
 
 const PREFS_KEY = "tsukurioki-note-prefs-v1";
@@ -749,7 +749,9 @@ async function applyStockFromSheet() {
   if (!targets.length) { showToast("減らす量が0だったので、在庫はそのままです", ""); return; }
   try {
     await decrementInventory(targets, title);
-    showToast(targets.length + "件の在庫を減らしました", "success");
+    /* 使い切った在庫はなかみメモから消えるので、黙って消えたように見えないよう件数を伝える */
+    const gone = usedUpRows(targets).length;
+    showToast(targets.length + "件の在庫を減らしました" + (gone ? "（使い切った" + gone + "件は在庫から消しました）" : ""), "success");
   } catch (error) {
     showToast("在庫を減らせませんでした", "");
   }

@@ -26,7 +26,7 @@ export function ItemCard({ item, locationLabel }: { item: Item; locationLabel?: 
           {item.category && <Badge>{item.category}</Badge>}
           {item.statusMemo && <Badge tone="blue">{item.statusMemo}</Badge>}
           {item.expirationDate && <Badge tone={isExpired(item.expirationDate) ? "red" : isExpiringSoon(item.expirationDate) ? "amber" : "slate"}>{item.expirationType || "期限"}: {formatDate(item.expirationDate)}</Badge>}
-          {isLowStock(item) && <Badge tone="amber">残り少ない</Badge>}
+          {isLowStock(item) && <Badge tone="amber">買い替え時</Badge>}
         </div>
         {item.memo && <p className="ui-item-card__memo">{item.memo}</p>}
         <Link href={`/app/items/${item.id}/edit`} className="ui-button ui-button--ghost mt-2">編集</Link>

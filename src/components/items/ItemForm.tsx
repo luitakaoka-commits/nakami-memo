@@ -2,7 +2,8 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { createItem, getItem, updateItem, updateItemImageUrl } from "@/lib/firebase/firestore";
+import { createItem, deleteItem, getItem, updateItem, updateItemImageUrl } from "@/lib/firebase/firestore";
+import { isOutOfStock, restockAlarmError } from "@/lib/inventory/outcome-core";
 import { uploadItemImage } from "@/lib/image-upload";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useInventory } from "@/lib/hooks/useInventory";
@@ -29,6 +30,9 @@ export function ItemForm({ itemId }: { itemId?: string }) {
   const [expirationType, setExpirationType] = useState("");
   const [notifyDaysBefore, setNotifyDaysBefore] = useState("");
   const [memo, setMemo] = useState("");
+  // 買い替えアラーム（2026-09-21）。付けたモノだけ、残りがこの数以下になったら「買い替え時」と知らせる。
+  // 保存先は以前からの lowStockThreshold（付けないときは null）
+  const [alarmEnabled, setAlarmEnabled] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(Boolean(itemId));
@@ -57,6 +61,7 @@ export function ItemForm({ itemId }: { itemId?: string }) {
       setExpirationType(result.expirationType ?? "");
       setNotifyDaysBefore(result.notifyDaysBefore?.toString() ?? "");
       setMemo(result.memo ?? "");
+      setAlarmEnabled(typeof result.lowStockThreshold === "number");
       setLowStockThreshold(result.lowStockThreshold?.toString() ?? "");
       setLoading(false);
     }
@@ -71,6 +76,26 @@ export function ItemForm({ itemId }: { itemId?: string }) {
     event.preventDefault();
     if (!user) return;
     setError("");
+
+    const alarmProblem = restockAlarmError(alarmEnabled, lowStockThreshold);
+    if (alarmProblem) { setError(alarmProblem); return; }
+
+    // 在庫が0になったモノは残さない（2026-09-21）。新しく足すときは0では作らず、
+    // 編集で0にしたときは、確かめてから在庫から消す
+    if (isOutOfStock(quantity)) {
+      if (!itemId) { setError("数量は0より大きい数を入れてください。"); return; }
+      if (!window.confirm(`数量が0なので、「${name || "このアイテム"}」を在庫から消します。よろしいですか？`)) return;
+      setSubmitting(true);
+      try {
+        await deleteItem(user.uid, itemId);
+        router.push(locationId ? `/app/locations/${locationId}` : "/app");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "消せませんでした。");
+        setSubmitting(false);
+      }
+      return;
+    }
+
     setSubmitting(true);
     setSaveProgress({ stage: "saving", progress: 0 });
 
@@ -86,7 +111,7 @@ export function ItemForm({ itemId }: { itemId?: string }) {
         expirationType,
         notifyDaysBefore: notifyDaysBefore === "" ? null : Number(notifyDaysBefore),
         memo,
-        lowStockThreshold: lowStockThreshold === "" ? null : Number(lowStockThreshold),
+        lowStockThreshold: alarmEnabled && lowStockThreshold !== "" ? Number(lowStockThreshold) : null,
       };
       const ref = itemId ? null : await createItem(user.uid, input);
       const targetId = itemId ?? ref?.id;
@@ -150,6 +175,38 @@ export function ItemForm({ itemId }: { itemId?: string }) {
           状態メモ
           <input value={statusMemo} onChange={(event) => setStatusMemo(event.target.value)} />
         </label>
+        <div className="ui-form-field ui-form-field--full">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={alarmEnabled}
+              onChange={(event) => {
+                setAlarmEnabled(event.target.checked);
+                // 付けたときに空欄なら、まず「残り1で知らせる」を入れておく
+                if (event.target.checked && lowStockThreshold === "") setLowStockThreshold("1");
+              }}
+            />
+            買い替えアラームを付ける
+          </label>
+          {alarmEnabled ? (
+            <label className="mt-2 flex flex-wrap items-center gap-2">
+              残りが
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                inputMode="decimal"
+                className="w-24"
+                value={lowStockThreshold}
+                onChange={(event) => setLowStockThreshold(event.target.value)}
+                aria-label="この数以下になったら知らせる"
+              />
+              {unit || ""}以下になったら「買い替え時」と知らせる
+            </label>
+          ) : (
+            <small className="ui-muted">切らしたくないモノにだけ付けてください。0になったモノは在庫から消えます。</small>
+          )}
+        </div>
       </div>
 
       <details className="ui-details mt-7" open={Boolean(itemId)}>
@@ -170,10 +227,6 @@ export function ItemForm({ itemId }: { itemId?: string }) {
               <option value="">未設定</option>
               {NOTIFY_DAYS_OPTIONS.map((days) => <option key={days} value={days}>{days}日前</option>)}
             </select>
-          </label>
-          <label className="ui-form-field">
-            低在庫しきい値
-            <input type="number" step="0.01" value={lowStockThreshold} onChange={(event) => setLowStockThreshold(event.target.value)} />
           </label>
           <label className="ui-form-field ui-form-field--full">
             メモ

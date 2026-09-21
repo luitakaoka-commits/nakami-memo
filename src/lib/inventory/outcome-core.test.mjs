@@ -6,7 +6,7 @@
  */
 import {
   CONSUMABLE_CATEGORIES, DISCARD_REASONS, OUTCOMES, OUTCOME_RESET, WASTE_RATIO,
-  canRecordOutcome, itemOutcomePatch, outcomeLabel, outcomeOfDiscardReason,
+  canRecordOutcome, isOutOfStock, itemOutcomePatch, outcomeLabel, outcomeOfDiscardReason, outOfStockItems, restockAlarmError,
   receiptLinePatch, receiptLinePatches, shouldResetOutcome, wasteAmountOf,
 } from "./outcome-core.ts";
 import { readFileSync } from "node:fs";
@@ -46,7 +46,7 @@ t("数量0のものには出さない（押す意味がない）", () => {
   ok(!canRecordOutcome(null), "在庫が無い");
 });
 
-t("「使い切った」は数量0・無駄なし。モノは消さない", () => {
+t("「使い切った」は数量0・無駄なし（在庫そのものは記録と同時に消す。2026-09-21 から）", () => {
   const patch = itemOutcomePatch({ kind: "consumed" }, NOW);
   eq(patch, { quantity: 0, outcome: "consumed", outcomeAt: "2026-09-16T02:00:00.000Z", outcomeReason: "" }, "中身");
   eq(wasteAmountOf(198, patch.outcome), 0, "使い切ったので無駄は0円");
@@ -164,6 +164,43 @@ t("料理で使い切ったときも「使い切った」として記録し、�
   const store = read("public", "recipe", "store.js");
   ok(store.includes("usedUpRows"), "つくりおきノート: 使い切りを拾っていない");
   ok(store.includes("inventoryItemId"), "つくりおきノート: 明細へ返していない");
+});
+
+/* ---------- 在庫が0になったら消す・買い替えアラーム（2026-09-21） ---------- */
+
+t("0以下なら在庫から消す。小数の誤差は丸めてから判定する", () => {
+  ok(isOutOfStock(0), "0");
+  ok(isOutOfStock(-1), "マイナス");
+  ok(isOutOfStock(0.0001), "誤差ほどの残りは0とみなす");
+  ok(isOutOfStock("0"), "文字の0");
+  ok(isOutOfStock(undefined), "数量なし");
+  ok(!isOutOfStock(0.5), "半分残っている");
+  ok(!isOutOfStock(1), "1個");
+});
+
+t("数量0のまま残っているモノだけを拾う（前の仕組みで残った分）", () => {
+  eq(outOfStockItems([{ id: "a", quantity: 0 }, { id: "b", quantity: 2 }, { id: "c", quantity: 0 }]).map((item) => item.id), ["a", "c"], "0のもの");
+  eq(outOfStockItems([]), [], "空");
+});
+
+t("買い替えアラームは、付けるときだけ0より大きい数が要る", () => {
+  eq(restockAlarmError(false, ""), "", "付けないなら何でもよい");
+  eq(restockAlarmError(true, "1"), "", "1");
+  eq(restockAlarmError(true, "0.5"), "", "0.5（mL などで使う）");
+  ok(restockAlarmError(true, "0").includes("0"), "0は受け付けない（0で消えるので鳴らない）");
+  ok(restockAlarmError(true, "-2") !== "", "マイナス");
+  ok(restockAlarmError(true, "") !== "", "空欄");
+  ok(restockAlarmError(true, "あ") !== "", "数でない");
+});
+
+t("0になった在庫は、どの経路でも消している（数量0で残していない）", () => {
+  const outcome = read("src", "lib", "firebase", "inventory-outcome.ts");
+  ok(/batch\.delete\(itemDoc\(userId, item\.id\)\)/.test(outcome), "使い切った／捨てた: 在庫を消していない");
+  ok(!/batch\.update\(itemDoc\(userId, item\.id\)/.test(outcome), "使い切った／捨てた: まだ在庫を書き換えて残している");
+  const kitchen = read("src", "lib", "firebase", "kitchen.ts");
+  ok(/isOutOfStock\(remainingQuantity\(row\.available, row\.use\)\)\) batch\.delete\(itemRef\)/.test(kitchen), "なかみメモの「作った」: 0になった在庫を消していない");
+  const form = read("src", "components", "items", "ItemForm.tsx");
+  ok(form.includes("isOutOfStock(quantity)") && form.includes("deleteItem(user.uid, itemId)"), "編集で0にしたとき消していない");
 });
 
 t("「使い切った／捨てた」を出すカテゴリが、なかみメモのカテゴリ一覧にある", () => {

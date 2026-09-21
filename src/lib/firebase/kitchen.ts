@@ -17,7 +17,7 @@ import {
 } from "firebase/firestore";
 import type { SavedRecipe } from "@/lib/types/recipe";
 import type { Tool, ToolInput } from "@/lib/types/tool";
-import { itemOutcomePatch, receiptLinePatch } from "@/lib/inventory/outcome-core";
+import { isOutOfStock, itemOutcomePatch, receiptLinePatch } from "@/lib/inventory/outcome-core";
 import { remainingQuantity } from "@/lib/recipes/suggest-core";
 import { db } from "./client";
 import { syncPublicByLocationIfNeeded } from "./public-location";
@@ -115,22 +115,19 @@ export type CookedRow = {
 
 /**
  * 「作った」。在庫を減らし、消費の記録を残す。まとめて1回で書くので、途中まで減る、は起きない。
- * 数量が0になっても在庫からは消さない（「少ない」の一覧に出て、買い足しの目安になる）。
+ * 数量が0になった在庫は消す（2026-09-21 から。以前は0で残していたが、0のモノが並んで見づらかった）。
  * つくりおきノートに保存済みのレシピなら、その「最後に作った日」も更新する。
  */
 export async function recordCooking(userId: string, rows: CookedRow[], recipeTitle: string, savedRecipeId?: string | null) {
   const targets = rows.filter((row) => row.use > 0);
   const batch = writeBatch(db);
-  // 料理で使い切った分は「使い切った」として記録し、お金管理の明細にも返す（2026-09-16）。
+  // 料理で使い切った分は「使い切った」としてお金管理の明細に返す（2026-09-16）。
   // 返さないと、使い切ったのに週1回のふりかえりで何度も聞かれる。使い切ったので無駄は0円。
   const consumed = itemOutcomePatch({ kind: "consumed" }, new Date());
   for (const row of targets) {
-    const usedUp = remainingQuantity(row.available, row.use) === 0;
-    batch.update(doc(db, "users", userId, "items", row.itemId), {
-      quantity: remainingQuantity(row.available, row.use),
-      ...(usedUp ? { outcome: consumed.outcome, outcomeAt: consumed.outcomeAt, outcomeReason: consumed.outcomeReason } : {}),
-      updatedAt: serverTimestamp(),
-    });
+    const itemRef = doc(db, "users", userId, "items", row.itemId);
+    if (isOutOfStock(remainingQuantity(row.available, row.use))) batch.delete(itemRef);
+    else batch.update(itemRef, { quantity: remainingQuantity(row.available, row.use), updatedAt: serverTimestamp() });
     batch.set(doc(collection(db, "users", userId, "consumptions")), {
       itemId: row.itemId,
       itemName: row.name,
@@ -146,7 +143,7 @@ export async function recordCooking(userId: string, rows: CookedRow[], recipeTit
   }
 
   for (const row of targets) {
-    if (!row.purchaseWorkspaceId || remainingQuantity(row.available, row.use) !== 0) continue;
+    if (!row.purchaseWorkspaceId || !isOutOfStock(remainingQuantity(row.available, row.use))) continue;
     const lines = await getDocs(
       query(collection(db, "workspaces", row.purchaseWorkspaceId, "receiptItems"), where("inventoryItemId", "==", row.itemId)),
     );
@@ -158,5 +155,9 @@ export async function recordCooking(userId: string, rows: CookedRow[], recipeTit
   // 公開中の保管場所なら、公開ページの数量も合わせる（失敗しても在庫の更新は済んでいるので、黙って続ける）
   const locationIds = [...new Set(targets.map((row) => row.locationId).filter((id): id is string => Boolean(id)))];
   await Promise.all(locationIds.map((locationId) => syncPublicByLocationIfNeeded(userId, locationId).catch(() => undefined)));
-  return targets.length;
+  // 画面に「何件減らし、何件を在庫から消したか」を出す（黙って消えたように見えないように）
+  return {
+    changed: targets.length,
+    removed: targets.filter((row) => isOutOfStock(remainingQuantity(row.available, row.use))).length,
+  };
 }

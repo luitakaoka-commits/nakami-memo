@@ -83,7 +83,11 @@ same("レシートから来ていない在庫は空のまま", "", rows[0].purch
 /* 使い切りをどう書き込むかは store.js 側。使い忘れるとテストだけ通って本番で反映されない。 */
 const STORE_SOURCE = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "store.js"), "utf8");
 same("store.js が使い切りを拾っている", true, STORE_SOURCE.includes("usedUpRows"));
-same("store.js が在庫に「使い切った」を書いている", true, /outcome: "consumed"/.test(STORE_SOURCE));
+/* 2026-09-21 仕様変更（ユーザー決定）：使い切った在庫は数量0で残さず、なかみメモから消す。
+   以前はここで「在庫に outcome: consumed を書いている」を確かめていた。 */
+same("store.js が使い切った在庫を消している", true, /usedUp\.has\(row\.itemId\)\)\s*batch\.delete\(doc\(col\("items"\)/.test(STORE_SOURCE));
+same("store.js が使い切った在庫に数量0を書き残していない", false, /outcome: "consumed", outcomeAt: now\.toISOString\(\), outcomeReason: "" \} : \{\}/.test(STORE_SOURCE));
+same("store.js がお金管理の明細に「使い切った」を返している", true, /outcome: "consumed"/.test(STORE_SOURCE));
 same("store.js がお金管理の明細にも返している", true, STORE_SOURCE.includes('"receiptItems"') && STORE_SOURCE.includes("inventoryItemId"));
 same("減らしたあとの数量", [9, 0, 0.9, 5], [
   remainingQuantity(10, 1),
