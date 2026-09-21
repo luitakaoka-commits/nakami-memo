@@ -6,7 +6,8 @@ import {
   documentsToObjects, isCountUnit, normalizeOptions, normalizeTools, parseAmount, pickPantry, remainingQuantity,
   responseSchema, sanitizeSuggestions, toTsukuriokiRecipe, RECIPE_CATEGORIES,
   clearCachedSuggestions, readCachedSuggestions, relativeTimeLabel, writeCachedSuggestions, SUGGESTION_CACHE_KEY,
-  geminiErrorMessage, geminiRetryDelay, isRetryableGeminiStatus,
+  geminiErrorMessage, isRetryableGeminiStatus,
+  DEFAULT_GEMINI_FALLBACK_MODELS, geminiErrorDetail, geminiModelChain, nextGeminiStep,
 } from "./suggest-core.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -312,11 +313,39 @@ t("Gemini の一時的な不調（500・502・503・504）だけ自動でやり�
   eq([400, 401, 403, 404, 429].map(isRetryableGeminiStatus), [false, false, false, false, false], "やり直さない");
 });
 
-t("やり直しは2回まで。返事を待つ時間（20秒）が残らないならやり直さない", () => {
-  eq(geminiRetryDelay(0, 50_000), 1500, "1回目のやり直しは1.5秒待つ");
-  eq(geminiRetryDelay(1, 45_000), 4000, "2回目は4秒待つ");
-  eq(geminiRetryDelay(2, 45_000), null, "3回目はやらない");
-  eq(geminiRetryDelay(0, 21_000), null, "待つと20秒を切るならやらない");
+t("試すモデルの並び：本来のモデルが先頭。重複と空は除く。環境変数のカンマ区切りも読める", () => {
+  eq(geminiModelChain("gemini-3.6-flash", DEFAULT_GEMINI_FALLBACK_MODELS), ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.1-flash-lite"], "既定");
+  eq(geminiModelChain("gemini-3.6-flash", " gemini-x , ,gemini-3.6-flash"), ["gemini-3.6-flash", "gemini-x"], "カンマ区切り");
+  eq(geminiModelChain("gemini-3.6-flash", undefined), ["gemini-3.6-flash"], "予備なし");
+});
+
+t("混雑（503）が続いたら：本来のモデルで1回やり直し、次に予備のモデルへ切り替える", () => {
+  const base = { modelCount: 3, remainingMs: 45_000 };
+  eq(nextGeminiStep({ ...base, modelIndex: 0, attemptOnModel: 0, status: 503 }), { action: "try", modelIndex: 0, waitMs: 1500 }, "1回目の失敗は同じモデルでやり直す");
+  eq(nextGeminiStep({ ...base, modelIndex: 0, attemptOnModel: 1, status: 503 }), { action: "try", modelIndex: 1, waitMs: 0 }, "2回目の失敗で予備へ");
+  eq(nextGeminiStep({ ...base, modelIndex: 1, attemptOnModel: 0, status: 503 }), { action: "try", modelIndex: 2, waitMs: 0 }, "予備も混んでいたら次の予備へ（予備では粘らない）");
+  eq(nextGeminiStep({ ...base, modelIndex: 2, attemptOnModel: 0, status: 503 }), { action: "stop" }, "全部だめなら止める");
+});
+
+t("予備が無い（404）・無料枠切れ（429）・頼み方の誤り（400）は次のモデルへ。APIキーの問題は止める", () => {
+  const base = { modelCount: 3, remainingMs: 45_000, attemptOnModel: 0 };
+  eq(nextGeminiStep({ ...base, modelIndex: 1, status: 404 }).action === "try", true, "予備のモデルが無くなっていたら次へ");
+  eq(nextGeminiStep({ ...base, modelIndex: 0, status: 429 }), { action: "try", modelIndex: 1, waitMs: 0 }, "無料枠はモデルごとなので次へ");
+  eq(nextGeminiStep({ ...base, modelIndex: 0, status: 400 }), { action: "try", modelIndex: 1, waitMs: 0 }, "400 も次へ（モデルによって受け付けが違うことがある）");
+  eq(nextGeminiStep({ ...base, modelIndex: 0, status: 401 }), { action: "stop" }, "401");
+  eq(nextGeminiStep({ ...base, modelIndex: 0, status: 403 }), { action: "stop" }, "403");
+});
+
+t("返事を待つ時間（20秒）が残らないなら、もう試さない", () => {
+  eq(nextGeminiStep({ modelCount: 3, modelIndex: 0, attemptOnModel: 0, status: 503, remainingMs: 21_000 }), { action: "try", modelIndex: 1, waitMs: 0 }, "待つ余裕は無いが、待たずに予備へは行ける");
+  eq(nextGeminiStep({ modelCount: 3, modelIndex: 0, attemptOnModel: 1, status: 503, remainingMs: 15_000 }), { action: "stop" }, "15秒しか無いなら止める");
+});
+
+t("Google の説明を短く取り出す（壊れた返事でも落ちない）", () => {
+  eq(geminiErrorDetail(JSON.stringify({ error: { code: 503, message: "The model is overloaded. Please try again later.", status: "UNAVAILABLE" } })), "The model is overloaded.", "最初の1文");
+  eq(geminiErrorDetail("<html>bad gateway</html>"), "", "JSON でない");
+  eq(geminiErrorDetail(JSON.stringify({ error: {} })), "", "説明が無い");
+  ok(geminiErrorDetail(JSON.stringify({ error: { message: "x".repeat(200) } })).length <= 91, "長すぎる説明は切る");
 });
 
 t("エラーの文には必ず番号を入れる（画面の写真だけで原因が分かるように）", () => {

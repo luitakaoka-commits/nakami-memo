@@ -176,6 +176,9 @@ export function RecipeSuggester() {
             <button type="button" onClick={clearSuggestions} className="ui-button ui-button--ghost"><Trash2 size={15} />提案を消す</button>
           </div>
           <p className="ui-muted">提案はこの端末に1日だけ残ります。とっておきたいレシピは「つくりおきノートに保存」を押してください。</p>
+          {result.fallbackModel && (
+            <p className="ui-muted">いつものAIが混み合っていたので、予備のAI（{result.fallbackModel}）で考えました。</p>
+          )}
           {result.uncoveredMustUse.length > 0 && (
             <p className="ui-status-note"><TriangleAlert size={16} className="inline mr-1" />{result.uncoveredMustUse.join("、")}を使うレシピは作れませんでした。条件を変えてもう一度お試しください。</p>
           )}

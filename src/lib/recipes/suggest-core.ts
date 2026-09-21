@@ -531,9 +531,8 @@ export function relativeTimeLabel(savedAt: number, nowMs: number): string {
 /* ---------- Gemini がエラーを返したとき（2026-09-22） ----------
  * 「AIがエラーを返しました」だけでは、混んでいるだけ（待てば直る）なのか、頼み方が悪い（何度やっても同じ）
  * なのかが分からず、画面の写真を見ても原因にたどり着けなかった。
- *  - 500・502・503・504（Google 側の一時的な不調・混雑）は、少し待って自動でやり直す
- *  - それでもだめなら、番号つきで何が起きたかを出す
- * 429（無料枠切れ）はやり直しても無駄なので、やり直さない。
+ *  - 500・502・503・504（Google 側の一時的な不調・混雑）は、やり直す・別のモデルに切り替える（下の nextGeminiStep）
+ *  - それでもだめなら、番号と Google の説明つきで何が起きたかを出す
  */
 
 /** 自動でやり直す意味がある返事か（Google 側の一時的な不調） */
@@ -541,13 +540,60 @@ export function isRetryableGeminiStatus(status: number): boolean {
   return [500, 502, 503, 504].includes(status);
 }
 
-/** 何回目のやり直しの前に何ミリ秒待つか。残り時間が足りなければ null（もうやり直さない） */
-export function geminiRetryDelay(attempt: number, remainingMs: number): number | null {
-  const delays = [1500, 4000];
-  const wait = delays[attempt];
-  if (wait === undefined) return null;
-  // 待ったあとに、返事を待つ時間（少なくとも20秒）が残らないならやり直さない
-  return remainingMs - wait >= 20_000 ? wait : null;
+/* ---------- 混雑したら別のモデルに切り替える（2026-09-22） ----------
+ * 自動のやり直し（同じモデル）を入れても 503 が続いた。日本の深夜はアメリカの昼で、Google 側が混む。
+ * 無料枠は混雑時に後回しにされやすいので、同じモデルで粘るより、別のモデルに切り替えたほうが通りやすい。
+ * 無料枠の上限（429）もモデルごとなので、429 でも次のモデルなら通ることがある。
+ * 予備のモデルが無くなっている（404）ときは、黙って次へ進む。
+ * APIキーの問題（401・403）はどのモデルでも同じなので、そこで止める。
+ */
+
+/** 既定の予備モデル（前から順に試す）。環境変数 GEMINI_FALLBACK_MODELS（カンマ区切り）で差し替えられる */
+export const DEFAULT_GEMINI_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.1-flash-lite"] as const;
+
+/** 試すモデルの並び（重複なし・空を除く）。先頭が本来のモデル */
+export function geminiModelChain(primary: string, fallbacks: readonly string[] | string | undefined): string[] {
+  const list = typeof fallbacks === "string" ? fallbacks.split(",") : [...(fallbacks ?? [])];
+  return [...new Set([primary, ...list].map((model) => model.trim()).filter(Boolean))];
+}
+
+export type GeminiNextStep = { action: "try"; modelIndex: number; waitMs: number } | { action: "stop" };
+
+/**
+ * 失敗したあと、次に何をするか。
+ * - 本来のモデルが一時的な不調（5xx）なら、1回だけ同じモデルでやり直す（1.5秒待つ）
+ * - それ以外で次のモデルがあれば、次のモデルへ（待たない）
+ * - 返事を待つ時間（20秒）が残らない、APIキーの問題、もう試すモデルが無い、なら止める
+ */
+export function nextGeminiStep(input: {
+  modelCount: number;
+  modelIndex: number;
+  attemptOnModel: number;
+  status: number;
+  remainingMs: number;
+}): GeminiNextStep {
+  const { modelCount, modelIndex, attemptOnModel, status, remainingMs } = input;
+  if (status === 401 || status === 403) return { action: "stop" };
+  if (modelIndex === 0 && attemptOnModel === 0 && isRetryableGeminiStatus(status) && remainingMs - 1500 >= 20_000) {
+    return { action: "try", modelIndex: 0, waitMs: 1500 };
+  }
+  const switchable = isRetryableGeminiStatus(status) || [400, 404, 429].includes(status);
+  if (switchable && modelIndex + 1 < modelCount && remainingMs >= 20_000) {
+    return { action: "try", modelIndex: modelIndex + 1, waitMs: 0 };
+  }
+  return { action: "stop" };
+}
+
+/** Google の返事にある短い説明（英語）を取り出す。画面に添えて、写真だけで原因が分かるようにする */
+export function geminiErrorDetail(bodyText: string): string {
+  try {
+    const message = String((JSON.parse(bodyText) as { error?: { message?: unknown } })?.error?.message ?? "").trim();
+    if (!message) return "";
+    const first = message.split(/(?<=\.)\s/)[0];
+    return first.length > 90 ? `${first.slice(0, 90)}…` : first;
+  } catch {
+    return "";
+  }
 }
 
 /** 画面に出す文。番号を必ず入れる（写真を見ただけで原因が分かるように） */

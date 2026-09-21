@@ -7,6 +7,8 @@ export type SuggestResponse = {
   recipes: RecipeSuggestion[];
   uncoveredMustUse: string[];
   assumedBasicTools: boolean;
+  /** 混雑などで予備のモデルが答えたときのモデル名。本来のモデルなら空（2026-09-22） */
+  fallbackModel?: string;
 };
 
 /** /api/recipes/suggest を呼ぶ。失敗したら画面に出せる日本語のメッセージで Error を投げる。 */
@@ -24,5 +26,5 @@ export async function requestSuggestions(user: User, options: SuggestOptions): P
   }
   const data = (await response.json().catch(() => ({}))) as Partial<SuggestResponse> & { error?: string };
   if (!response.ok) throw new Error(data.error || "レシピを提案できませんでした。");
-  return { recipes: data.recipes ?? [], uncoveredMustUse: data.uncoveredMustUse ?? [], assumedBasicTools: Boolean(data.assumedBasicTools) };
+  return { recipes: data.recipes ?? [], uncoveredMustUse: data.uncoveredMustUse ?? [], assumedBasicTools: Boolean(data.assumedBasicTools), fallbackModel: String(data.fallbackModel ?? "") };
 }

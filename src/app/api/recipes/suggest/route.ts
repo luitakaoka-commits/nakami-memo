@@ -4,9 +4,11 @@ import {
   buildPrompt,
   createThrottle,
   documentsToObjects,
+  DEFAULT_GEMINI_FALLBACK_MODELS,
+  geminiErrorDetail,
   geminiErrorMessage,
-  geminiRetryDelay,
-  isRetryableGeminiStatus,
+  geminiModelChain,
+  nextGeminiStep,
   normalizeOptions,
   normalizeTools,
   pickPantry,
@@ -81,19 +83,25 @@ async function readUserCollection(uid: string, idToken: string, name: string) {
   return all;
 }
 
-async function askGemini(prompt: string): Promise<unknown> {
+async function askGemini(prompt: string): Promise<{ data: unknown; model: string }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ApiError("レシピ提案の設定がまだです（サーバーに GEMINI_API_KEY がありません）。", 500);
 
-  // 関数の持ち時間（maxDuration 60秒）の中で、Google 側が一時的に不調なら少し待ってやり直す（2026-09-22）
+  // 関数の持ち時間（maxDuration 60秒）の中で、Google 側が混んでいれば1回やり直し、
+  // それでもだめなら予備のモデルに切り替える（2026-09-22。決め方は suggest-core の nextGeminiStep）
+  const models = geminiModelChain(GEMINI_MODEL, process.env.GEMINI_FALLBACK_MODELS ?? DEFAULT_GEMINI_FALLBACK_MODELS);
   const deadline = Date.now() + GEMINI_TIMEOUT_MS;
+  let modelIndex = 0;
+  let attemptOnModel = 0;
   let response: Response;
   let bodyText = "";
-  for (let attempt = 0; ; attempt += 1) {
+  let lastFailure = { status: 0, detail: "" };
+  for (;;) {
+    const model = models[modelIndex];
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(deadline - Date.now(), 1_000));
     try {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
@@ -112,18 +120,25 @@ async function askGemini(prompt: string): Promise<unknown> {
 
     bodyText = await response.text();
     if (response.ok) break;
-    console.error("[api/recipes/suggest] Gemini がエラーを返しました", `${attempt + 1}回目`, response.status, bodyText.slice(0, 500));
-    const wait = isRetryableGeminiStatus(response.status) ? geminiRetryDelay(attempt, deadline - Date.now()) : null;
-    if (wait === null) {
-      throw new ApiError(geminiErrorMessage(response.status), response.status === 429 ? 429 : 502);
+    console.error("[api/recipes/suggest] Gemini がエラーを返しました", model, `${attemptOnModel + 1}回目`, response.status, bodyText.slice(0, 500));
+    // 予備のモデルが無い（404）だけなら、利用者に伝える失敗は、その前の本当の失敗（503 など）のほうにする
+    if (!(response.status === 404 && lastFailure.status)) {
+      lastFailure = { status: response.status, detail: geminiErrorDetail(bodyText) };
     }
-    await new Promise((resolve) => setTimeout(resolve, wait));
+    const step = nextGeminiStep({ modelCount: models.length, modelIndex, attemptOnModel, status: response.status, remainingMs: deadline - Date.now() });
+    if (step.action === "stop") {
+      const message = geminiErrorMessage(lastFailure.status) + (lastFailure.detail ? ` ／ Google の説明: ${lastFailure.detail}` : "");
+      throw new ApiError(message, lastFailure.status === 429 ? 429 : 502);
+    }
+    attemptOnModel = step.modelIndex === modelIndex ? attemptOnModel + 1 : 0;
+    modelIndex = step.modelIndex;
+    if (step.waitMs) await new Promise((resolve) => setTimeout(resolve, step.waitMs));
   }
 
   try {
     const parsed = JSON.parse(bodyText) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const text = parsed.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
-    return JSON.parse(text);
+    return { data: JSON.parse(text), model: models[modelIndex] };
   } catch {
     console.error("[api/recipes/suggest] Gemini の返答を読めません", bodyText.slice(0, 500));
     throw new ApiError("AIの返事を読み取れませんでした。もう一度お試しください。", 502);
@@ -158,11 +173,16 @@ export async function POST(request: Request) {
 
     const tools = normalizeTools(rawTools);
     const options = normalizeOptions(body, pantry);
-    const raw = await askGemini(buildPrompt(pantry, tools, options));
-    const result = sanitizeSuggestions(raw, pantry, tools, options);
+    const answer = await askGemini(buildPrompt(pantry, tools, options));
+    const result = sanitizeSuggestions(answer.data, pantry, tools, options);
     if (!result.recipes.length) throw new ApiError("条件に合うレシピを作れませんでした。条件をゆるめてお試しください。", 422);
 
-    return NextResponse.json({ ...result, assumedBasicTools: tools.length === 0 });
+    // 予備のモデルで答えたときは、画面にそう出す（いつもと出来が違って見えたときの手がかり）
+    return NextResponse.json({
+      ...result,
+      assumedBasicTools: tools.length === 0,
+      fallbackModel: answer.model === GEMINI_MODEL ? "" : answer.model,
+    });
   } catch (error) {
     if (error instanceof ApiError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("[api/recipes/suggest] 想定外のエラー", error);
