@@ -220,6 +220,14 @@ t("なかみメモのチェックボックスは ui-check-field に入れてい�
   });
   walk(path.join(ROOT, "src"));
   eq(offenders, [], "ui-check-field に入っていないチェックボックス");
+
+  /* 2026-09-22：ui-check-field が幅しか打ち消しておらず、余白と高さが残って横長の楕円になっていた
+     （レシピの「必ず使う食材」など）。全体の input 指定を全部打ち消しているかを見る */
+  const css = read("src", "app", "globals.css");
+  const rule = css.slice(css.indexOf(".ui-check-field input {"), css.indexOf("}", css.indexOf(".ui-check-field input {")));
+  ["width: 18px", "height: 18px", "min-height: 18px", "padding: 0", "flex: 0 0 auto"].forEach((decl) => {
+    ok(rule.includes(decl), `.ui-check-field input に「${decl}」が無い（スマホで楕円に崩れる）`);
+  });
 });
 
 t("「使い切った／捨てた」を出すカテゴリが、なかみメモのカテゴリ一覧にある", () => {

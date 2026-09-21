@@ -789,9 +789,16 @@
   font-weight: 740;
 }
 
+/* 全体の input 指定（幅100%・高さ44px・左右の余白13px・枠線）を、チェックボックスでは全部打ち消す。
+   幅だけ戻していたので、スマホでは余白と高さが残って横長の楕円になっていた（2026-09-22）。
+   この打ち消しを減らさないこと。レシピの「必ず使う食材」・保管場所・調理器具・買い替えアラームが全部これを使う */
 .ui-check-field input {
+  flex: 0 0 auto;
   width: 18px;
+  height: 18px;
   min-height: 18px;
+  padding: 0;
+  margin: 0;
   accent-color: var(--brand);
 }
 
@@ -801,12 +808,6 @@
   display: grid;
   gap: 8px;
   min-width: 0;
-}
-
-.ui-restock .ui-check-field input {
-  flex: 0 0 auto;
-  height: 18px;
-  padding: 0;
 }
 
 .ui-restock__row {

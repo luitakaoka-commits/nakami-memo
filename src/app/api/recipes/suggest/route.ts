@@ -4,6 +4,9 @@ import {
   buildPrompt,
   createThrottle,
   documentsToObjects,
+  geminiErrorMessage,
+  geminiRetryDelay,
+  isRetryableGeminiStatus,
   normalizeOptions,
   normalizeTools,
   pickPantry,
@@ -82,33 +85,39 @@ async function askGemini(prompt: string): Promise<unknown> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ApiError("レシピ提案の設定がまだです（サーバーに GEMINI_API_KEY がありません）。", 500);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  // 関数の持ち時間（maxDuration 60秒）の中で、Google 側が一時的に不調なら少し待ってやり直す（2026-09-22）
+  const deadline = Date.now() + GEMINI_TIMEOUT_MS;
   let response: Response;
-  try {
-    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema: responseSchema() },
-      }),
-      signal: controller.signal,
-      cache: "no-store",
-    });
-  } catch (error) {
-    if ((error as Error).name === "AbortError") throw new ApiError("AIの返事が時間内に届きませんでした。もう一度お試しください。", 504);
-    throw new ApiError("AIに接続できませんでした。", 502);
-  } finally {
-    clearTimeout(timer);
-  }
+  let bodyText = "";
+  for (let attempt = 0; ; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(deadline - Date.now(), 1_000));
+    try {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", responseSchema: responseSchema() },
+        }),
+        signal: controller.signal,
+        cache: "no-store",
+      });
+    } catch (error) {
+      if ((error as Error).name === "AbortError") throw new ApiError("AIの返事が時間内に届きませんでした。もう一度お試しください。", 504);
+      throw new ApiError("AIに接続できませんでした。", 502);
+    } finally {
+      clearTimeout(timer);
+    }
 
-  const bodyText = await response.text();
-  if (!response.ok) {
-    console.error("[api/recipes/suggest] Gemini がエラーを返しました", response.status, bodyText.slice(0, 500));
-    if (response.status === 429) throw new ApiError("AIの無料枠を使い切りました。しばらく（翌日まで）待ってからお試しください。", 429);
-    if (response.status === 404) throw new ApiError("AIのモデルが使えなくなっています。設定の見直しが必要です。", 502);
-    throw new ApiError("AIがエラーを返しました。時間をおいてお試しください。", 502);
+    bodyText = await response.text();
+    if (response.ok) break;
+    console.error("[api/recipes/suggest] Gemini がエラーを返しました", `${attempt + 1}回目`, response.status, bodyText.slice(0, 500));
+    const wait = isRetryableGeminiStatus(response.status) ? geminiRetryDelay(attempt, deadline - Date.now()) : null;
+    if (wait === null) {
+      throw new ApiError(geminiErrorMessage(response.status), response.status === 429 ? 429 : 502);
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait));
   }
 
   try {

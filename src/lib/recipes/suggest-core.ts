@@ -528,6 +528,39 @@ export function relativeTimeLabel(savedAt: number, nowMs: number): string {
  * 無料枠を1回の連打で使い切らないため（設計書: 1ユーザー 1分5回）。
  * サーバーのメモリに持つので、Vercel の別インスタンス同士では共有されない。あくまで連打よけ。
  */
+/* ---------- Gemini がエラーを返したとき（2026-09-22） ----------
+ * 「AIがエラーを返しました」だけでは、混んでいるだけ（待てば直る）なのか、頼み方が悪い（何度やっても同じ）
+ * なのかが分からず、画面の写真を見ても原因にたどり着けなかった。
+ *  - 500・502・503・504（Google 側の一時的な不調・混雑）は、少し待って自動でやり直す
+ *  - それでもだめなら、番号つきで何が起きたかを出す
+ * 429（無料枠切れ）はやり直しても無駄なので、やり直さない。
+ */
+
+/** 自動でやり直す意味がある返事か（Google 側の一時的な不調） */
+export function isRetryableGeminiStatus(status: number): boolean {
+  return [500, 502, 503, 504].includes(status);
+}
+
+/** 何回目のやり直しの前に何ミリ秒待つか。残り時間が足りなければ null（もうやり直さない） */
+export function geminiRetryDelay(attempt: number, remainingMs: number): number | null {
+  const delays = [1500, 4000];
+  const wait = delays[attempt];
+  if (wait === undefined) return null;
+  // 待ったあとに、返事を待つ時間（少なくとも20秒）が残らないならやり直さない
+  return remainingMs - wait >= 20_000 ? wait : null;
+}
+
+/** 画面に出す文。番号を必ず入れる（写真を見ただけで原因が分かるように） */
+export function geminiErrorMessage(status: number): string {
+  if (status === 429) return "AIの無料枠を使い切りました。しばらく（翌日まで）待ってからお試しください。（429）";
+  if (status === 404) return "AIのモデルが使えなくなっています。設定の見直しが必要です。（404）";
+  if (status === 503) return "AIが混み合っていて、何度か試しても返事がありませんでした。数分おいてお試しください。（503）";
+  if (isRetryableGeminiStatus(status)) return `AIの側で一時的なエラーが起きました。数分おいてお試しください。（${status}）`;
+  if (status === 400) return "AIへの頼み方に問題があって受け付けられませんでした。時間をおいても直らないので、この画面の写真を送ってください。（400）";
+  if (status === 401 || status === 403) return `AIを使う鍵（APIキー）が使えなくなっています。設定の見直しが必要です。（${status}）`;
+  return `AIがエラーを返しました。時間をおいてお試しください。（${status}）`;
+}
+
 export function createThrottle(limit: number, windowMs: number) {
   const hits = new Map<string, number[]>();
   return function allow(key: string, nowMs: number): boolean {

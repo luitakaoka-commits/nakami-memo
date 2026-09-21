@@ -175,6 +175,17 @@ HTML内の `styles.css` が `/money/styles.css` ではなく `/styles.css` に�
 テストは通っていたのに画面が崩れていた。**画面を足したら、ログインが要る画面でも本物の CSS でスマホ幅の見た目を確かめる**
 （`.next/static/css/*.css` を読む仮のHTMLを作り、Playwright で 390px の画面写真を撮る）。
 
+**その翌日、ほかのチェックボックスも楕円に崩れていた（2026-09-22）。** 前日は買い替えアラームの1か所だけ直し、
+共通の `.ui-check-field input` が**幅しか**打ち消していない（余白13px・高さが残る）ことに気づかなかった。
+レシピの「必ず使う食材」・保管場所・調理器具が全部 28×18px の横長になっていた。**崩れを直すときは、
+同じ部品を使っているほかの画面も確かめる。** 共通ルールで幅・高さ・余白・flex をすべて打ち消し、テストで守っている。
+
+**レシピ提案の「AIがエラーを返しました」は、Gemini 側の返事の番号で原因が違う（2026-09-22）。**
+500・502・503・504（一時的な不調・混雑）は `route.ts` が1.5秒・4秒待って2回までやり直す。
+それでもだめなとき、画面の文には番号（例「（503）」）が必ず入るので、写真をもらえば原因が分かる
+（400 は頼み方の誤りで待っても直らない、401/403 は APIキー、429 は無料枠切れ）。決め方は `suggest-core.ts` の
+`isRetryableGeminiStatus` / `geminiRetryDelay` / `geminiErrorMessage`。
+
 **ルールはデプロイしないと効かない。** リポジトリの `firestore.rules` はただのファイルです。
 Firebase Console で公開するまで反映されません。レシートが保存できなかった原因はこれでした。
 
@@ -196,7 +207,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 29 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 

@@ -6,6 +6,7 @@ import {
   documentsToObjects, isCountUnit, normalizeOptions, normalizeTools, parseAmount, pickPantry, remainingQuantity,
   responseSchema, sanitizeSuggestions, toTsukuriokiRecipe, RECIPE_CATEGORIES,
   clearCachedSuggestions, readCachedSuggestions, relativeTimeLabel, writeCachedSuggestions, SUGGESTION_CACHE_KEY,
+  geminiErrorMessage, geminiRetryDelay, isRetryableGeminiStatus,
 } from "./suggest-core.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -304,6 +305,26 @@ t("いつの提案かを日本語で出す", () => {
   const minute = 60000;
   eq([relativeTimeLabel(NOW, NOW), relativeTimeLabel(NOW - 5 * minute, NOW), relativeTimeLabel(NOW - 90 * minute, NOW), relativeTimeLabel(NOW - 50 * 60 * minute, NOW)],
     ["たった今", "5分前", "1時間前", "2日前"], "表示");
+});
+
+t("Gemini の一時的な不調（500・502・503・504）だけ自動でやり直す。無料枠切れや頼み方の誤りはやり直さない", () => {
+  eq([500, 502, 503, 504].map(isRetryableGeminiStatus), [true, true, true, true], "やり直す");
+  eq([400, 401, 403, 404, 429].map(isRetryableGeminiStatus), [false, false, false, false, false], "やり直さない");
+});
+
+t("やり直しは2回まで。返事を待つ時間（20秒）が残らないならやり直さない", () => {
+  eq(geminiRetryDelay(0, 50_000), 1500, "1回目のやり直しは1.5秒待つ");
+  eq(geminiRetryDelay(1, 45_000), 4000, "2回目は4秒待つ");
+  eq(geminiRetryDelay(2, 45_000), null, "3回目はやらない");
+  eq(geminiRetryDelay(0, 21_000), null, "待つと20秒を切るならやらない");
+});
+
+t("エラーの文には必ず番号を入れる（画面の写真だけで原因が分かるように）", () => {
+  [400, 401, 403, 404, 429, 500, 502, 503, 504, 418].forEach((status) => {
+    ok(geminiErrorMessage(status).includes(`（${status}）`), `${status} の番号が無い`);
+  });
+  ok(geminiErrorMessage(503).includes("混み合って"), "503は混雑と分かる文");
+  ok(geminiErrorMessage(400).includes("写真を送って"), "400は待っても直らないので連絡を頼む");
 });
 
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);
