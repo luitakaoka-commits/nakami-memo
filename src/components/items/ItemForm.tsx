@@ -175,8 +175,10 @@ export function ItemForm({ itemId }: { itemId?: string }) {
           状態メモ
           <input value={statusMemo} onChange={(event) => setStatusMemo(event.target.value)} />
         </label>
-        <div className="ui-form-field ui-form-field--full">
-          <label className="flex items-center gap-2">
+        {/* 買い替えアラーム。チェックボックスは必ず ui-check-field に入れる
+            （全体の input 指定が幅100%・高さ44pxなので、素のままだと入力欄の大きさに引き伸ばされる。2026-09-21 の崩れ） */}
+        <div className="ui-restock ui-form-field--full">
+          <label className="ui-check-field">
             <input
               type="checkbox"
               checked={alarmEnabled}
@@ -189,22 +191,22 @@ export function ItemForm({ itemId }: { itemId?: string }) {
             買い替えアラームを付ける
           </label>
           {alarmEnabled ? (
-            <label className="mt-2 flex flex-wrap items-center gap-2">
-              残りが
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                inputMode="decimal"
-                className="w-24"
-                value={lowStockThreshold}
-                onChange={(event) => setLowStockThreshold(event.target.value)}
-                aria-label="この数以下になったら知らせる"
-              />
-              {unit || ""}以下になったら「買い替え時」と知らせる
+            <label className="ui-form-field">
+              この数以下で「買い替え時」と知らせる
+              <span className="ui-restock__row">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  inputMode="decimal"
+                  value={lowStockThreshold}
+                  onChange={(event) => setLowStockThreshold(event.target.value)}
+                />
+                {unit && <span className="ui-restock__unit">{unit}</span>}
+              </span>
             </label>
           ) : (
-            <small className="ui-muted">切らしたくないモノにだけ付けてください。0になったモノは在庫から消えます。</small>
+            <p className="ui-form-note">切らしたくないモノにだけ付けてください。0になったモノは在庫から消えます。</p>
           )}
         </div>
       </div>

@@ -169,6 +169,12 @@ HTML内の `styles.css` が `/money/styles.css` ではなく `/styles.css` に�
 `tests/sw-shell-hashes.json` に**行を足す**（既存の行を書き換えない）。
 あわせて、この SW が `/money/` の外（`/shared/` や共通の manifest）までキャッシュ優先で抱えていたのをやめました。
 
+**なかみメモのチェックボックスが入力欄の大きさに引き伸ばされた（2026-09-21）。** `globals.css` の全体指定で
+`input` は幅100%・高さ44pxになるので、チェックボックスも同じ大きさになり、横の文字が縦一列に押し出された。
+**チェックボックスは必ず `<label className="ui-check-field">` の中に置く。** `outcome-core.test.mjs` が src の全 .tsx を見て止める。
+テストは通っていたのに画面が崩れていた。**画面を足したら、ログインが要る画面でも本物の CSS でスマホ幅の見た目を確かめる**
+（`.next/static/css/*.css` を読む仮のHTMLを作り、Playwright で 390px の画面写真を撮る）。
+
 **ルールはデプロイしないと効かない。** リポジトリの `firestore.rules` はただのファイルです。
 Firebase Console で公開するまで反映されません。レシートが保存できなかった原因はこれでした。
 
@@ -190,7 +196,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 21
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 26 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 

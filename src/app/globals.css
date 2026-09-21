@@ -795,6 +795,37 @@
   accent-color: var(--brand);
 }
 
+/* 買い替えアラーム（アイテムの編集画面。2026-09-21）
+   チェック → 付けたら「残りがこの数以下で知らせる」の数と単位を横に並べる */
+.ui-restock {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ui-restock .ui-check-field input {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0;
+}
+
+.ui-restock__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ui-restock__row input {
+  width: 8rem;
+  flex: 0 0 auto;
+}
+
+.ui-restock__unit {
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 .ui-details {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);

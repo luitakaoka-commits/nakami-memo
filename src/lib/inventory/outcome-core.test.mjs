@@ -9,7 +9,7 @@ import {
   canRecordOutcome, isOutOfStock, itemOutcomePatch, outcomeLabel, outcomeOfDiscardReason, outOfStockItems, restockAlarmError,
   receiptLinePatch, receiptLinePatches, shouldResetOutcome, wasteAmountOf,
 } from "./outcome-core.ts";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -201,6 +201,25 @@ t("0になった在庫は、どの経路でも消している（数量0で残し
   ok(/isOutOfStock\(remainingQuantity\(row\.available, row\.use\)\)\) batch\.delete\(itemRef\)/.test(kitchen), "なかみメモの「作った」: 0になった在庫を消していない");
   const form = read("src", "components", "items", "ItemForm.tsx");
   ok(form.includes("isOutOfStock(quantity)") && form.includes("deleteItem(user.uid, itemId)"), "編集で0にしたとき消していない");
+});
+
+t("なかみメモのチェックボックスは ui-check-field に入れている（素のままだと入力欄の大きさに引き伸ばされる）", () => {
+  /* 2026-09-21 の崩れ：全体の input 指定（幅100%・高さ44px）がチェックボックスにも効き、
+     「買い替えアラームを付ける」の文字が縦一列に押し出された。src の全 .tsx を見る */
+  const offenders = [];
+  const walk = (dir) => readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return walk(full);
+    if (!entry.name.endsWith(".tsx")) return;
+    const source = readFileSync(full, "utf8");
+    [...source.matchAll(/type="checkbox"/g)].forEach((match) => {
+      const before = source.slice(Math.max(0, match.index - 400), match.index);
+      const label = before.lastIndexOf("<label");
+      if (label < 0 || !before.slice(label).includes("ui-check-field")) offenders.push(path.relative(ROOT, full));
+    });
+  });
+  walk(path.join(ROOT, "src"));
+  eq(offenders, [], "ui-check-field に入っていないチェックボックス");
 });
 
 t("「使い切った／捨てた」を出すカテゴリが、なかみメモのカテゴリ一覧にある", () => {
