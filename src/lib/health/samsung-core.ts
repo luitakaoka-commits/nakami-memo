@@ -14,7 +14,7 @@
  */
 
 export type HealthMetricKey =
-  | "antioxidant" | "ages" | "bodyWater" | "weight" | "waterIntake"
+  | "antioxidant" | "ages" | "agesPercent" | "vascularLoad" | "bodyWater" | "weight" | "waterIntake"
   | "vitality" | "vitalitySleep" | "vitalityActivity" | "sleepScore" | "stress" | "steps" | "heartHealth";
 
 type Aggregate = "last" | "sum" | "max" | "avg";
@@ -33,22 +33,35 @@ export type HealthMetricDef = {
   aggregate: Aggregate;
   /** 数字が大きいほど良いか（レシピ提案の判断に使う。null は向きを決めない） */
   higherIsBetter: boolean | null;
+  /** この列がこの値の行だけ読む */
+  onlyRows?: { column: string; value: string };
+  /** 読んだ値に掛ける数（書き出しの数値と、Samsung Health の画面の上下が逆のとき -1） */
+  factor?: number;
 };
 
 /**
  * 取り込む項目。飲んだ水（waterIntake）は 2026-09-28 の書き出しに無かった（Samsung Health で水を記録していない）。
  * 記録すると「com.samsung.health.water_intake」が出る見込みだが、実物では確かめていない。
  * 列の名前が違っても拾えるよう、値の列を複数並べてある。
+ *
+ * 2026-09-28 に、本人の Samsung Health の画面と書き出しを突き合わせて分かったこと（値は見ず、日付と順位・一致の有無だけで確かめた）
+ * - AGEs の「percent」は、同年代の中での位置（%）。score が大きいほど percent も大きい（86組すべて同じ向き）。
+ *   同じファイルの level_boundary（別の JSON ファイル）は同年代の 10/25/50/75/90% の境目で、percent と19日すべて食い違わない
+ * - 血管負荷（mean_arterial_pressure）は、type 3 が毎晩の結果（1・2 は基準を作っている途中）。measurement は基準との差で、
+ *   **画面の上下と逆向き**（画面の7日間のグラフの高さの順と、measurement の大きさの順がちょうど逆だった）。
+ *   なので -1 を掛けて「大きいほど負荷が高い」にそろえる。日付は画面と同じく、測り終えた朝（end_time）の日
  */
 export const HEALTH_METRICS: HealthMetricDef[] = [
   { key: "antioxidant", label: "抗酸化指数", unit: "", file: "health.antioxidant", valueColumns: ["antioxidant"], timeColumns: ["start_time"], aggregate: "last", higherIsBetter: true },
   { key: "ages", label: "AGEs指数", unit: "", file: "health.advanced_glycation_endproduct", valueColumns: ["score"], timeColumns: ["day_time", "start_time"], aggregate: "last", higherIsBetter: false },
+  { key: "agesPercent", label: "AGEs（同年代での位置）", unit: "%", file: "health.advanced_glycation_endproduct", valueColumns: ["percent"], timeColumns: ["day_time", "start_time"], aggregate: "last", higherIsBetter: false },
+  { key: "vascularLoad", label: "血管負荷（基準との差）", unit: "", file: "shealth.mean_arterial_pressure", valueColumns: ["measurement"], timeColumns: ["end_time"], aggregate: "last", higherIsBetter: false, onlyRows: { column: "type", value: "3" }, factor: -1 },
   { key: "bodyWater", label: "体水分量", unit: "kg", file: "health.weight", valueColumns: ["total_body_water"], timeColumns: ["start_time"], aggregate: "last", higherIsBetter: null },
   { key: "weight", label: "体重", unit: "kg", file: "health.weight", valueColumns: ["weight"], timeColumns: ["start_time"], aggregate: "last", higherIsBetter: null },
   { key: "waterIntake", label: "飲んだ水", unit: "mL", file: "health.water_intake", valueColumns: ["amount", "com.samsung.health.water_intake.amount", "volume"], timeColumns: ["start_time", "com.samsung.health.water_intake.start_time"], aggregate: "sum", higherIsBetter: true },
-  { key: "vitality", label: "元気スコア", unit: "", file: "shealth.vitality_score", valueColumns: ["total_score"], timeColumns: ["day_time"], aggregate: "last", higherIsBetter: true },
-  { key: "vitalitySleep", label: "元気スコア（睡眠）", unit: "", file: "shealth.vitality_score", valueColumns: ["sleep_score"], timeColumns: ["day_time"], aggregate: "last", higherIsBetter: true },
-  { key: "vitalityActivity", label: "元気スコア（活動）", unit: "", file: "shealth.vitality_score", valueColumns: ["activity_score"], timeColumns: ["day_time"], aggregate: "last", higherIsBetter: true },
+  { key: "vitality", label: "エナジースコア", unit: "", file: "shealth.vitality_score", valueColumns: ["total_score"], timeColumns: ["day_time"], aggregate: "last", higherIsBetter: true },
+  { key: "vitalitySleep", label: "エナジースコア（睡眠）", unit: "", file: "shealth.vitality_score", valueColumns: ["sleep_score"], timeColumns: ["day_time"], aggregate: "last", higherIsBetter: true },
+  { key: "vitalityActivity", label: "エナジースコア（活動）", unit: "", file: "shealth.vitality_score", valueColumns: ["activity_score"], timeColumns: ["day_time"], aggregate: "last", higherIsBetter: true },
   { key: "sleepScore", label: "睡眠スコア", unit: "", file: "shealth.sleep", valueColumns: ["sleep_score"], timeColumns: ["com.samsung.health.sleep.end_time", "com.samsung.health.sleep.start_time", "start_time"], aggregate: "last", higherIsBetter: true },
   { key: "stress", label: "ストレス", unit: "", file: "shealth.stress", valueColumns: ["score"], timeColumns: ["start_time"], aggregate: "avg", higherIsBetter: false },
   { key: "steps", label: "歩数", unit: "歩", file: "shealth.tracker.pedometer_day_summary", valueColumns: ["step_count"], timeColumns: ["day_time"], aggregate: "max", higherIsBetter: true },
@@ -132,11 +145,14 @@ export function readSamsungCsv(fileName: string, text: string): HealthSeries {
     const timeColumn = def.timeColumns.find((name) => header.includes(name));
     if (valueIndex < 0 || !timeColumn) continue;
     const timeIndex = header.indexOf(timeColumn);
+    const filterIndex = def.onlyRows ? header.indexOf(def.onlyRows.column) : -1;
+    if (def.onlyRows && filterIndex < 0) continue;
     const buckets = new Map<string, number[]>();
     for (const row of rows.slice(2)) {
+      if (def.onlyRows && (row[filterIndex] ?? "").trim() !== def.onlyRows.value) continue;
       const raw = (row[valueIndex] ?? "").trim();
       if (raw === "") continue;
-      const value = Number(raw);
+      const value = Number(raw) * (def.factor ?? 1);
       if (!Number.isFinite(value)) continue;
       const date = localDateOf(row[timeIndex], timeColumn, offsetIndex >= 0 ? row[offsetIndex] : undefined);
       if (!date) continue;

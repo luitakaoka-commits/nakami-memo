@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { HeartPulse, Trash2, Upload } from "lucide-react";
 import { deleteAllHealth, readHealthSeries, saveHealthSeries } from "@/lib/firebase/health";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { healthHints, japanDate } from "@/lib/health/health-hints";
+import { healthHints, japanDate, latestLevels } from "@/lib/health/health-hints";
 import { mergeSeries, metricsForFile, readSamsungCsv, summarizeSeries, type HealthSeries } from "@/lib/health/samsung-core";
 
 /**
@@ -71,7 +71,9 @@ export function HealthRecords() {
   }
 
   const summary = summarizeSeries(stored ?? {});
-  const hints = healthHints(stored ?? {}, japanDate(Date.now()));
+  const today = japanDate(Date.now());
+  const hints = healthHints(stored ?? {}, today);
+  const levels = latestLevels(stored ?? {}, today);
 
   return (
     <div className="ui-stack">
@@ -104,7 +106,7 @@ export function HealthRecords() {
         {preview && (
           <div className="mt-4">
             <p className="ui-muted">{preview.files}個のファイルから、次の記録が見つかりました。</p>
-            <HealthTable rows={summarizeSeries(preview.series).filter((row) => row.count > 0)} />
+            <HealthTable rows={summarizeSeries(preview.series).filter((row) => row.count > 0)} levels={latestLevels(preview.series, today)} />
             <button type="button" onClick={save} disabled={busy} className="ui-button ui-button--primary mt-3">{busy ? "保存しています" : "この内容で取り込む"}</button>
           </div>
         )}
@@ -117,16 +119,17 @@ export function HealthRecords() {
         {hints.length ? (
           <ul className="ui-list">{hints.map((hint) => <li key={hint.key}>・{hint.instruction}<span className="ui-muted block text-xs">{hint.reason}</span></li>)}</ul>
         ) : (
-          <p className="ui-muted">いまは特にありません。記録がいつもの値と比べて変わったときに、ここに出ます。</p>
+          <p className="ui-muted">いまは特にありません。Samsung の区分で低めのときや、いつもの値から変わったときに、ここに出ます。</p>
         )}
       </section>
 
       <section className="ui-section">
         <h2 className="ui-section__title">取り込んだ記録</h2>
-        {stored === null ? <p className="ui-muted">読み込んでいます…</p> : <HealthTable rows={summary} />}
+        {stored === null ? <p className="ui-muted">読み込んでいます…</p> : <HealthTable rows={summary} levels={levels} />}
         {summary.find((row) => row.key === "waterIntake")?.count === 0 && (
           <p className="ui-form-note mt-2">飲んだ水は、Samsung Health で水分を記録すると取り込めるようになります。</p>
         )}
+        <p className="ui-form-note mt-2">区分の出どころ：抗酸化指数・エナジースコア・睡眠スコアは Samsung Health の区分、AGEs は Samsung が出す同年代の中での位置、飲んだ水は厚生労働省の目安（飲み水として1日約1.2L）。血管負荷はあなたの基準との差を、ふだんの振れ幅と比べています。</p>
         {stored && summary.some((row) => row.count > 0) && (
           <button type="button" onClick={removeAll} disabled={busy} className="ui-button ui-button--ghost mt-3"><Trash2 size={15} />からだの記録を全部消す</button>
         )}
@@ -135,7 +138,7 @@ export function HealthRecords() {
   );
 }
 
-function HealthTable({ rows }: { rows: ReturnType<typeof summarizeSeries> }) {
+function HealthTable({ rows, levels = {} }: { rows: ReturnType<typeof summarizeSeries>; levels?: Partial<Record<string, string>> }) {
   return (
     <ul className="ui-health-table">
       {rows.map((row) => (
@@ -143,8 +146,13 @@ function HealthTable({ rows }: { rows: ReturnType<typeof summarizeSeries> }) {
           <span>{row.label}</span>
           {row.count ? (
             <span className="ui-health-table__value">
-              <strong>{typeof row.latest === "number" ? row.latest.toLocaleString("ja-JP") : row.latest}{row.unit}</strong>
-              <small className="ui-muted">{row.to.slice(5).replace("-", "/")}・{row.count}日分</small>
+              {row.key === "vascularLoad" ? (
+                // 基準との差の数字だけでは分かりにくいので、区分を出す（7夜そろうまでは「記録中」）
+                <strong>{levels[row.key] ?? "記録中"}</strong>
+              ) : (
+                <strong>{typeof row.latest === "number" ? row.latest.toLocaleString("ja-JP") : row.latest}{row.unit}</strong>
+              )}
+              <small className="ui-muted">{levels[row.key] && row.key !== "vascularLoad" ? `「${levels[row.key]}」・` : ""}{row.to.slice(5).replace("-", "/")}・{row.count}日分</small>
             </span>
           ) : (
             <span className="ui-muted">記録なし</span>

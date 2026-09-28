@@ -110,13 +110,19 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   なかみメモの `/app/health` で選んでもらい **ブラウザの中で読む**（ファイルはどこにも送らない）。保存は日付と値だけ、
   `users/{uid}/health/{項目}_{YYYY-MM}`。**健康データなので家（同居人）には置かない**（ルールも users の下にだけ許す。
   `rules.test.mjs` が止める）。読み方は `src/lib/health/samsung-core.ts`（1行目は種類、2行目が見出し、日時は UTC で
-  時差は `time_offset` の列、`day_time` はそのまま日付）。取り込む項目は抗酸化指数・AGEs指数・体水分量・体重・飲んだ水・
-  元気スコア（総合・睡眠・活動）・睡眠スコア・ストレス・歩数・心臓の健康スコア。**飲んだ水は 2026-09-28 の書き出しに無かった**
+  時差は `time_offset` の列、`day_time` はそのまま日付）。取り込む項目は抗酸化指数・AGEs指数（と同年代での位置）・血管負荷・
+  体水分量・体重・飲んだ水・エナジースコア（総合・睡眠・活動）・睡眠スコア・ストレス・歩数・心臓の健康スコア。**飲んだ水は 2026-09-28 の書き出しに無かった**
   （Samsung Health で水を記録していない）。`water_intake` のファイル名と列は実物で確かめていない。
-  レシピへの生かし方は `src/lib/health/health-hints.ts`：**本人の過去の値との比較だけ**で決める（正常範囲は知らないので
-  決まった線は引かない）。抗酸化指数が下がった→色の濃い野菜、AGEs指数が上がった→蒸す・ゆでる・煮る、水分が少ない→汁物、
-  睡眠が低い・ストレスが高い→手早い料理、よく歩いた→たんぱく質。AIには「医療的な指示ではなく、在庫と条件が優先」と伝える。
-  レシピ画面の「からだの記録を生かす」で切れる
+  レシピへの生かし方は `src/lib/health/health-hints.ts`。**判断の線は出どころのはっきりしたものだけ**（2026-09-28 ユーザー要望
+  「世界基準と一致できない？」で「本人の過去との比較だけ」から変更）：抗酸化指数は Samsung の区分（75〜 適切／50〜74 低い／〜49 非常に低い）、
+  エナジー・睡眠スコアは Samsung の区分（85／75／60 で4段階。「良い」の75未満で手早い料理）、AGEs は書き出しの `percent`
+  （同年代の中での位置。75%以上で蒸す・ゆでる・煮る）、飲んだ水は厚生労働省の飲み水1日約1.2L。区分は本人の Samsung Health の画面の写真で確認した。
+  線の分からないもの（ストレス・体水分量・歩数、AGEs の上がり下がり）は本人の過去との比較のまま。
+  **血管負荷**（`mean_arterial_pressure`、塩分・カリウムで上下する）は type 3 が毎晩の結果、measurement は基準との差で
+  **画面の上下と逆向き**（-1 を掛ける）、日付は `end_time`。Samsung の5段階の境目は書き出しに無いので、本人のふだんの振れ幅
+  （前30日の差の大きさの中央値。7夜未満なら決めない）の1.5倍を超えたら高め→塩分控えめ・カリウム多め。
+  本人の 9/22〜9/28 の画面（9/27 だけ「やや低い」、ほかは「順調」）と、実データで判定が一致することを確かめた（値は見ず、順位と日付だけで照合）。
+  AIには「医療的な指示ではなく、在庫と条件が優先」と伝える。レシピ画面の「からだの記録を生かす」で切れる
 - **レシピの量は、在庫の単位に合わせる**（2026-09-28 ユーザー要望）。冷蔵庫のものをグラムで管理する人はいないのに、
   レシピが「300g」で在庫が「1パック」だと、以前は「1パック使い切った」として減らしていた（600gのうち300gでも1パック減る）。
   いまは **AIに在庫の単位のまま書かせる**（`amount`「1/2」`unit`「パック」）。料理の分量は `refAmount`（「約300g」）に入れ、
@@ -254,7 +260,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 14 / migrate 7 / recipes 40 / household 10 / health 21 / stale-assets 6 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 14 / migrate 7 / recipes 40 / household 10 / health 29 / stale-assets 6 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 

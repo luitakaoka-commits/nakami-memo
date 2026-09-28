@@ -7,7 +7,9 @@ import {
   HEALTH_METRICS, localDateOf, mergeSeries, metricsForFile, monthlyDocs, offsetMinutes, parseCsv, readSamsungCsv,
   seriesFromDocs, summarizeSeries,
 } from "./samsung-core.ts";
-import { healthHints, healthPromptLines, japanDate, latestAgainstBaseline } from "./health-hints.ts";
+import {
+  antioxidantLevel, healthHints, healthPromptLines, japanDate, latestAgainstBaseline, latestLevels, scoreLevel, vascularLoadLevel,
+} from "./health-hints.ts";
 import { buildPrompt, normalizeOptions } from "../recipes/suggest-core.ts";
 
 let pass = 0, fail = 0;
@@ -53,7 +55,9 @@ t("日付：start_time は時差を足して日本の日付に、day_time はそ
 t("ファイル名から項目を決める（.raw や別の種類のファイルには当たらない）", () => {
   const keys = (name) => metricsForFile(name).map((def) => def.key);
   eq(keys("com.samsung.health.antioxidant.20260928123868.csv"), ["antioxidant"], "抗酸化指数");
-  eq(keys("com.samsung.health.advanced_glycation_endproduct.20260928123868.csv"), ["ages"], "AGEs");
+  // 2026-09-28：同じファイルから「同年代での位置（percent）」も読むようにした（体組成と同じく1ファイル2項目）
+  eq(keys("com.samsung.health.advanced_glycation_endproduct.20260928123868.csv"), ["ages", "agesPercent"], "AGEs");
+  eq(keys("com.samsung.shealth.mean_arterial_pressure.20260928123868.csv"), ["vascularLoad"], "血管負荷");
   eq(keys("com.samsung.health.advanced_glycation_endproduct.raw.20260928123868.csv"), [], ".raw は読まない");
   eq(keys("com.samsung.health.weight.20260928123868.csv"), ["bodyWater", "weight"], "体組成は2項目");
   eq(keys("com.samsung.shealth.sleep.20260928123868.csv"), ["sleepScore"], "睡眠");
@@ -100,6 +104,26 @@ t("飲んだ水：記録すれば取り込める（1日の合計）", () => {
   eq(readSamsungCsv("com.samsung.health.water_intake.20260928123868.csv", text), { waterIntake: { "2026-09-05": 500 } }, "合計");
 });
 
+t("AGEs：指数と、同年代の中での位置（%）を読む", () => {
+  const header = ["create_sh_ver", "measurement_result", "percent", "modify_sh_ver", "update_time", "create_time", "score", "deviceuuid", "level_boundary", "pkg_name", "datauuid", "day_time"];
+  const text = csv("com.samsung.health.advanced_glycation_endproduct", header, [
+    { day_time: "2026-09-20 00:00:00.000", score: "110", percent: "40", measurement_result: "0", level_boundary: "x.level_boundary.json" },
+  ]);
+  eq(readSamsungCsv("com.samsung.health.advanced_glycation_endproduct.20260928123868.csv", text), { ages: { "2026-09-20": 110 }, agesPercent: { "2026-09-20": 40 } }, "2項目");
+});
+
+t("血管負荷：毎晩の結果（type 3）だけを、画面と同じ向き（大きいほど負荷が高い）・測り終えた朝の日付で読む", () => {
+  const header = ["create_sh_ver", "measurement", "start_time", "modify_sh_ver", "update_time", "create_time", "type", "time_offset", "deviceuuid", "pkg_name", "end_time", "datauuid"];
+  const text = csv("com.samsung.shealth.mean_arterial_pressure", header, [
+    { type: "1", measurement: "", start_time: "2026-09-05 13:33:00.000", end_time: "2026-09-05 22:00:00.000", time_offset: "UTC+0900" },
+    { type: "2", measurement: "85.5", start_time: "2026-09-08 15:18:00.000", end_time: "2026-09-08 22:00:00.000", time_offset: "UTC+0900" },
+    { type: "3", measurement: "1.5", start_time: "2026-09-26 11:30:00.000", end_time: "2026-09-27 00:50:00.000", time_offset: "UTC+0900" },
+    { type: "3", measurement: "-2.25", start_time: "2026-09-27 18:18:00.000", end_time: "2026-09-28 03:30:00.000", time_offset: "UTC+0900" },
+    { type: "3", measurement: "", start_time: "2026-09-22 19:11:00.000", end_time: "2026-09-23 01:00:00.000", time_offset: "UTC+0900" },
+  ]);
+  eq(readSamsungCsv("com.samsung.shealth.mean_arterial_pressure.20260928123868.csv", text), { vascularLoad: { "2026-09-27": -1.5, "2026-09-28": 2.25 } }, "type 3 だけ・向きを逆に・朝の日付");
+});
+
 t("保存の形（月ごとに1件）と、読み戻し", () => {
   const series = mergeSeries({ antioxidant: { "2026-08-31": 40, "2026-09-01": 42 } }, { antioxidant: { "2026-09-01": 43 }, steps: { "2026-09-02": 9000 } });
   eq(series.antioxidant, { "2026-08-31": 40, "2026-09-01": 43 }, "後から読んだほうを使う");
@@ -116,7 +140,7 @@ t("まとめ：項目ごとの件数・期間・いちばん新しい値", () =>
   eq(rows.find((row) => row.key === "waterIntake").count, 0, "記録なし");
 });
 
-/* ---------- レシピ提案への生かし方（本人の過去の値との比較だけ） ---------- */
+/* ---------- レシピ提案への生かし方（Samsung・厚生労働省の区分と、本人の過去の値との比較） ---------- */
 
 const TODAY = "2026-09-28";
 
@@ -136,10 +160,21 @@ t("抗酸化指数が前より下がっていたら、色の濃い野菜を多�
   ok(hints[0].reason.includes("42 → 36"), `理由に数値: ${hints[0].reason}`);
 });
 
-t("抗酸化指数が上がった・1回しか測っていない・古い、なら何も言わない（決まった線は引かない）", () => {
-  eq(healthHints({ antioxidant: { "2026-09-01": 36, "2026-09-20": 42 } }, TODAY), [], "上がった");
-  eq(healthHints({ antioxidant: { "2026-09-20": 20 } }, TODAY), [], "1回だけ");
+// 2026-09-28 仕様変更：「決まった線は引かない」をやめ、Samsung の区分（75以上が適切）で決める（ユーザー要望「世界基準と一致できない？」）。
+// 前の版のこのテストは「上がった（36→42）」「1回だけ（20）」なら何も言わない、だった。どちらも Samsung の区分では「非常に低い」なので言う側に変わる
+t("抗酸化指数は Samsung の区分で決める：適切（75以上）なら言わない。低ければ上がっていても・1回だけでも言う。古い記録は使わない", () => {
+  eq(healthHints({ antioxidant: { "2026-09-01": 90, "2026-09-20": 80 } }, TODAY), [], "下がっても適切なら言わない");
+  eq(healthHints({ antioxidant: { "2026-09-20": 75 } }, TODAY), [], "75ちょうどは適切");
+  eq(healthHints({ antioxidant: { "2026-09-01": 36, "2026-09-20": 42 } }, TODAY).map((h) => h.key), ["vegetables"], "上がっても非常に低い");
+  const once = healthHints({ antioxidant: { "2026-09-20": 74 } }, TODAY);
+  eq(once.map((h) => h.key), ["vegetables"], "1回だけでも低い");
+  ok(once[0].reason.includes("「低い」") && once[0].reason.includes("75以上"), `理由に区分: ${once[0].reason}`);
   eq(healthHints({ antioxidant: { "2026-05-01": 42, "2026-06-01": 20 } }, TODAY), [], "古い");
+});
+
+t("Samsung の区分の境目（本人の画面で確認）", () => {
+  eq([100, 75, 74, 50, 49, 0].map(antioxidantLevel), ["適切", "適切", "低い", "低い", "非常に低い", "非常に低い"], "抗酸化指数");
+  eq([100, 85, 84, 75, 74, 60, 59].map(scoreLevel), ["非常に良い", "非常に良い", "良い", "良い", "普通", "普通", "注意が必要"], "エナジー・睡眠");
 });
 
 t("AGEs指数が前より上がっていたら、蒸す・ゆでる・煮るを優先", () => {
@@ -160,6 +195,58 @@ t("よく眠れなかった日・ストレスが高い日は、手早くでき�
   eq(healthHints({ vitalitySleep: { ...usual, "2026-09-28": 60 } }, TODAY).map((h) => h.key), ["quick"], "睡眠スコアが無ければ元気スコアの睡眠");
   eq(healthHints({ stress: { "2026-09-20": 30, "2026-09-21": 30, "2026-09-28": 45 } }, TODAY).map((h) => h.key), ["quick"], "ストレス");
   eq(healthHints({ sleepScore: { ...usual, "2026-09-25": 60 } }, TODAY), [], "3日前の睡眠は今日には効かない");
+});
+
+t("睡眠・エナジースコアは Samsung の区分で決める（「良い」の75以上なら、いつもより低くても言わない）", () => {
+  const usual = { "2026-09-20": 95, "2026-09-21": 96, "2026-09-22": 94 };
+  eq(healthHints({ sleepScore: { ...usual, "2026-09-28": 76 } }, TODAY), [], "いつもより低いが「良い」");
+  const low = healthHints({ sleepScore: { "2026-09-28": 74 } }, TODAY);
+  eq(low.map((h) => h.key), ["quick"], "1回だけでも「普通」なら");
+  ok(low[0].reason.includes("「普通」"), `理由に区分: ${low[0].reason}`);
+  const energy = healthHints({ vitality: { "2026-09-27": 58 } }, TODAY);
+  eq(energy.map((h) => h.key), ["quick"], "エナジースコアが「注意が必要」");
+  ok(energy[0].reason.includes("エナジースコア") && energy[0].reason.includes("「注意が必要」"), `理由: ${energy[0].reason}`);
+  eq(healthHints({ vitality: { "2026-09-28": 80 } }, TODAY), [], "エナジースコアが「良い」");
+});
+
+t("飲んだ水が厚生労働省の目安（飲み水として1日約1.2L）より少なければ、いつもの値が無くても汁物を", () => {
+  const hints = healthHints({ waterIntake: { "2026-09-27": 1000, "2026-09-28": 900 } }, TODAY);
+  eq(hints.map((h) => h.key), ["hydrating"], "目安より少ない");
+  ok(hints[0].reason.includes("厚生労働省"), `理由に出どころ: ${hints[0].reason}`);
+  eq(healthHints({ waterIntake: { "2026-09-27": 1300, "2026-09-28": 1250 } }, TODAY), [], "目安どおり");
+});
+
+t("AGEs が同年代の上位25%（75%以上の位置）なら、蒸す・ゆでる・煮るを優先", () => {
+  const hints = healthHints({ agesPercent: { "2026-09-25": 80 } }, TODAY);
+  eq(hints.map((h) => h.key), ["gentleCooking"], "高め");
+  ok(hints[0].reason.includes("同年代"), `理由: ${hints[0].reason}`);
+  eq(healthHints({ agesPercent: { "2026-09-25": 74 } }, TODAY), [], "中くらい");
+});
+
+t("血管負荷：本人のふだんの振れ幅の1.5倍より高い夜の翌日は、塩分控えめ・カリウム多めに", () => {
+  // ふだんは基準との差が ±1 くらい（振れ幅の中央値 1 → 境目 1.5）
+  const usual = { "2026-09-18": 1, "2026-09-19": -1, "2026-09-20": 0.8, "2026-09-21": -1.2, "2026-09-22": 1, "2026-09-23": -0.9, "2026-09-24": 1.1 };
+  const high = healthHints({ vascularLoad: { ...usual, "2026-09-28": 1.6 } }, TODAY);
+  eq(high.map((h) => h.key), ["lowSalt"], "高め");
+  ok(high[0].instruction.includes("塩分控えめ") && high[0].instruction.includes("カリウム"), `中身: ${high[0].instruction}`);
+  eq(healthHints({ vascularLoad: { ...usual, "2026-09-28": 1.4 } }, TODAY), [], "基準くらい");
+  eq(healthHints({ vascularLoad: { ...usual, "2026-09-28": -3 } }, TODAY), [], "低めは言わない");
+  eq(vascularLoadLevel({ ...usual, "2026-09-28": -3 }, TODAY)?.level, "基準より低め", "低め");
+  eq(healthHints({ vascularLoad: { ...usual, "2026-09-25": 3 } }, TODAY), [], "3日前の夜は今日には効かない");
+  const few = { "2026-09-22": 1, "2026-09-23": -1, "2026-09-24": 1, "2026-09-28": 5 };
+  eq(vascularLoadLevel(few, TODAY), null, "7夜そろうまでは決めない");
+});
+
+t("取り込んだ記録に添える区分", () => {
+  const usual = { "2026-09-18": 1, "2026-09-19": -1, "2026-09-20": 0.8, "2026-09-21": -1.2, "2026-09-22": 1, "2026-09-23": -0.9, "2026-09-24": 1.1 };
+  eq(latestLevels({
+    antioxidant: { "2026-09-20": 60 },
+    vitality: { "2026-09-28": 86 },
+    sleepScore: { "2026-09-28": 70 },
+    agesPercent: { "2026-09-25": 40 },
+    vascularLoad: { ...usual, "2026-09-28": 0.2 },
+    steps: { "2026-09-28": 9000 },
+  }, TODAY), { antioxidant: "低い", vitality: "非常に良い", sleepScore: "普通", agesPercent: "同年代の中くらいまで", vascularLoad: "基準くらい" }, "区分のあるものだけ");
 });
 
 t("よく歩いた日は、たんぱく質のとれる主菜を", () => {
