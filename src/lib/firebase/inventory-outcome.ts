@@ -1,23 +1,29 @@
 import {
   collection,
+  doc,
   getDocs,
   query,
+  serverTimestamp,
   where,
   writeBatch,
   type DocumentData,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import type { Item } from "@/lib/types/item";
+import { OUTCOME_QUEUE, outcomeQueueEntry, shouldQueueOutcome } from "@/lib/household/household-core";
 import { itemOutcomePatch, receiptLinePatches, type OutcomeChoice } from "@/lib/inventory/outcome-core";
 import { db } from "./client";
 import { syncPublicByLocationIfNeeded } from "./public-location";
 import { itemDoc } from "./refs";
+import { getActiveHousehold, spaceCollection } from "./space";
 
 export type OutcomeResult = {
   /** お金管理のレシート明細に返せた行数。0 ならレシート由来ではない（手で足した在庫） */
   linesUpdated: number;
   /** 返した無駄金額の合計。0円なら無駄ではなかった（使い切った） */
   wasteTotal: number;
+  /** 家に入っていて受け渡し箱に入れた（お金管理を開いたときに返る） */
+  queued?: boolean;
 };
 
 /**
@@ -64,6 +70,14 @@ export async function recordItemOutcome(userId: string, item: Item, choice: Outc
   const patch = itemOutcomePatch(choice, new Date());
   const batch = writeBatch(db);
   batch.delete(itemDoc(userId, item.id));
+
+  // 家に入っているときは受け渡し箱へ（同居人はお金管理に書けない。あなたがお金管理を開いたときに返る。決定 B）
+  if (shouldQueueOutcome(getActiveHousehold(), item)) {
+    batch.set(doc(spaceCollection(userId, OUTCOME_QUEUE)), { ...outcomeQueueEntry(item, patch, userId), recordedAt: serverTimestamp() });
+    await batch.commit();
+    await syncPublicByLocationIfNeeded(userId, item.locationId).catch(() => undefined);
+    return { linesUpdated: 0, wasteTotal: 0, queued: true };
+  }
 
   // 値引き行も同じ在庫に結びついているので、レシートごとに値引き後の額で無駄を出す
   const lines = await findReceiptLines(userId, item);

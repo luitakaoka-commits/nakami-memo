@@ -176,13 +176,106 @@ service cloud.firestore {
       }
     }
 
+    /* ---------- 同居人と共有する「家」（2026-09-28） ----------
+     * なかみメモとつくりおきノートのデータだけを置く。お金管理（workspaces）はここに入れない。
+     * 家を作るまでは users/{uid} を使うので、作らない人の動きは今までと変わらない。 */
+
+    // 家の中に置いてよいコレクション名。users/{uid} の分に、お金管理への受け渡し箱（outcomeQueue）を足したもの。
+    // 足すときは public/shared/rules.test.mjs が、アプリが使う名前と揃っているかを確かめる。
+    function allowedHouseholdCollection(name) {
+      return allowedUserCollection(name) || name in ['outcomeQueue'];
+    }
+
+    function isHouseholdMember(householdId) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/households/$(householdId)).data.memberUids;
+    }
+
+    // 招待コードが有効か（その家のもので、期限内）
+    function validInvite(code, householdId) {
+      let invite = get(/databases/$(database)/documents/householdInvites/$(code));
+      return invite.data.householdId == householdId && invite.data.expiresAt > request.time;
+    }
+
+    match /households/{householdId} {
+      allow get: if signedIn() && request.auth.uid in resource.data.memberUids;
+      allow list: if false;
+
+      // 作るのは本人だけ。最初のメンバーは自分1人
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'memberUids', 'memberNames', 'createdAt', 'updatedAt'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.memberUids == [request.auth.uid];
+
+      allow update: if signedIn() && (
+        // メンバーは名前を変えられる
+        (request.auth.uid in resource.data.memberUids
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt']))
+        ||
+        // 持ち主はメンバーを外せる（自分は外せない）
+        (request.auth.uid == resource.data.ownerUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids', 'memberNames', 'updatedAt'])
+          && resource.data.memberUids.hasAll(request.resource.data.memberUids)
+          && request.resource.data.ownerUid in request.resource.data.memberUids)
+        ||
+        // 持ち主以外のメンバーは自分だけ抜けられる
+        (request.auth.uid in resource.data.memberUids
+          && request.auth.uid != resource.data.ownerUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids', 'memberNames', 'updatedAt'])
+          && resource.data.memberUids.hasAll(request.resource.data.memberUids)
+          && request.resource.data.memberUids.size() == resource.data.memberUids.size() - 1
+          && !(request.auth.uid in request.resource.data.memberUids))
+        ||
+        // 有効な招待コードを持っている人は、自分1人だけを足せる
+        (!(request.auth.uid in resource.data.memberUids)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids', 'memberNames', 'joinedWith', 'updatedAt'])
+          && request.resource.data.memberUids.hasAll(resource.data.memberUids)
+          && request.resource.data.memberUids.size() == resource.data.memberUids.size() + 1
+          && request.auth.uid in request.resource.data.memberUids
+          && request.resource.data.memberNames.diff(resource.data.memberNames).affectedKeys().hasOnly([request.auth.uid])
+          && validInvite(request.resource.data.joinedWith, householdId))
+      );
+
+      allow delete: if signedIn() && request.auth.uid == resource.data.ownerUid;
+
+      match /{collection}/{docId} {
+        allow read, write: if isHouseholdMember(householdId) && allowedHouseholdCollection(collection);
+
+        match /{document=**} {
+          allow read, write: if isHouseholdMember(householdId) && allowedHouseholdCollection(collection);
+        }
+      }
+    }
+
+    // 招待コード。コードを知っている人だけが1件ずつ読める（一覧は取らせない）。作れるのは家のメンバーだけ
+    match /householdInvites/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['householdId', 'householdName', 'createdBy', 'createdAt', 'expiresAt'])
+        && request.resource.data.createdBy == request.auth.uid
+        && isHouseholdMember(request.resource.data.householdId);
+      allow update: if false;
+      allow delete: if signedIn() && request.auth.uid == resource.data.createdBy;
+    }
+
     // なかみメモの公開閲覧専用。公開画面で見せる最小情報だけを複製する。一覧は取らせない。
+    // 2026-09-28 から、家のものは householdId を持ち、家のメンバーなら誰でも直せる（同居人がモノを足しても QR が追いつくように）
     match /publicLocations/{publicToken} {
       allow get: if resource.data.isPublic == true;
       allow list: if false;
-      allow create: if signedIn() && request.auth.uid == request.resource.data.ownerId;
-      allow update: if signedIn() && request.auth.uid == resource.data.ownerId && request.auth.uid == request.resource.data.ownerId;
-      allow delete: if signedIn() && request.auth.uid == resource.data.ownerId;
+      allow create: if signedIn() && request.auth.uid == request.resource.data.ownerId
+        && (!('householdId' in request.resource.data) || isHouseholdMember(request.resource.data.householdId));
+      allow update: if signedIn() && request.auth.uid == request.resource.data.ownerId && (
+        request.auth.uid == resource.data.ownerId
+        || ('householdId' in resource.data
+          && request.resource.data.get('householdId', '') == resource.data.householdId
+          && isHouseholdMember(resource.data.householdId))
+      );
+      allow delete: if signedIn() && (
+        request.auth.uid == resource.data.ownerId
+        || ('householdId' in resource.data && isHouseholdMember(resource.data.householdId))
+      );
     }
   }
 }

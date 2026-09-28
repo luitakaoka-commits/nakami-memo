@@ -1691,6 +1691,39 @@
   }
 
   /**
+   * 同居人が記録した「使い切った／捨てた」を、自分のレシート明細へ返す内容（2026-09-28。ユーザー決定 B）。
+   * 同居人はお金管理を見られないので、なかみメモ・つくりおきノートは家の受け渡し箱（outcomeQueue）に入れ、
+   * お金管理を開いたときにここで明細の書き換えを作る。
+   * 1つの在庫には値引き行も結びついているので、レシートごとに金額を足し、いちばん金額の大きい行（商品の行）に
+   * 無駄を載せ、ほかの行は0円にする。結末は全部の行に同じものを書く。
+   * **なかみメモの src/lib/inventory/outcome-core.ts の receiptLinePatches と同じ計算。**
+   * 片方だけ直すと、誰が押したかでムダ支出が変わる。outcome-core.test.mjs が突き合わせる。
+   */
+  function outcomeLinePatches(lines, entry) {
+    const outcome = RECEIPT_OUTCOMES.includes(String(entry?.outcome)) ? String(entry.outcome) : 'in_stock';
+    const outcomeAt = String(entry?.outcomeAt || '');
+    const outcomeReason = ['in_stock', 'consumed'].includes(outcome) ? '' : String(entry?.outcomeReason || '');
+    const byReceipt = new Map();
+    (Array.isArray(lines) ? lines : []).forEach(line => {
+      const key = String(line?.receiptId ?? '');
+      if (!byReceipt.has(key)) byReceipt.set(key, []);
+      byReceipt.get(key).push(line);
+    });
+    const patches = [];
+    let wasteTotal = 0;
+    byReceipt.forEach(group => {
+      const net = group.reduce((sum, line) => sum + (Number.isFinite(Number(line.amount)) ? Number(line.amount) : 0), 0);
+      const primary = group.reduce((best, line) => (Number(line.amount) > Number(best.amount) ? line : best), group[0]);
+      group.forEach(line => {
+        const wasteAmount = line === primary ? wasteAmountOf({ amount: net, outcome }) : 0;
+        if (line === primary) wasteTotal += wasteAmount;
+        patches.push({ id: line.id, patch: { outcome, outcomeAt, outcomeReason, wasteAmount, updatedAt: outcomeAt } });
+      });
+    });
+    return { patches, wasteTotal };
+  }
+
+  /**
    * 明細行1件の無駄金額。
    * 半額扱い(unused)の端数は切り捨てる。金額が0以下、または見覚えのない outcome は0。
    */
@@ -1960,7 +1993,7 @@
     calculateFutureSpendable,
     // レシート明細（buy → 結末 → 無駄）
     RECEIPT_CATEGORIES, RECEIPT_OUTCOMES, receiptItemDateOf,
-    wasteAmountOf, classifyOutcomeTracked, summarizeWaste, repeatedWasteRanking, dueForReview,
+    wasteAmountOf, outcomeLinePatches, classifyOutcomeTracked, summarizeWaste, repeatedWasteRanking, dueForReview,
     // 品名の名寄せ
     normalizeItemName, resolveItemKey,
     // レシート明細 → なかみメモの在庫

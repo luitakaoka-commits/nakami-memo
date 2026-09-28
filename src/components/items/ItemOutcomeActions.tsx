@@ -33,7 +33,9 @@ export function ItemOutcomeActions({ item }: { item: Item }) {
       // 何が起きたかを出す。黙って数量が0になるだけだと、お金管理へ返ったのか分からない。
       // 在庫からは消える（2026-09-21 から）。一覧の再描画でカードごと消えるまでの一瞬だけ見える
       setDone(
-        result.linesUpdated === 0
+        result.queued
+          ? "在庫から消しました。お金管理を開いたときに、ムダ支出に反映されます。"
+          : result.linesUpdated === 0
           ? "記録して、在庫から消しました。"
           : result.wasteTotal > 0
             ? `在庫から消しました。お金管理のムダ支出に ${result.wasteTotal.toLocaleString("ja-JP")}円 が入ります。`

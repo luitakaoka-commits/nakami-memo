@@ -35,6 +35,8 @@ function nakamiCollections() {
       else if (/\.(ts|tsx)$/.test(entry.name)) {
         const text = readFileSync(full, "utf8");
         for (const m of text.matchAll(/collection\(\s*db\s*,\s*"users"\s*,\s*\w+\s*,\s*"([^"]+)"/g)) found.add(m[1]);
+        // 2026-09-28 から、場所は space.ts の spaceCollection / spaceDoc で組み立てる（家に入っていれば家）
+        for (const m of text.matchAll(/space(?:Collection|Doc)\(\s*\w+\s*,\s*"([^"]+)"/g)) found.add(m[1]);
       }
     }
   };
@@ -106,6 +108,60 @@ t("なかみメモは Firebase の接続先を環境変数から読まない（V
   ok(!client.includes("process.env"), "client.ts が環境変数を読んでいる");
   const route = read("src", "app", "api", "images", "upload", "route.ts");
   ok(!/NEXT_PUBLIC_(RECIPE_)?FIREBASE/.test(route), "画像APIが古い環境変数を読んでいる");
+});
+
+/* ---------- 同居人と共有する「家」（2026-09-28） ---------- */
+
+const householdBlock = (() => {
+  const start = rules.indexOf("match /households/{householdId} {");
+  const end = rules.indexOf("match /householdInvites/{code} {");
+  return start >= 0 && end > start ? rules.slice(start, end) : "";
+})();
+
+t("家（households）のルールがあり、一覧は断り、メンバーだけが中身を読み書きできる", () => {
+  ok(householdBlock, "households の match が無い");
+  ok(/allow list: if false;/.test(householdBlock), "家の一覧を断っていない");
+  ok(/allow read, write: if isHouseholdMember\(householdId\) && allowedHouseholdCollection\(collection\);/.test(householdBlock), "中身はメンバーだけ");
+});
+
+t("家に写すコレクションが、すべて家のルールで許されている（写すと保存が黙って失敗する、を防ぐ）", () => {
+  const core = read("src", "lib", "household", "household-core.ts");
+  const list = core.match(/HOUSEHOLD_COLLECTIONS = \[([^\]]+)\]/);
+  ok(list, "HOUSEHOLD_COLLECTIONS が見つからない");
+  const names = [...list[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  ok(names.length >= 8, `拾えた数: ${names}`);
+  const missing = names.filter((name) => !allowed.has(name));
+  ok(!missing.length, `家のルールに無い: ${missing.join(", ")}`);
+  // 逆に、本人の場所にあるのに家へ写さないコレクションがあると、家を作った時点でそのデータが見えなくなる
+  const notCopied = [...allowed].filter((name) => !names.includes(name));
+  ok(!notCopied.length, `家へ写していない: ${notCopied.join(", ")}`);
+  ok(/allowedHouseholdCollection\(name\)\s*\{\s*return allowedUserCollection\(name\) \|\| name in \['outcomeQueue'\]/.test(rules), "受け渡し箱（outcomeQueue）が家で許されていない");
+});
+
+t("家に自分を足せるのは、有効な招待コードを持っているときだけ", () => {
+  ok(/validInvite\(request\.resource\.data\.joinedWith, householdId\)/.test(householdBlock), "招待コードを確かめていない");
+  ok(/request\.resource\.data\.memberUids\.size\(\) == resource\.data\.memberUids\.size\(\) \+ 1/.test(householdBlock), "1人ずつしか足せない、になっていない");
+  ok(/invite\.data\.expiresAt > request\.time/.test(rules), "招待の期限を見ていない");
+});
+
+t("招待コードは1件ずつしか読めず（一覧は断る）、作れるのは家のメンバーだけ", () => {
+  const block = rules.match(/match \/householdInvites\/\{code\} \{([\s\S]*?)\n    \}/);
+  ok(block, "householdInvites の match が無い");
+  ok(/allow list: if false;/.test(block[1]), "招待の一覧を断っていない（コードを総当たりで見られる）");
+  ok(/isHouseholdMember\(request\.resource\.data\.householdId\)/.test(block[1]), "メンバー以外も招待を作れる");
+});
+
+t("お金管理（workspaces）は家に入れない（同居人と共有しない、というユーザーの希望）", () => {
+  ok(!householdBlock.includes("workspaces"), "家のルールが workspaces に触れている");
+  const core = read("src", "lib", "household", "household-core.ts");
+  ok(!/HOUSEHOLD_COLLECTIONS = \[[^\]]*(receipts|transactions|workspaces)/.test(core), "お金管理のデータを家に写そうとしている");
+});
+
+t("3アプリとも、家に入っていれば家の場所を使う（ずれると別の在庫を見る）", () => {
+  ok(read("src", "lib", "firebase", "space.ts").includes("spaceSegments(userId, activeHouseholdId)"), "なかみメモ");
+  ok(/collection\(db, "households", householdId, name\)/.test(read("public", "recipe", "store.js")), "つくりおきノート");
+  ok(/collection\(db, 'households', householdId, name\)/.test(read("public", "money", "firebase-sync.js")), "お金管理（在庫に入れる）");
+  ok(/spaceSegments\(uid, householdId\)/.test(read("src", "app", "api", "recipes", "suggest", "route.ts")), "レシピ提案のサーバー");
 });
 
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);

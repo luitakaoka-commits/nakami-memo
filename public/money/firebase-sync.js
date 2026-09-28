@@ -15,6 +15,7 @@ import {
   deleteDoc,
   doc,
   enableIndexedDbPersistence,
+  getDoc,
   getDocs,
   getFirestore,
   onSnapshot,
@@ -55,6 +56,10 @@ let stopItemAliases = null;
 let receiptHandler = () => {};
 let receiptItemHandler = () => {};
 let itemAliasHandler = () => {};
+/* 同居人と共有している「家」（2026-09-28）。なかみメモの在庫はここに入る。お金管理そのものは家に入れない */
+let householdId = null;
+let stopOutcomeQueue = null;
+const outcomeQueueInFlight = new Set();
 let saveTimer = null;
 let remoteHandler = () => {};
 let statusHandler = () => {};
@@ -126,6 +131,7 @@ async function selectWorkspace(workspaceId) {
   localStorage.setItem(ACTIVE_WORKSPACE_KEY, selected.id);
   startCandidateWatch();
   startReceiptWatch();
+  startOutcomeQueueWatch();
 
   return new Promise((resolve, reject) => {
     let first = true;
@@ -158,6 +164,8 @@ async function connect(initialState, onRemote, onStatus, onCandidates, onReceipt
   if (typeof onReceipts === 'function') receiptHandler = onReceipts;
   if (typeof onReceiptItems === 'function') receiptItemHandler = onReceiptItems;
   if (typeof onItemAliases === 'function') itemAliasHandler = onItemAliases;
+  // なかみメモの在庫の置き場所（家か本人か）を先に決める。在庫に入れる・受け渡し箱を見るのに使う
+  await resolveHousehold();
   let available = await refreshWorkspaces();
   if (!available.length) available = [await createWorkspace(initialState)];
   const savedId = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
@@ -416,15 +424,79 @@ async function updateReceiptItem(lineId, patch = {}) {
   return true;
 }
 
-/* ---------- なかみメモの在庫（2026-09-16。Firebaseを1つにまとめたので users/{uid} を直接読める） ---------- */
+/* ---------- なかみメモの在庫（2026-09-16。Firebaseを1つにまとめたので users/{uid} を直接読める） ----------
+ * 2026-09-28 から、同居人と「家」を共有していれば households/{id} に入っている。
+ * なかみメモの src/lib/firebase/space.ts と同じ決め方にすること（ずれると別の在庫に入れてしまう）。 */
+
+/** どの家に入っているかを調べる。読めなければ家なし（本人の場所）として続ける */
+async function resolveHousehold() {
+  householdId = null;
+  if (!currentUser) return null;
+  try {
+    const profile = await getDoc(doc(db, 'users', currentUser.uid));
+    const id = profile.exists() ? profile.data().householdId : null;
+    if (typeof id !== 'string' || !id) return null;
+    const home = await getDoc(doc(db, 'households', id));
+    const members = home.exists() ? home.data().memberUids : null;
+    householdId = Array.isArray(members) && members.includes(currentUser.uid) ? id : null;
+  } catch (error) {
+    householdId = null;
+  }
+  return householdId;
+}
+
+/** なかみメモの在庫のコレクション（家に入っていれば家） */
+function inventoryCol(name) {
+  return householdId
+    ? collection(db, 'households', householdId, name)
+    : collection(db, 'users', currentUser.uid, name);
+}
+
+/**
+ * 同居人が記録した「使い切った／捨てた」を、今の共有スペースのレシート明細へ返す（ユーザー決定 B）。
+ * 同居人はお金管理を見られないので、なかみメモ・つくりおきノートは家の受け渡し箱（outcomeQueue）に入れておく。
+ * ここで明細を書き換え、終わった分を箱から消す。お金管理を開いているあいだは、箱に入った時点ですぐ返る。
+ */
+function startOutcomeQueueWatch() {
+  if (stopOutcomeQueue) { stopOutcomeQueue(); stopOutcomeQueue = null; }
+  if (!householdId || !currentWorkspace) return;
+  const workspaceId = currentWorkspace.id;
+  const home = householdId;
+  stopOutcomeQueue = onSnapshot(collection(db, 'households', home, 'outcomeQueue'), snapshot => {
+    snapshot.docs.forEach(entry => {
+      const data = entry.data();
+      // 別の共有スペースのレシートから入れた在庫は、そちらを開いたときに返す
+      if (data.purchaseWorkspaceId && data.purchaseWorkspaceId !== workspaceId) return;
+      if (outcomeQueueInFlight.has(entry.id)) return;
+      outcomeQueueInFlight.add(entry.id);
+      applyOutcomeEntry(workspaceId, home, entry.id, data)
+        .catch(error => console.warn('受け渡し箱の記録を返せませんでした', error))
+        .finally(() => outcomeQueueInFlight.delete(entry.id));
+    });
+  }, () => {});
+}
+
+async function applyOutcomeEntry(workspaceId, home, entryId, data) {
+  const lines = await getDocs(query(
+    collection(db, 'workspaces', workspaceId, 'receiptItems'),
+    where('inventoryItemId', '==', String(data.inventoryItemId || ''))
+  ));
+  // 共有スペースが分からない古い在庫で、ここに明細が無ければ、別の共有スペースのものかもしれないので残す
+  if (!lines.size && !data.purchaseWorkspaceId) return;
+  const engine = window.FinanceEngine;
+  const { patches } = engine.outcomeLinePatches(lines.docs.map(line => ({ id: line.id, ...line.data() })), data);
+  const batch = writeBatch(db);
+  patches.forEach(({ id, patch }) => batch.update(doc(db, 'workspaces', workspaceId, 'receiptItems', id), patch));
+  batch.delete(doc(db, 'households', home, 'outcomeQueue', entryId));
+  await batch.commit();
+}
 
 /** なかみメモの保管場所を、エリア名つきで返す。「在庫に入れる」で選んでもらうため。 */
 async function readInventoryLocations() {
   if (!currentUser) return [];
-  const uid = currentUser.uid;
   const [areaSnap, locationSnap] = await Promise.all([
-    getDocs(collection(db, 'users', uid, 'areas')),
-    getDocs(collection(db, 'users', uid, 'locations'))
+    getDocs(inventoryCol('areas')),
+    getDocs(inventoryCol('locations'))
   ]);
   const areaNames = new Map(areaSnap.docs.map(entry => [entry.id, entry.data().name || '']));
   return locationSnap.docs
@@ -441,7 +513,7 @@ async function readInventoryLocations() {
 /** なかみメモの在庫。まとめ先を決めるのに使う。 */
 async function readInventoryItems() {
   if (!currentUser) return [];
-  const snap = await getDocs(collection(db, 'users', currentUser.uid, 'items'));
+  const snap = await getDocs(inventoryCol('items'));
   return snap.docs.map(entry => ({ id: entry.id, ...entry.data() }));
 }
 
@@ -452,13 +524,12 @@ async function readInventoryItems() {
  */
 async function addToInventory(plan) {
   if (!connected()) return { created: 0, merged: 0 };
-  const uid = currentUser.uid;
   const workspaceId = currentWorkspace.id;
   const now = new Date();
   const batch = writeBatch(db);
 
   (plan.creates || []).forEach(row => {
-    const ref = doc(collection(db, 'users', uid, 'items'));
+    const ref = doc(inventoryCol('items'));
     batch.set(ref, {
       locationId: row.locationId,
       name: row.name,
@@ -484,7 +555,7 @@ async function addToInventory(plan) {
 
   (plan.merges || []).forEach(row => {
     // また買って在庫が戻るので、「使い切った／捨てた」の印は消す（残すと棚にあるのに使い切った扱いになる）。
-    batch.update(doc(db, 'users', uid, 'items', row.itemId), {
+    batch.update(doc(inventoryCol('items'), row.itemId), {
       quantity: row.quantity,
       purchaseWorkspaceId: workspaceId,
       outcome: 'in_stock',
@@ -571,6 +642,9 @@ async function signOutCurrentUser() {
   if (stopReceipts) stopReceipts();
   if (stopReceiptItems) stopReceiptItems();
   if (stopItemAliases) stopItemAliases();
+  if (stopOutcomeQueue) stopOutcomeQueue();
+  stopOutcomeQueue = null;
+  householdId = null;
   stopWorkspace = null;
   stopCandidates = null;
   stopReceipts = null;

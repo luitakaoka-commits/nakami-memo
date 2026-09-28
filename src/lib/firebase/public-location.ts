@@ -8,6 +8,7 @@ import {
   publicLocationDoc,
   snapToItem,
 } from "./refs";
+import { getActiveHousehold } from "./space";
 
 /**
  * 公開閲覧用ドキュメント（publicLocations/{publicToken}）の同期をここに集約する。
@@ -30,8 +31,12 @@ async function writePublicLocation(userId: string, location: Location, fixedToke
       return publicItem;
     });
 
+  // 家に入っているときは householdId も書く。ルールは、家のメンバーなら誰でも公開ページを直せるようにしている
+  // （同居人がモノを足したときも、QR の公開ページが追いつくように。2026-09-28）
+  const householdId = getActiveHousehold();
   await setDoc(publicLocationDoc(publicToken), {
     ownerId: userId,
+    ...(householdId ? { householdId } : {}),
     locationId: location.id,
     areaName: area?.name ?? "未分類",
     locationName: location.name,

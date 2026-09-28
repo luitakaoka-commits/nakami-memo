@@ -1,5 +1,4 @@
 import {
-  collection,
   doc,
   getDoc,
   orderBy,
@@ -12,23 +11,26 @@ import type { Area } from "@/lib/types/area";
 import type { Item } from "@/lib/types/item";
 import type { Location } from "@/lib/types/location";
 import { db } from "./client";
+import { spaceCollection, spaceDoc } from "./space";
 
+// 本人のプロフィール（householdId を持つ）。ここだけは家に入っていても本人の場所
 export const usersDoc = (userId: string) => doc(db, "users", userId);
-export const areasCollection = (userId: string) => collection(db, "users", userId, "areas");
-export const locationsCollection = (userId: string) => collection(db, "users", userId, "locations");
-export const itemsCollection = (userId: string) => collection(db, "users", userId, "items");
+// 在庫まわりは、家に入っていれば家の場所（space.ts が決める。2026-09-28）
+export const areasCollection = (userId: string) => spaceCollection(userId, "areas");
+export const locationsCollection = (userId: string) => spaceCollection(userId, "locations");
+export const itemsCollection = (userId: string) => spaceCollection(userId, "items");
 export const publicLocationDoc = (publicToken: string) => doc(db, "publicLocations", publicToken);
 
 export function areaDoc(userId: string, areaId: string) {
-  return doc(db, "users", userId, "areas", areaId);
+  return spaceDoc(userId, "areas", areaId);
 }
 
 export function locationDoc(userId: string, locationId: string) {
-  return doc(db, "users", userId, "locations", locationId);
+  return spaceDoc(userId, "locations", locationId);
 }
 
 export function itemDoc(userId: string, itemId: string) {
-  return doc(db, "users", userId, "items", itemId);
+  return spaceDoc(userId, "items", itemId);
 }
 
 export function snapToArea(snapshot: QueryDocumentSnapshot<DocumentData>): Area {

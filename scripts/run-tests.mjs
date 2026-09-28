@@ -35,6 +35,13 @@ const SUITES = [
     file: "suggest-core.test.mjs",
     nodeArgs: ["--experimental-strip-types", "--no-warnings"],
   },
+  // 同居人との共有（家）。お金管理へ返す計算が、直接返すときと同じかも見る（2026-09-28）
+  {
+    name: "household",
+    cwd: path.join(ROOT, "src", "lib", "household"),
+    file: "household-core.test.mjs",
+    nodeArgs: ["--experimental-strip-types", "--no-warnings"],
+  },
   // 在庫の「使い切った／捨てた」。お金管理と同じ値を使っているかもここで見る
   {
     name: "inventory-outcome",

@@ -1443,3 +1443,33 @@
   background: var(--brand);
   color: #fff;
 }
+
+/* ===== 同居人と共有（2026-09-28） ===== */
+.ui-mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-mobile-household[data-shared="true"] {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.ui-household-member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ui-household-member:last-child { border-bottom: 0; }
+
+.ui-household-link {
+  display: grid;
+  gap: 10px;
+}
+
+.ui-household-link input { font-size: 0.85rem; }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { firebaseConfig } from "@/lib/firebase/config";
+import { spaceSegments } from "@/lib/household/household-core";
 import {
   buildPrompt,
   createThrottle,
@@ -65,9 +66,25 @@ async function verifyUser(request: Request): Promise<{ uid: string; idToken: str
   return { uid, idToken };
 }
 
-/** users/{uid}/{name} を全部読む（本人の ID トークンで。ルールが効く）。 */
-async function readUserCollection(uid: string, idToken: string, name: string) {
-  const base = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/users/${encodeURIComponent(uid)}/${name}`;
+const DOCUMENTS = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
+
+/**
+ * 在庫の置き場所。同居人と「家」を共有していれば households/{id}、していなければ users/{uid}（2026-09-28）。
+ * 画面側（space.ts）と同じ決め方にすること。違うと、画面の在庫と提案に使う在庫がずれる。
+ */
+async function spaceBase(uid: string, idToken: string): Promise<string> {
+  const response = await fetch(`${DOCUMENTS}/users/${encodeURIComponent(uid)}`, { headers: { Authorization: `Bearer ${idToken}` }, cache: "no-store" });
+  if (response.ok) {
+    const body = (await response.json()) as { fields?: { householdId?: { stringValue?: string } } };
+    const householdId = body.fields?.householdId?.stringValue;
+    if (householdId) return spaceSegments(uid, householdId).map(encodeURIComponent).join("/");
+  }
+  return spaceSegments(uid, null).map(encodeURIComponent).join("/");
+}
+
+/** 在庫の置き場所の {name} を全部読む（本人の ID トークンで。ルールが効く）。 */
+async function readUserCollection(uid: string, idToken: string, name: string, space: string) {
+  const base = `${DOCUMENTS}/${space}/${name}`;
   const all: Array<Record<string, unknown> & { id: string }> = [];
   let pageToken = "";
   for (let page = 0; page < 10; page++) {
@@ -188,9 +205,10 @@ export async function POST(request: Request) {
     if (!allow(uid, Date.now())) throw new ApiError("続けて使いすぎです。1分ほど待ってからお試しください。", 429);
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const space = await spaceBase(uid, idToken);
     const [rawItems, rawTools] = await Promise.all([
-      readUserCollection(uid, idToken, "items"),
-      readUserCollection(uid, idToken, "tools"),
+      readUserCollection(uid, idToken, "items", space),
+      readUserCollection(uid, idToken, "tools", space),
     ]);
 
     const pantry = pickPantry(

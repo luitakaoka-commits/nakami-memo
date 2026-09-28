@@ -6,7 +6,7 @@ import { watchAuth, consumeRedirectResult, signIn, signOutUser, configured } fro
 import {
   setUser, newId, subscribe, saveDocument, patchDocument, removeDocument,
   saveMany, removeMany, removeCollection, uploadRecipeImage, deleteRecipeImage, onWriteError,
-  readInventory, decrementInventory
+  readInventory, decrementInventory, loadHousehold
 } from "./store.js";
 import { planFromSourceItems, quickUseAmounts, rowsToApply, usedUpRows } from "../shared/cook-stock.js";
 import { markPantryHits, pantryHitCount } from "../shared/pantry-check.js";
@@ -1337,7 +1337,10 @@ async function boot() {
     legacyData = readLegacyData();
     phase = "syncing";
     render();
-    subscribeAll();
+    /* どの家に入っているかが決まってから購読する（先に本人の場所を読むと、家のレシピに切り替わるまで違う中身が見える） */
+    loadHousehold().finally(() => {
+      if (authUser && authUser.uid === user.uid) subscribeAll();
+    });
   });
 }
 

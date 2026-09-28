@@ -20,17 +20,20 @@ import type { Tool, ToolInput } from "@/lib/types/tool";
 import { isOutOfStock, itemOutcomePatch, receiptLinePatch } from "@/lib/inventory/outcome-core";
 import { remainingQuantity } from "@/lib/recipes/suggest-core";
 import { db } from "./client";
+import { getActiveHousehold, spaceCollection, spaceDoc } from "./space";
+import { OUTCOME_QUEUE, outcomeQueueEntry, shouldQueueOutcome } from "@/lib/household/household-core";
 import { syncPublicByLocationIfNeeded } from "./public-location";
 
 /*
  * レシピ提案（Phase 3）で使う、台所まわりの読み書き。
- *   users/{uid}/tools         調理器具（なかみメモ）
- *   users/{uid}/consumptions  「作った」で在庫を減らした記録（なかみメモ）
- *   users/{uid}/recipes       つくりおきノートのレシピ（2026-09-14 に同じ Firebase にまとめたので直接書ける）
- * どれも public/money/firestore.rules の allowedUserCollection に入っている。
+ *   tools         調理器具（なかみメモ）
+ *   consumptions  「作った」で在庫を減らした記録（なかみメモ）
+ *   recipes       つくりおきノートのレシピ（2026-09-14 に同じ Firebase にまとめたので直接書ける）
+ * 置き場所は space.ts が決める（家に入っていれば households/{id}、無ければ users/{uid}。2026-09-28）。
+ * どれも public/money/firestore.rules の allowedUserCollection（家は allowedHouseholdCollection）に入っている。
  */
 
-export const toolsCollection = (userId: string) => collection(db, "users", userId, "tools");
+export const toolsCollection = (userId: string) => spaceCollection(userId, "tools");
 export const toolsQuery = (userId: string) => query(toolsCollection(userId), orderBy("name"));
 
 export function snapToTool(snapshot: QueryDocumentSnapshot<DocumentData>): Tool {
@@ -68,7 +71,7 @@ export async function deleteTool(userId: string, toolId: string) {
 
 /* ---------- つくりおきノートに保存したレシピ（なかみメモからは履歴として見る） ---------- */
 
-export const savedRecipesCollection = (userId: string) => collection(db, "users", userId, "recipes");
+export const savedRecipesCollection = (userId: string) => spaceCollection(userId, "recipes");
 export const savedRecipesQuery = (userId: string) => query(savedRecipesCollection(userId), orderBy("createdAt", "desc"));
 
 export function snapToSavedRecipe(snapshot: QueryDocumentSnapshot<DocumentData>): SavedRecipe {
@@ -93,7 +96,7 @@ export async function deleteSavedRecipe(userId: string, recipeId: string) {
 
 /** つくりおきノートにレシピを1件保存し、そのIDを返す。形は suggest-core の toTsukuriokiRecipe で作る。 */
 export async function saveRecipeToTsukurioki(userId: string, recipe: Record<string, unknown>): Promise<string> {
-  const ref = doc(collection(db, "users", userId, "recipes"));
+  const ref = doc(spaceCollection(userId, "recipes"));
   await setDoc(ref, recipe);
   return ref.id;
 }
@@ -125,10 +128,10 @@ export async function recordCooking(userId: string, rows: CookedRow[], recipeTit
   // 返さないと、使い切ったのに週1回のふりかえりで何度も聞かれる。使い切ったので無駄は0円。
   const consumed = itemOutcomePatch({ kind: "consumed" }, new Date());
   for (const row of targets) {
-    const itemRef = doc(db, "users", userId, "items", row.itemId);
+    const itemRef = spaceDoc(userId, "items", row.itemId);
     if (isOutOfStock(remainingQuantity(row.available, row.use))) batch.delete(itemRef);
     else batch.update(itemRef, { quantity: remainingQuantity(row.available, row.use), updatedAt: serverTimestamp() });
-    batch.set(doc(collection(db, "users", userId, "consumptions")), {
+    batch.set(doc(spaceCollection(userId, "consumptions")), {
       itemId: row.itemId,
       itemName: row.name,
       quantity: row.use,
@@ -139,11 +142,20 @@ export async function recordCooking(userId: string, rows: CookedRow[], recipeTit
     });
   }
   if (savedRecipeId) {
-    batch.update(doc(db, "users", userId, "recipes", savedRecipeId), { lastCookedAt: Date.now() });
+    batch.update(spaceDoc(userId, "recipes", savedRecipeId), { lastCookedAt: Date.now() });
   }
 
+  const householdId = getActiveHousehold();
   for (const row of targets) {
     if (!row.purchaseWorkspaceId || !isOutOfStock(remainingQuantity(row.available, row.use))) continue;
+    // 家に入っているときは、受け渡し箱に入れる（同居人はあなたのお金管理に書けない。ユーザー決定 B）
+    if (shouldQueueOutcome(householdId, row)) {
+      batch.set(doc(spaceCollection(userId, OUTCOME_QUEUE)), {
+        ...outcomeQueueEntry({ id: row.itemId, name: row.name, purchaseWorkspaceId: row.purchaseWorkspaceId }, consumed, userId),
+        recordedAt: serverTimestamp(),
+      });
+      continue;
+    }
     const lines = await getDocs(
       query(collection(db, "workspaces", row.purchaseWorkspaceId, "receiptItems"), where("inventoryItemId", "==", row.itemId)),
     );

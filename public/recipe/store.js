@@ -10,15 +10,35 @@
 
 import { db, getIdToken } from "./firebase.js";
 import {
-  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, getDocs, query, where
+  collection, doc, getDoc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, getDocs, query, where
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { usedUpRows } from "../shared/cook-stock.js";
 
 let uid = null;
+/* 同居人と共有している「家」（2026-09-28）。入っていれば households/{id}、無ければ users/{uid} を使う。
+   なかみメモの src/lib/firebase/space.ts と同じ決め方にすること（ずれると2つのアプリで別の在庫を見る） */
+let householdId = null;
 
-export function setUser(nextUid) { uid = nextUid; }
+export function setUser(nextUid) { uid = nextUid; householdId = null; }
 
-function col(name) { return collection(db, "users", uid, name); }
+/** ログイン直後に、どの家に入っているかを調べる。読めなければ家なし（本人の場所）として続ける */
+export async function loadHousehold() {
+  householdId = null;
+  if (!uid) return null;
+  try {
+    const profile = await getDoc(doc(db, "users", uid));
+    const id = profile.exists() ? profile.data().householdId : null;
+    if (typeof id !== "string" || !id) return null;
+    const home = await getDoc(doc(db, "households", id));
+    const members = home.exists() ? home.data().memberUids : null;
+    householdId = Array.isArray(members) && members.includes(uid) ? id : null;
+  } catch (error) {
+    householdId = null;
+  }
+  return householdId;
+}
+
+function col(name) { return householdId ? collection(db, "households", householdId, name) : collection(db, "users", uid, name); }
 
 export function newId(name) { return doc(col(name)).id; }
 
@@ -179,6 +199,21 @@ export async function decrementInventory(rows, recipeTitle) {
   });
   await Promise.all(usedUpRows(rows).map(async (row) => {
     if (!row.purchaseWorkspaceId) return; /* レシートから入れた在庫でなければ返す先が無い */
+    /* 家に入っているときは受け渡し箱へ。同居人はあなたのお金管理に書けないので、
+       あなたがお金管理を開いたときに返す（ユーザー決定 B。2026-09-28） */
+    if (householdId) {
+      batch.set(doc(col("outcomeQueue")), {
+        inventoryItemId: row.itemId,
+        purchaseWorkspaceId: row.purchaseWorkspaceId,
+        outcome: "consumed",
+        outcomeAt: now.toISOString(),
+        outcomeReason: "",
+        recordedBy: uid,
+        itemName: row.name,
+        recordedAt: now
+      });
+      return;
+    }
     const lines = await getDocs(query(
       collection(db, "workspaces", row.purchaseWorkspaceId, "receiptItems"),
       where("inventoryItemId", "==", row.itemId)

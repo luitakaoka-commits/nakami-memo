@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Box, ChefHat, Home, LogOut, Plus, Search } from "lucide-react";
+import { Box, ChefHat, Home, LogOut, Plus, Search, Users } from "lucide-react";
 import { logout } from "@/lib/firebase/auth";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { InventoryProvider } from "@/lib/hooks/useInventory";
@@ -24,7 +24,7 @@ function isActivePath(pathname: string, href: string) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, household } = useAuth();
 
   async function handleLogout() {
     await logout();
@@ -53,6 +53,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="ui-sidebar-footer">
+          <Link href="/app/household" className="ui-sidebar-logout">
+            <Users size={16} strokeWidth={1.9} />
+            {household ? household.name : "同居人と共有"}
+          </Link>
           <span className="ui-account">{user?.displayName || user?.email}</span>
           <button type="button" onClick={handleLogout} className="ui-sidebar-logout">
             <LogOut size={16} strokeWidth={1.9} />
@@ -68,9 +72,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="ui-brand-mark ui-brand-mark--small" aria-hidden="true"><Box size={21} strokeWidth={1.8} /></span>
             <span className="ui-brand-name">なかみメモ</span>
           </Link>
-          <button type="button" onClick={handleLogout} className="ui-mobile-logout" aria-label="ログアウト" title="ログアウト">
-            <LogOut size={17} strokeWidth={1.9} />
-          </button>
+          <span className="ui-mobile-actions">
+            {/* 同居人との共有（2026-09-28）。ログアウトの隣に置く。共有中は色を付ける */}
+            <Link href="/app/household" className="ui-mobile-logout ui-mobile-household" aria-label="同居人と共有" title="同居人と共有" data-shared={household ? "true" : undefined}>
+              <Users size={17} strokeWidth={1.9} />
+            </Link>
+            <button type="button" onClick={handleLogout} className="ui-mobile-logout" aria-label="ログアウト" title="ログアウト">
+              <LogOut size={17} strokeWidth={1.9} />
+            </button>
+          </span>
         </header>
 
         <main className="ui-main"><div className="ui-content"><InventoryProvider>{children}</InventoryProvider></div></main>

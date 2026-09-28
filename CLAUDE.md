@@ -93,6 +93,18 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   **意味の判断を自動でやらない**。「牛乳」と「低脂肪乳」を同じにしてよいかは本人にしか決められない。
   逆に寄せすぎると粒度が粗くなって行動につながらない
 - **レシートは記録ページ内のタブ**。ボトムナビは5項目のまま。口座はナビに残す
+- **なかみメモとつくりおきノートは同居人と共有し、お金管理は共有しない**（2026-09-28 ユーザー決定）。
+  共有の単位は「家」（`households/{id}`）。**家を作るまでは今までどおり `users/{uid}` を使う**（作らない人の動きは変わらない）。
+  置き場所を決めるのは1か所ずつ：なかみメモ `src/lib/firebase/space.ts`、つくりおきノート `public/recipe/store.js` の `col()`、
+  お金管理 `firebase-sync.js` の `inventoryCol()`、レシピ提案のサーバー `route.ts` の `spaceBase()`。**4つとも同じ決め方**
+  （`users/{uid}.householdId` を読み、その家の `memberUids` に自分が入っていれば家）。`rules.test.mjs` が4つを見て止める。
+  家を作ると `HOUSEHOLD_COLLECTIONS`（在庫・保管場所・レシピ・献立・買い物…）を家へ写し、件数がそろったら切り替える。**元のデータは消さない**。
+  招待は `householdInvites/{24文字のコード}`（7日で切れる）。ルールは「有効なコードを持つ人が自分1人だけを足す」ときだけ許す。
+  **同居人が押した「使い切った／捨てた」「作った」はお金管理に直接書けない**ので、家の受け渡し箱（`outcomeQueue`）に入れ、
+  持ち主がお金管理を開いたときに `finance-engine.js` の `outcomeLinePatches` で明細へ返す（ユーザー決定 B）。
+  家に入っているときは持ち主が押した分も受け渡し箱を通る（経路を1つにするため）。
+  この計算はなかみメモの `receiptLinePatches` と同じで、`household-core.test.mjs` が突き合わせる。
+  QR の公開ページ（`publicLocations`）は家のものなら `householdId` を持ち、家のメンバーなら直せる
 - **レシピの量は、在庫の単位に合わせる**（2026-09-28 ユーザー要望）。冷蔵庫のものをグラムで管理する人はいないのに、
   レシピが「300g」で在庫が「1パック」だと、以前は「1パック使い切った」として減らしていた（600gのうち300gでも1パック減る）。
   いまは **AIに在庫の単位のまま書かせる**（`amount`「1/2」`unit`「パック」）。料理の分量は `refAmount`（「約300g」）に入れ、
@@ -221,7 +233,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 40 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 13 / migrate 7 / recipes 40 / household 10 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
