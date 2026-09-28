@@ -9,6 +9,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { receiptLinePatches, itemOutcomePatch } from "../inventory/outcome-core.ts";
+import { loginRedirectPath, safeRedirect } from "../auth/login-redirect.ts";
+import { readFileSync } from "node:fs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const finance = createRequire(import.meta.url)(path.join(ROOT, "public", "money", "finance-engine.js"));
@@ -100,6 +102,23 @@ t("同居人が押した分を、お金管理が明細に返す計算は、な�
     const viaQueue = finance.outcomeLinePatches(lines, outcomeQueueEntry({ id: "i", purchaseWorkspaceId: "ws" }, patch, "mate"));
     eq(viaQueue, direct, `ケース${i + 1}・${choice.reason || "使い切った"}`);
   }));
+});
+
+t("ログインしていない人が招待リンクを開いても、ログインのあと招待コードつきで戻る（2026-09-28）", () => {
+  const code = newInviteCode(() => 7);
+  const link = new URL(inviteLink("https://nakami-memo.vercel.app", code));
+  const login = new URL(loginRedirectPath(link.pathname, link.search), "https://nakami-memo.vercel.app");
+  const back = safeRedirect(login.searchParams.get("redirect"));
+  eq(back, `/app/join?code=${code}`, "戻り先に招待コードが残る");
+  eq(new URL(back, "https://nakami-memo.vercel.app").searchParams.get("code"), code, "参加画面が読めるコード");
+  eq(loginRedirectPath("/app/items", ""), "/login?redirect=%2Fapp%2Fitems", "クエリが無ければ今までどおり");
+  const guard = readFileSync(path.join(ROOT, "src", "components", "auth", "AuthGuard.tsx"), "utf8");
+  ok(guard.includes("loginRedirectPath(pathname, window.location.search)"), "AuthGuard がクエリを渡していない");
+});
+
+t("ログインのあとの戻り先は、自分のサイトの中だけ", () => {
+  eq([null, "/app/join?code=x", "https://evil.example.com", "//evil.example.com", "/\\evil.example.com"].map(safeRedirect),
+    ["/app", "/app/join?code=x", "/app", "/app", "/app"], "戻り先");
 });
 
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);

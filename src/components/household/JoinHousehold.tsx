@@ -18,10 +18,16 @@ export function JoinHousehold() {
   const [invite, setInvite] = useState<Invite | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** 招待を読めなかった理由（通信や権限）。「使えない」とまとめず、写真で原因が分かるように出す */
+  const [readError, setReadError] = useState("");
 
   useEffect(() => {
     if (!code) { setInvite(null); return; }
-    readInvite(code).then(setInvite).catch(() => setInvite(null));
+    readInvite(code).then(setInvite).catch((err) => {
+      console.error("[招待を確かめる]", err);
+      setReadError(err && typeof err === "object" && "code" in err ? String(err.code) : String(err));
+      setInvite(null);
+    });
   }, [code]);
 
   if (invite === undefined) return <LoadingState label="招待を確かめています" />;
@@ -33,7 +39,13 @@ export function JoinHousehold() {
     return (
       <div className="ui-stack">
         {head}
-        <p className="ui-muted">{status === "expired" ? "この招待リンクは期限が切れています。" : "この招待リンクは使えません。"}招待した人に、もう一度リンクを作ってもらってください。</p>
+        <p className="ui-muted">
+          {!code
+            ? "リンクに招待コードが入っていません。届いた招待リンクを、もう一度そのまま開いてください。"
+            : readError
+              ? `招待を確かめられませんでした（${readError}）。通信を確かめて、もう一度リンクを開いてください。`
+              : `${status === "expired" ? "この招待リンクは期限が切れています。" : "この招待リンクは使えません。"}招待した人に、もう一度リンクを作ってもらってください。`}
+        </p>
         <Link href="/app" className="ui-button ui-button--secondary">ホームへ</Link>
       </div>
     );

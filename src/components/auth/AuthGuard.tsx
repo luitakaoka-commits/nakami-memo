@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { loginRedirectPath } from "@/lib/auth/login-redirect";
 import { LoadingState } from "@/components/common/LoadingState";
 
 export function AuthGuard({ children }: { children: ReactNode }) {
@@ -12,7 +13,8 @@ export function AuthGuard({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+      // 招待リンクの ?code=… を落とさないよう、パスと一緒に覚えておく（2026-09-28）
+      router.replace(loginRedirectPath(pathname, window.location.search));
     }
   }, [loading, pathname, router, user]);
 
