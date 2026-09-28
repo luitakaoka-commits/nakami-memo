@@ -42,6 +42,13 @@ const SUITES = [
     file: "household-core.test.mjs",
     nodeArgs: ["--experimental-strip-types", "--no-warnings"],
   },
+  // からだの記録（Samsung Health の取り込みとレシピ提案への生かし方。2026-09-28）
+  {
+    name: "health",
+    cwd: path.join(ROOT, "src", "lib", "health"),
+    file: "health.test.mjs",
+    nodeArgs: ["--experimental-strip-types", "--no-warnings"],
+  },
   // 在庫の「使い切った／捨てた」。お金管理と同じ値を使っているかもここで見る
   {
     name: "inventory-outcome",

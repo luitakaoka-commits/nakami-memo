@@ -50,10 +50,16 @@ function recipeCollections() {
   return new Set([...text.matchAll(/\b(?:watch|put|patch|remove|newId|readAll|getAll)[A-Za-z]*\(\s*"([a-z]+)"/g)].map((m) => m[1]));
 }
 
+/** 本人の場所（users/{uid}）でだけ許す名前（家には置かないもの。からだの記録 health など。2026-09-28） */
+const personalOnly = (() => {
+  const usersBlock = rules.slice(rules.indexOf("match /users/{userId} {"), rules.indexOf("match /households/{householdId} {"));
+  return new Set([...usersBlock.matchAll(/collection == '([^']+)'/g)].map((m) => m[1]));
+})();
+
 t("なかみメモが使う users/{uid} のコレクションが、すべてルールで許されている", () => {
   const used = nakamiCollections();
   ok(used.size >= 3, `拾えた数が少なすぎる（読み取りの正規表現が壊れていないか）: ${[...used]}`);
-  const missing = [...used].filter((name) => !allowed.has(name));
+  const missing = [...used].filter((name) => !allowed.has(name) && !personalOnly.has(name));
   ok(!missing.length, `ルールに無い: ${missing.join(", ")}`);
 });
 
@@ -162,6 +168,16 @@ t("3アプリとも、家に入っていれば家の場所を使う（ずれる�
   ok(/collection\(db, "households", householdId, name\)/.test(read("public", "recipe", "store.js")), "つくりおきノート");
   ok(/collection\(db, 'households', householdId, name\)/.test(read("public", "money", "firebase-sync.js")), "お金管理（在庫に入れる）");
   ok(/spaceSegments\(uid, householdId\)/.test(read("src", "app", "api", "recipes", "suggest", "route.ts")), "レシピ提案のサーバー");
+});
+
+t("からだの記録（health）は本人の場所にだけ置け、同居人と共有する家には置けない", () => {
+  const usersBlock = rules.slice(rules.indexOf("match /users/{userId} {"), rules.indexOf("match /households/{householdId} {"));
+  ok(/allowedUserCollection\(collection\) \|\| collection == 'health'/.test(usersBlock), "本人の場所で health が許されていない");
+  ok(!allowed.has("health"), "health が allowedUserCollection に入っている（家にも置けてしまう）");
+  ok(!householdBlock.includes("'health'"), "家のルールが health を許している");
+  const store = read("src", "lib", "firebase", "health.ts");
+  ok(/collection\(db, "users", uid, "health"\)/.test(store), "からだの記録を本人の場所以外に書いている");
+  ok(!store.includes("spaceCollection"), "からだの記録が家の場所（space.ts）を通っている");
 });
 
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);

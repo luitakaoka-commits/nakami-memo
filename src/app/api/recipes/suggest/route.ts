@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { firebaseConfig } from "@/lib/firebase/config";
 import { spaceSegments } from "@/lib/household/household-core";
+import { healthHints, healthPromptLines, japanDate } from "@/lib/health/health-hints";
+import { seriesFromDocs } from "@/lib/health/samsung-core";
 import {
   buildPrompt,
   createThrottle,
@@ -228,7 +230,12 @@ export async function POST(request: Request) {
 
     const tools = normalizeTools(rawTools);
     const options = normalizeOptions(body, pantry);
-    const answer = await askGemini(buildPrompt(pantry, tools, options));
+    // からだの記録（Samsung Health から取り込んだ値）。健康データなので家ではなく本人の場所から読む（2026-09-28）。
+    // 読めなくてもレシピは出す（記録を使わないだけ）
+    const hints = options.useHealth
+      ? healthHints(seriesFromDocs(await readUserCollection(uid, idToken, "health", spaceSegments(uid, null).map(encodeURIComponent).join("/")).catch(() => [])), japanDate(Date.now()))
+      : [];
+    const answer = await askGemini(buildPrompt(pantry, tools, options, healthPromptLines(hints)));
     const result = sanitizeSuggestions(answer.data, pantry, tools, options);
     if (!result.recipes.length) throw new ApiError("条件に合うレシピを作れませんでした。条件をゆるめてお試しください。", 422);
 
@@ -236,6 +243,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ...result,
       assumedBasicTools: tools.length === 0,
+      // 何を理由にどんな希望を出したか（画面に出す）
+      healthHints: hints.map((hint) => ({ key: hint.key, reason: hint.reason, instruction: hint.instruction })),
       fallbackModel: answer.model === GEMINI_MODEL ? "" : answer.model,
     });
   } catch (error) {

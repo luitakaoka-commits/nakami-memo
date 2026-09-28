@@ -167,11 +167,13 @@ service cloud.firestore {
 
       allow read, write: if isOwner();
 
+      // health はからだの記録（Samsung Health から取り込んだ値。2026-09-28）。健康データなので本人の場所にだけ置き、
+      // 同居人と共有する家（households）には許さない。allowedUserCollection に入れないのはそのため
       match /{collection}/{docId} {
-        allow read, write: if isOwner() && allowedUserCollection(collection);
+        allow read, write: if isOwner() && (allowedUserCollection(collection) || collection == 'health');
 
         match /{document=**} {
-          allow read, write: if isOwner() && allowedUserCollection(collection);
+          allow read, write: if isOwner() && (allowedUserCollection(collection) || collection == 'health');
         }
       }
     }

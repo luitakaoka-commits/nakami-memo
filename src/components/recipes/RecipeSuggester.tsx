@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookmarkPlus, ChefHat, Check, CookingPot, LoaderCircle, Sparkles, Trash2, TriangleAlert } from "lucide-react";
+import { BookmarkPlus, ChefHat, Check, CookingPot, HeartPulse, LoaderCircle, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { deleteSavedRecipe, recordCooking, saveRecipeToTsukurioki, type CookedRow } from "@/lib/firebase/kitchen";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -63,6 +63,8 @@ export function RecipeSuggester() {
   const [maxMinutes, setMaxMinutes] = useState(30);
   const [mustUse, setMustUse] = useState<string[] | null>(null); // null = まだ触っていない（期限が近いものを選んだ状態）
   const [exclude, setExclude] = useState("");
+  // からだの記録（Samsung Health）をレシピに生かすか（2026-09-28）
+  const [useHealth, setUseHealth] = useState(true);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<SuggestResponse | null>(null);
@@ -96,6 +98,7 @@ export function RecipeSuggester() {
         maxMinutes,
         mustUseItemIds: selected,
         excludeIngredients: exclude.split(/[、,\s]+/).map((s) => s.trim()).filter(Boolean),
+        useHealth,
       });
       setResult(response);
       setSuggestedAt(Date.now());
@@ -154,6 +157,13 @@ export function RecipeSuggester() {
                 ))}
               </div>
             </fieldset>
+            <div className="ui-form-field ui-form-field--full">
+              <label className="ui-check-field">
+                <input type="checkbox" checked={useHealth} onChange={(event) => setUseHealth(event.target.checked)} />
+                からだの記録を生かす
+              </label>
+              <p className="ui-form-note">Samsung Health から取り込んだ抗酸化指数や睡眠などを見て、料理の選び方を調整します。<Link href="/app/health" className="underline">からだの記録</Link></p>
+            </div>
             <label className="ui-form-field ui-form-field--full">
               使わない食材
               <input value={exclude} onChange={(event) => setExclude(event.target.value)} placeholder="例：ピーマン、セロリ" />
@@ -177,6 +187,16 @@ export function RecipeSuggester() {
             <button type="button" onClick={clearSuggestions} className="ui-button ui-button--ghost"><Trash2 size={15} />提案を消す</button>
           </div>
           <p className="ui-muted">提案はこの端末に1日だけ残ります。とっておきたいレシピは「つくりおきノートに保存」を押してください。</p>
+          {result.healthHints && result.healthHints.length > 0 && (
+            <div className="ui-status-note">
+              <p><HeartPulse size={16} className="inline mr-1" />からだの記録から、次のことを取り入れました。</p>
+              <ul className="mt-1">
+                {result.healthHints.map((hint) => (
+                  <li key={hint.key}>・{hint.instruction}<span className="ui-muted block text-xs">{hint.reason}</span></li>
+                ))}
+              </ul>
+            </div>
+          )}
           {result.fallbackModel && (
             <p className="ui-muted">いつものAIが混み合っていたので、予備のAI（{result.fallbackModel}）で考えました。</p>
           )}

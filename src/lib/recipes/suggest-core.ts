@@ -58,6 +58,8 @@ export type SuggestOptions = {
   maxMinutes: number;
   mustUseItemIds: string[];
   excludeIngredients: string[];
+  /** からだの記録（Samsung Health）をレシピに生かすか。既定は生かす（2026-09-28） */
+  useHealth: boolean;
 };
 
 export type SuggestedIngredient = {
@@ -179,6 +181,7 @@ export function normalizeOptions(raw: Partial<Record<keyof SuggestOptions, unkno
     maxMinutes: maxMinutes >= 5 && maxMinutes <= 180 ? maxMinutes : 30,
     mustUseItemIds: [...new Set(mustUse)],
     excludeIngredients: exclude.map((name) => name.slice(0, 30)),
+    useHealth: raw.useHealth !== false,
   };
 }
 
@@ -191,7 +194,11 @@ function describeExpiry(days: number | null) {
   return `あと${days}日`;
 }
 
-export function buildPrompt(pantry: PantryItem[], tools: KitchenTool[], options: SuggestOptions): string {
+/**
+ * AIへの指示を組み立てる。healthLines は、からだの記録から出した希望（health-hints.ts の healthPromptLines）。
+ * 希望は【条件】のあとに置き、在庫や条件より弱いことを文で伝える（2026-09-28）
+ */
+export function buildPrompt(pantry: PantryItem[], tools: KitchenTool[], options: SuggestOptions, healthLines: string[] = []): string {
   const mustUse = pantry.filter((item) => options.mustUseItemIds.includes(item.id));
   const stockLines = pantry
     .filter((item) => item.expiresInDays === null || item.expiresInDays >= 0)
@@ -217,6 +224,7 @@ export function buildPrompt(pantry: PantryItem[], tools: KitchenTool[], options:
     `- ${options.servings}人分`,
     `- 調理時間は${options.maxMinutes}分以内`,
     ...(options.excludeIngredients.length ? [`- 次の食材は使わない: ${options.excludeIngredients.join("、")}`] : []),
+    ...healthLines,
     "",
     "【必ず守ること】",
     `- レシピは${MAX_SUGGESTIONS}つ。似た料理を並べない。`,

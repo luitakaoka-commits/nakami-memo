@@ -65,7 +65,8 @@ t("器具は名前の無いものを落とし、知らない種類は「その�
 
 t("条件は安全な範囲にそろえ、在庫に無いIDは必ず使う食材から外す", () => {
   const o = normalizeOptions({ servings: 99, maxMinutes: "15", mustUseItemIds: ["egg", "ghost", "egg"], excludeIngredients: [" ピーマン ", "", 3] }, pantry);
-  eq(o, { servings: 2, maxMinutes: 15, mustUseItemIds: ["egg"], excludeIngredients: ["ピーマン"] }, "条件");
+  // useHealth は 2026-09-28 に足した項目（からだの記録を生かすか。指定が無ければ生かす）
+  eq(o, { servings: 2, maxMinutes: 15, mustUseItemIds: ["egg"], excludeIngredients: ["ピーマン"], useHealth: true }, "条件");
 });
 
 t("AIへの指示に、4つの約束（必ず使う・器具・調味料・量）と在庫のIDが入る", () => {

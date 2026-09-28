@@ -105,6 +105,18 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   家に入っているときは持ち主が押した分も受け渡し箱を通る（経路を1つにするため）。
   この計算はなかみメモの `receiptLinePatches` と同じで、`household-core.test.mjs` が突き合わせる。
   QR の公開ページ（`publicLocations`）は家のものなら `householdId` を持ち、家のメンバーなら直せる
+- **からだの記録（Samsung Health）を取り込み、レシピ提案に生かす**（2026-09-28 ユーザー要望）。
+  Samsung Health にはWebから読む公開の方法が無いので、本人が「個人データをダウンロード」で書き出したCSVを、
+  なかみメモの `/app/health` で選んでもらい **ブラウザの中で読む**（ファイルはどこにも送らない）。保存は日付と値だけ、
+  `users/{uid}/health/{項目}_{YYYY-MM}`。**健康データなので家（同居人）には置かない**（ルールも users の下にだけ許す。
+  `rules.test.mjs` が止める）。読み方は `src/lib/health/samsung-core.ts`（1行目は種類、2行目が見出し、日時は UTC で
+  時差は `time_offset` の列、`day_time` はそのまま日付）。取り込む項目は抗酸化指数・AGEs指数・体水分量・体重・飲んだ水・
+  元気スコア（総合・睡眠・活動）・睡眠スコア・ストレス・歩数・心臓の健康スコア。**飲んだ水は 2026-09-28 の書き出しに無かった**
+  （Samsung Health で水を記録していない）。`water_intake` のファイル名と列は実物で確かめていない。
+  レシピへの生かし方は `src/lib/health/health-hints.ts`：**本人の過去の値との比較だけ**で決める（正常範囲は知らないので
+  決まった線は引かない）。抗酸化指数が下がった→色の濃い野菜、AGEs指数が上がった→蒸す・ゆでる・煮る、水分が少ない→汁物、
+  睡眠が低い・ストレスが高い→手早い料理、よく歩いた→たんぱく質。AIには「医療的な指示ではなく、在庫と条件が優先」と伝える。
+  レシピ画面の「からだの記録を生かす」で切れる
 - **レシピの量は、在庫の単位に合わせる**（2026-09-28 ユーザー要望）。冷蔵庫のものをグラムで管理する人はいないのに、
   レシピが「300g」で在庫が「1パック」だと、以前は「1パック使い切った」として減らしていた（600gのうち300gでも1パック減る）。
   いまは **AIに在庫の単位のまま書かせる**（`amount`「1/2」`unit`「パック」）。料理の分量は `refAmount`（「約300g」）に入れ、
@@ -233,7 +245,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 13 / migrate 7 / recipes 40 / household 10 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 14 / migrate 7 / recipes 40 / household 10 / health 21 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
