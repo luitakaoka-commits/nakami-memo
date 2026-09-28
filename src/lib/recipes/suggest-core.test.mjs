@@ -3,12 +3,13 @@
  */
 import {
   amountInStockUnit, buildPrompt, canonicalUnit, convertAmount, createThrottle, defaultConsumption, defaultMustUseIds,
-  documentsToObjects, isCountUnit, normalizeOptions, normalizeTools, parseAmount, pickPantry, remainingQuantity,
+  documentsToObjects, ingredientLine, isCountUnit, quickUseAmounts, normalizeOptions, normalizeTools, parseAmount, pickPantry, remainingQuantity,
   responseSchema, sanitizeSuggestions, toTsukuriokiRecipe, RECIPE_CATEGORIES,
   clearCachedSuggestions, readCachedSuggestions, relativeTimeLabel, writeCachedSuggestions, SUGGESTION_CACHE_KEY,
   geminiErrorMessage, isRetryableGeminiStatus,
   DEFAULT_GEMINI_FALLBACK_MODELS, geminiErrorDetail, geminiModelChain, nextGeminiStep, pickFallbackModels, triedModelsSummary,
 } from "./suggest-core.ts";
+import * as sharedCook from "../../../public/shared/cook-stock.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -306,6 +307,50 @@ t("いつの提案かを日本語で出す", () => {
   const minute = 60000;
   eq([relativeTimeLabel(NOW, NOW), relativeTimeLabel(NOW - 5 * minute, NOW), relativeTimeLabel(NOW - 90 * minute, NOW), relativeTimeLabel(NOW - 50 * 60 * minute, NOW)],
     ["たった今", "5分前", "1時間前", "2日前"], "表示");
+});
+
+/* ---------- 単位の食い違い（2026-09-28） ---------- */
+
+t("AIには在庫と同じ単位で書かせ、料理の分量は refAmount に入れる", () => {
+  const prompt = buildPrompt(pantry, tools, normalizeOptions({}, pantry));
+  ok(prompt.includes("その単位のまま「1」「0.5」「1/2」のように書く"), "数える単位はそのままで書く指示");
+  ok(prompt.includes("refAmount"), "分量の目安の置き場所");
+  const ingredient = responseSchema().properties.recipes.items.properties.ingredients.items.properties;
+  ok(ingredient.refAmount, "返す形に refAmount がある");
+});
+
+t("在庫が「パック」なら 1/2 パックのまま減らせる（グラムに引きずられない）", () => {
+  const pantry = [{ id: "chicken", name: "鶏もも", quantity: 2, unit: "パック", category: "食品", expirationMillis: null }];
+  const recipe = {
+    title: "照り焼き", category: "主菜", servings: 2, estMinutes: 20,
+    ingredients: [{ name: "鶏もも", amount: "1/2", unit: "パック", refAmount: "約300g", itemId: "chicken", inStock: true }],
+    shoppingNeeded: [], steps: ["焼く"], toolIds: [], usesItemIds: ["chicken"],
+  };
+  const rows = defaultConsumption(recipe, pantry);
+  eq(rows[0].use, 0.5, "0.5パックだけ減る");
+  eq(rows[0].note, "", "単位が噛み合っているので注意は出さない");
+  eq(ingredientLine(recipe.ingredients[0]), "鶏もも 1/2パック（約300g）", "保存する材料は両方見せる");
+});
+
+t("分量の目安が無い材料は、これまでどおりの書き方のまま", () => {
+  eq(ingredientLine({ name: "牛乳", amount: "200", unit: "mL", refAmount: "", itemId: "milk", inStock: true }), "牛乳 200mL", "g・mL はそのまま");
+  eq(ingredientLine({ name: "塩", amount: "少々", unit: "", refAmount: "", itemId: null, inStock: true }), "塩 少々", "少々");
+});
+
+t("全部・半分・少しの量：数える単位は0.01きざみ、g や mL は1きざみ。在庫を超えない", () => {
+  eq(quickUseAmounts(1, "パック"), { all: 1, half: 0.5, little: 0.25 }, "1パック");
+  eq(quickUseAmounts(3, "個"), { all: 3, half: 1.5, little: 0.75 }, "3個");
+  eq(quickUseAmounts(300, "g"), { all: 300, half: 150, little: 75 }, "300g");
+  eq(quickUseAmounts(1, "g"), { all: 1, half: 1, little: 0 }, "1g（半分は丸めて1、少しは0）");
+  eq(quickUseAmounts(0, "パック"), { all: 0, half: 0, little: 0 }, "在庫なし");
+  eq(quickUseAmounts("あ", "パック"), { all: 0, half: 0, little: 0 }, "数でない");
+});
+
+t("全部・半分・少しの量は、なかみメモとつくりおきノートで同じ（片方だけ直すと量が変わる）", () => {
+  const shared = sharedCook;
+  [[1, "パック"], [3, "個"], [300, "g"], [500, "mL"], [1, "g"], [2.5, "本"], [0, "袋"]].forEach(([available, unit]) => {
+    eq(shared.quickUseAmounts(available, unit), quickUseAmounts(available, unit), `${available}${unit}`);
+  });
 });
 
 t("Gemini の一時的な不調（500・502・503・504）だけ自動でやり直す。無料枠切れや頼み方の誤りはやり直さない", () => {

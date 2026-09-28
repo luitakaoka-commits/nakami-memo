@@ -40,6 +40,24 @@ export function planFromSourceItems(sourceItems, items) {
     });
 }
 
+/* 「全部・半分・少し」のワンタップ（2026-09-28）。
+ * 冷蔵庫のものを量る人はいない。レシピが「300g」でも在庫が「1パック」なら、
+ * 数字を打たずに感覚のまま選べるようにする。
+ * 数える単位（パック・本など）は0.01きざみ、g や mL は1きざみで丸める。 */
+const COUNT_UNITS_FOR_QUICK = ["個", "本", "枚", "袋", "パック", "玉", "束", "丁", "切れ", "尾", "缶", "箱", "ロール", "食", "セット", "冊"];
+
+export function quickUseAmounts(available, unit) {
+  const stock = Math.max(0, Number(available) || 0);
+  const counted = COUNT_UNITS_FOR_QUICK.includes(String(unit || "").trim());
+  const round = (value) => (counted ? Math.round(value * 100) / 100 : Math.round(value));
+  const clamp = (value) => Math.min(stock, Math.max(0, value));
+  return {
+    all: round(stock),
+    half: clamp(round(stock / 2)),
+    little: clamp(round(stock / 4)),
+  };
+}
+
 /** 実際に書き込む行だけにする（0は在庫を触らない）。 */
 export function rowsToApply(rows) {
   return (rows || []).filter((row) => Number(row.use) > 0);

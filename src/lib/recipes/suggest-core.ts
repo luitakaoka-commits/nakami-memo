@@ -64,6 +64,11 @@ export type SuggestedIngredient = {
   name: string;
   amount: string;
   unit: string;
+  /**
+   * 料理で使う分量の目安（例「約300g」）。在庫が「パック」のように数える単位のときだけ入る（2026-09-28）。
+   * amount・unit は在庫と同じ単位（1/2パック など）なので、料理の分量はこちらに置く。
+   */
+  refAmount: string;
   /** 在庫から使うときの在庫ID。買ってくるものは null。 */
   itemId: string | null;
   inStock: boolean;
@@ -218,8 +223,10 @@ export function buildPrompt(pantry: PantryItem[], tools: KitchenTool[], options:
     "- 必ず使う食材は、どれかのレシピで必ず使う。各レシピは必ず使う食材を1つ以上含める（指定がある場合）。",
     "- 使える調理器具に無い器具（オーブンなど）が要る料理は出さない。使う器具の id を toolIds に入れる。",
     "- 在庫の量を超えて使わない。卵が2個しかなければ3個以上使わない。",
-    "- 量は在庫と同じ単位で書く。在庫が mL なら mL、g なら g。在庫が「本」「パック」のように数える単位のときだけ、",
-    "  その中身の量（mL や g）で書いてよい。",
+    "- 量は在庫と同じ単位で書く（amount と unit）。在庫が mL なら mL、g なら g。",
+    "  在庫が「本」「パック」「袋」のように数える単位なら、その単位のまま「1」「0.5」「1/2」のように書く。",
+    "  そのとき、料理で使う分量（約300g など）は refAmount に書く（例 amount「1/2」unit「パック」refAmount「約300g」）。",
+    "  在庫の単位が g・mL のときは refAmount は空文字でよい。",
     "- 在庫から使う材料は、itemId にその食材の id を書き、inStock を true にする。",
     "- 在庫に無い材料は itemId を空文字、inStock を false にし、shoppingNeeded にも名前を入れる。",
     "- 調味料は在庫にあるものを優先する。水・塩・こしょう・砂糖・醤油・サラダ油は在庫に無くても家にあるものとして inStock を true、itemId は空文字にしてよい。",
@@ -249,8 +256,9 @@ export function responseSchema() {
                 type: "OBJECT",
                 properties: {
                   name: { type: "STRING" },
-                  amount: { type: "STRING", description: "量の数字や「少々」。単位は unit に分ける" },
-                  unit: { type: "STRING" },
+                  amount: { type: "STRING", description: "量の数字や「少々」。単位は unit に分ける。在庫が数える単位なら「1/2」のようにその単位のままの数" },
+                  unit: { type: "STRING", description: "在庫と同じ単位（パック・本・g・mL など）" },
+                  refAmount: { type: "STRING", description: "料理で使う分量の目安（例「約300g」）。在庫が数える単位のときだけ書く。無ければ空文字" },
                   itemId: { type: "STRING", description: "在庫から使うならその id。無ければ空文字" },
                   inStock: { type: "BOOLEAN" },
                 },
@@ -317,6 +325,21 @@ export function isCountUnit(unit: string): boolean {
 }
 
 /**
+ * 「全部・半分・少し」のワンタップで入れる量（2026-09-28）。
+ * 冷蔵庫のものを量る人はいないので、数字を打たずに感覚のまま選べるようにする。
+ * 数える単位（パック・本など）は0.01きざみ、g や mL は1きざみで丸める。
+ * **つくりおきノート側（`public/shared/cook-stock.js`）に同じものがある。**
+ * 片方だけ直すと、同じ「作った」でもアプリによって入る量が変わる。`suggest-core.test.mjs` が突き合わせる。
+ */
+export function quickUseAmounts(available: unknown, unit: string): { all: number; half: number; little: number } {
+  const stock = Math.max(0, Number(available) || 0);
+  const counted = isCountUnit(String(unit ?? ""));
+  const round = (value: number) => (counted ? Math.round(value * 100) / 100 : Math.round(value));
+  const clamp = (value: number) => Math.min(stock, Math.max(0, value));
+  return { all: round(stock), half: clamp(round(stock / 2)), little: clamp(round(stock / 4)) };
+}
+
+/**
  * amount を fromUnit から toUnit へ換算する。できないときは null。
  * mL ↔ L、g ↔ kg のように、同じ種類の単位のときだけ換算する（本 → mL はできない）。
  */
@@ -361,7 +384,7 @@ export function sanitizeSuggestions(raw: unknown, pantry: PantryItem[], tools: K
         // id を書き間違えても、名前が在庫と完全に一致すればその在庫とみなす
         const stock = byId.get(text(ing.itemId)) ?? byName.get(name) ?? null;
         const inStock = stock ? true : ing.inStock === true;
-        return { name, amount: text(ing.amount), unit: text(ing.unit), itemId: stock ? stock.id : null, inStock };
+        return { name, amount: text(ing.amount), unit: text(ing.unit), refAmount: text(ing.refAmount).slice(0, 20), itemId: stock ? stock.id : null, inStock };
       })
       .filter((ing) => ing.name);
 
@@ -652,7 +675,9 @@ export function createThrottle(limit: number, windowMs: number) {
 /** つくりおきノートの材料は「鶏もも肉 300g」の1行文字列。 */
 export function ingredientLine(ing: SuggestedIngredient): string {
   const amount = `${ing.amount}${ing.unit}`.trim();
-  return amount ? `${ing.name} ${amount}` : ing.name;
+  // 在庫の単位（1/2パック）だけだと料理しにくいので、分量の目安があれば並べる（2026-09-28）
+  const withRef = amount && ing.refAmount ? `${amount}（${ing.refAmount}）` : amount || ing.refAmount;
+  return withRef ? `${ing.name} ${withRef}` : ing.name;
 }
 
 /**

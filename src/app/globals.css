@@ -1406,3 +1406,40 @@
 }
 
 /* Hallmark self-critique 2026-07-21: Philosophy 4, Hierarchy 4, Execution 4, Specificity 4, Restraint 4, Variety 4. */
+
+/* ===== 「作った」で使った量を選ぶ行（2026-09-28） =====
+   レシピは「300g」でも在庫は「1パック」なので、数字を打たずに全部・半分・少しで選べるようにする。
+   スマホ幅では名前の下に操作が回り込む。 */
+.ui-use-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  /* ダイアログ全体は中央寄せなので、この行だけ左そろえに戻す */
+  text-align: left;
+}
+
+.ui-use-row:last-child { border-bottom: 0; }
+
+.ui-use-row__name { font-size: 0.9rem; }
+
+.ui-use-row__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-use-row__controls input { width: 4.2rem; }
+
+.ui-quick-use {
+  min-height: 36px;
+  padding-inline: 10px;
+  font-size: 0.82rem;
+}
+
+.ui-quick-use.is-on {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #fff;
+}

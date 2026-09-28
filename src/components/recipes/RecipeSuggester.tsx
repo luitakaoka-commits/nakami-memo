@@ -14,6 +14,7 @@ import {
   defaultConsumption,
   defaultMustUseIds,
   pickPantry,
+  quickUseAmounts,
   readCachedSuggestions,
   relativeTimeLabel,
   toTsukuriokiRecipe,
@@ -378,12 +379,28 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
         ) : (
           <div className="ui-list mt-4">
             {rows.map((row, index) => (
-              <label key={row.itemId} className="flex items-center justify-between gap-3">
-                <span>
+              <div key={row.itemId} className="ui-use-row">
+                <span className="ui-use-row__name">
                   {row.name}<span className="ui-muted">（在庫 {row.available}{row.unit}）</span>
                   {row.note && <span className="ui-muted block text-xs">{row.note}</span>}
                 </span>
-                <span className="flex items-center gap-1">
+                <span className="ui-use-row__controls">
+                  {/* 数字を打たずに選べるように（2026-09-28）。冷蔵庫のものを量る人はいない */}
+                  {(() => {
+                    const quick = quickUseAmounts(row.available, row.unit);
+                    const choices: Array<[string, number]> = [["全部", quick.all], ["半分", quick.half], ["少し", quick.little]];
+                    return choices.map(([label, value]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => setRows(rows.map((r, i) => (i === index ? { ...r, use: value } : r)))}
+                        aria-pressed={row.use === value}
+                        className={`ui-button ui-button--ghost ui-quick-use ${row.use === value ? "is-on" : ""}`}
+                      >
+                        {label}
+                      </button>
+                    ));
+                  })()}
                   <input
                     type="number" min={0} max={row.available} step="any" inputMode="decimal" className="w-20"
                     value={row.use}
@@ -395,7 +412,7 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
                   />
                   <span className="ui-muted">{row.unit}</span>
                 </span>
-              </label>
+              </div>
             ))}
           </div>
         )}

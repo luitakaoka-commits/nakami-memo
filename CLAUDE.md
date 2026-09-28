@@ -93,6 +93,13 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   **意味の判断を自動でやらない**。「牛乳」と「低脂肪乳」を同じにしてよいかは本人にしか決められない。
   逆に寄せすぎると粒度が粗くなって行動につながらない
 - **レシートは記録ページ内のタブ**。ボトムナビは5項目のまま。口座はナビに残す
+- **レシピの量は、在庫の単位に合わせる**（2026-09-28 ユーザー要望）。冷蔵庫のものをグラムで管理する人はいないのに、
+  レシピが「300g」で在庫が「1パック」だと、以前は「1パック使い切った」として減らしていた（600gのうち300gでも1パック減る）。
+  いまは **AIに在庫の単位のまま書かせる**（`amount`「1/2」`unit`「パック」）。料理の分量は `refAmount`（「約300g」）に入れ、
+  保存する材料は「鶏もも 1/2パック（約300g）」と両方見せる。あわせて「作った」の確認画面に
+  **全部・半分・少し**のワンタップを出す（`quickUseAmounts`。数える単位は0.01きざみ、g・mL は1きざみ）。
+  **`suggest-core.ts` と `public/shared/cook-stock.js` に同じ計算が2つある**（なかみメモとつくりおきノート）。
+  `suggest-core.test.mjs` が両方を読んで突き合わせるので、片方だけ直すと落ちる
 - **なかみメモの在庫は、0になったら消す**（2026-09-21 ユーザー決定。Phase 4 手B の「数量0で残す」を覆した）。
   0のモノが並ぶと冗長で見づらかったため。使い切った／捨てた・なかみメモの「作った」・つくりおきノートの「作った」・
   編集で数量0、のどれでも消える（判定は `src/lib/inventory/outcome-core.ts` の `isOutOfStock`）。お金管理の明細への書き戻しは消す前に同じバッチで行う。
@@ -214,7 +221,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 35 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 7 / migrate 7 / recipes 40 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 

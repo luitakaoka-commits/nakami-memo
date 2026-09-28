@@ -8,7 +8,7 @@ import {
   saveMany, removeMany, removeCollection, uploadRecipeImage, deleteRecipeImage, onWriteError,
   readInventory, decrementInventory
 } from "./store.js";
-import { planFromSourceItems, rowsToApply, usedUpRows } from "../shared/cook-stock.js";
+import { planFromSourceItems, quickUseAmounts, rowsToApply, usedUpRows } from "../shared/cook-stock.js";
 import { markPantryHits, pantryHitCount } from "../shared/pantry-check.js";
 
 const PREFS_KEY = "tsukurioki-note-prefs-v1";
@@ -723,11 +723,18 @@ async function markCooked(id) {
 }
 
 function stockSheetMarkup(sheetState) {
-  const rows = sheetState.rows.map((row, index) =>
-    '<label class="stock-row"><span class="stock-row__name">' + esc(row.name) +
-    '<small>在庫 ' + row.available + esc(row.unit) + "</small></span>" +
-    '<span class="stock-row__input"><input type="number" min="0" max="' + row.available + '" step="any" inputmode="decimal" data-stock-index="' + index + '" value="' + row.use + '" aria-label="' + esc(row.name) + 'を減らす量"><small>' + esc(row.unit) + "</small></span></label>"
-  ).join("");
+  /* 数字を打たずに選べるように「全部・半分・少し」を出す（2026-09-28）。
+     レシピが「300g」でも在庫は「1パック」で、量る人はいないため。なかみメモ側にも同じものがある。 */
+  const rows = sheetState.rows.map((row, index) => {
+    const quick = quickUseAmounts(row.available, row.unit);
+    const buttons = [["全部", quick.all], ["半分", quick.half], ["少し", quick.little]]
+      .map(([label, value]) => '<button type="button" class="quick-use' + (row.use === value ? " is-on" : "") + '" data-action="quick-use" data-stock-target="' + index + '" data-value="' + value + '">' + label + "</button>")
+      .join("");
+    return '<div class="stock-row"><span class="stock-row__name">' + esc(row.name) +
+      '<small>在庫 ' + row.available + esc(row.unit) + "</small></span>" +
+      '<span class="stock-row__input">' + buttons +
+      '<input type="number" min="0" max="' + row.available + '" step="any" inputmode="decimal" data-stock-index="' + index + '" value="' + row.use + '" aria-label="' + esc(row.name) + 'を減らす量"><small>' + esc(row.unit) + "</small></span></div>";
+  }).join("");
   return sheet("なかみメモの在庫を減らす",
     '<p class="sheet__label">「' + esc(sheetState.title) + '」で使った量です。直してから押してください。</p>' +
     '<div class="stock-list">' + rows + "</div>" +
@@ -1061,6 +1068,14 @@ function handleAction(element) {
 
   if (action === "detail") { state.detailId = id; state.returnTo = state.screen; return go("detail"); }
   if (action === "mark-cooked") { markCooked(id); return; }
+  if (action === "quick-use") {
+    /* 押した量を入れて、押したボタンだけ色を変える（シート全体は作り直さない。入力中の値を消さないため） */
+    const input = document.querySelector('[data-stock-index="' + element.dataset.stockTarget + '"]');
+    if (input) input.value = element.dataset.value;
+    const group = element.parentElement;
+    if (group) group.querySelectorAll(".quick-use").forEach((button) => button.classList.toggle("is-on", button === element));
+    return;
+  }
   if (action === "apply-stock") { applyStockFromSheet(); return; }
   if (action === "add-to-shopping") { const recipe = state.recipes.find((item) => item.id === id); if (!recipe) return; const added = pushShopping(recipe.ingredients, recipe.title); showToast(added ? added + "件を買い物リストに入れました" : "すでに全部入っています", added ? "success" : ""); return; }
   if (action === "quick-plan") { state.editingPlanId = null; state.draft = { date: todayISO(), slot: "夕食", items: [id], extras: [], memo: "" }; return go("mealCreate", "meal"); }
