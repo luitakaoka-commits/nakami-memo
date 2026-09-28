@@ -10,9 +10,15 @@ import { useSavedRecipes } from "@/lib/hooks/useSavedRecipes";
 import { useTools } from "@/lib/hooks/useTools";
 import { requestSuggestions, type SuggestResponse } from "@/lib/recipes/client";
 import {
+  BREAKFAST_MINUTES,
+  MEAL_TYPES,
   clearCachedSuggestions,
+  combineMealSet,
   defaultConsumption,
+  defaultMealForHour,
   defaultMustUseIds,
+  isMealSet,
+  type MealType,
   pickPantry,
   quickUseAmounts,
   readCachedSuggestions,
@@ -60,7 +66,11 @@ export function RecipeSuggester() {
   const choosable = pantry.filter((item) => item.category !== "調味料" && (item.expiresInDays === null || item.expiresInDays >= 0));
 
   const [servings, setServings] = useState(2);
-  const [maxMinutes, setMaxMinutes] = useState(30);
+  // いつ食べるか。開いた時刻で最初の選択を決める（朝5〜9時・昼10〜14時・それ以外は晩。2026-09-28）
+  const [meal, setMeal] = useState<MealType>(() => defaultMealForHour(new Date().getHours()));
+  const [maxMinutes, setMaxMinutes] = useState(() => (defaultMealForHour(new Date().getHours()) === "朝ごはん" ? BREAKFAST_MINUTES : 30));
+  const [setCooking, setSetCooking] = useState(false);
+  const [setCooked, setSetCooked] = useState("");
   const [mustUse, setMustUse] = useState<string[] | null>(null); // null = まだ触っていない（期限が近いものを選んだ状態）
   const [exclude, setExclude] = useState("");
   // からだの記録（Samsung Health）をレシピに生かすか（2026-09-28）
@@ -87,11 +97,19 @@ export function RecipeSuggester() {
     setMustUse(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   }
 
+  /** 朝ごはんにしたら調理時間を15分に。朝ごはんから移ったら、15分のままなら30分に戻す（どちらも選び直せる） */
+  function chooseMeal(next: MealType) {
+    if (next === "朝ごはん") setMaxMinutes(BREAKFAST_MINUTES);
+    else if (meal === "朝ごはん" && maxMinutes === BREAKFAST_MINUTES) setMaxMinutes(30);
+    setMeal(next);
+  }
+
   async function ask() {
     if (!user) return;
     setError("");
     setAsking(true);
     setResult(null);
+    setSetCooked("");
     try {
       const response = await requestSuggestions(user, {
         servings,
@@ -99,10 +117,15 @@ export function RecipeSuggester() {
         mustUseItemIds: selected,
         excludeIngredients: exclude.split(/[、,\s]+/).map((s) => s.trim()).filter(Boolean),
         useHealth,
+        meal,
       });
       setResult(response);
       setSuggestedAt(Date.now());
-      writeCachedSuggestions(window.localStorage, user.uid, { recipes: response.recipes, uncoveredMustUse: response.uncoveredMustUse }, Date.now());
+      writeCachedSuggestions(window.localStorage, user.uid, {
+        recipes: response.recipes,
+        uncoveredMustUse: response.uncoveredMustUse,
+        ...(response.mealSet ? { mealSet: true, setWarnings: response.setWarnings ?? [] } : {}),
+      }, Date.now());
     } catch (err) {
       setError(err instanceof Error ? err.message : "レシピを提案できませんでした。");
     } finally {
@@ -114,6 +137,7 @@ export function RecipeSuggester() {
     clearCachedSuggestions(window.localStorage);
     setResult(null);
     setSuggestedAt(null);
+    setSetCooked("");
   }
 
   if (loading) return <LoadingState label="在庫を読み込み中" />;
@@ -125,7 +149,7 @@ export function RecipeSuggester() {
         <div className="flex items-center gap-3"><ChefHat size={25} className="text-[var(--brand)]" /><h1 className="ui-page-title">レシピ提案</h1></div>
         <Link href="/app/tools" className="ui-button ui-button--secondary"><CookingPot size={16} />調理器具 {tools.length}件</Link>
       </div>
-      <p className="ui-muted">期限が近い食材を必ず使うレシピを、AIが3つ考えます。登録した調理器具で作れるものだけを出します。</p>
+      <p className="ui-muted">期限が近い食材を必ず使うレシピを、AIが3つ考えます（晩ごはんは主菜・副菜・汁物の献立で出します）。登録した調理器具で作れるものだけを出します。</p>
       <p className="ui-muted">牛乳や小麦粉のように少しずつ使うものは、在庫の単位を <strong>mL</strong> や <strong>g</strong> にしておくと、「作った」で使った分だけ正確に減らせます（「1本」のままだと、減らす量を自分で入れることになります）。</p>
 
       {pantry.length === 0 ? (
@@ -133,6 +157,17 @@ export function RecipeSuggester() {
       ) : (
         <section className="ui-form-surface">
           <div className="ui-form-grid">
+            <fieldset className="ui-form-field ui-form-field--full">
+              <legend>いつ食べる？</legend>
+              <div className="ui-chip-list mt-2">
+                {MEAL_TYPES.map((type) => (
+                  <button key={type} type="button" className="ui-chip" aria-pressed={meal === type} onClick={() => chooseMeal(type)}>
+                    {type}
+                  </button>
+                ))}
+              </div>
+              {isMealSet(meal) && <p className="ui-form-note">主菜・副菜・汁物を1品ずつ、1つの献立として考えます。</p>}
+            </fieldset>
             <label className="ui-form-field">
               何人分
               <select value={servings} onChange={(event) => setServings(Number(event.target.value))}>
@@ -174,7 +209,7 @@ export function RecipeSuggester() {
           <div className="ui-form-actions mt-5">
             <button type="button" onClick={ask} disabled={asking} className="ui-button ui-button--primary">
               {asking ? <LoaderCircle size={17} className="animate-spin" /> : <Sparkles size={17} />}
-              {asking ? "考えています（30秒ほど）" : "レシピを考えてもらう"}
+              {asking ? "考えています（30秒ほど）" : isMealSet(meal) ? "献立を考えてもらう" : "レシピを考えてもらう"}
             </button>
           </div>
         </section>
@@ -202,6 +237,34 @@ export function RecipeSuggester() {
           )}
           {result.uncoveredMustUse.length > 0 && (
             <p className="ui-status-note"><TriangleAlert size={16} className="inline mr-1" />{result.uncoveredMustUse.join("、")}を使うレシピは作れませんでした。条件を変えてもう一度お試しください。</p>
+          )}
+          {result.mealSet && (
+            <div className="ui-section ui-meal-set-head">
+              <h3 className="ui-section__title">今日の献立</h3>
+              <p className="ui-muted">{result.recipes.map((recipe) => `${recipe.category}：${recipe.title}`).join(" ／ ")}</p>
+              {result.setWarnings && result.setWarnings.length > 0 && (
+                <ul className="ui-status-note mt-2">{result.setWarnings.map((w) => <li key={w}><TriangleAlert size={14} className="inline mr-1" />{w}</li>)}</ul>
+              )}
+              {setCooked && <p className="ui-status-note mt-2"><Check size={14} className="inline mr-1" />{setCooked}</p>}
+              <div className="ui-form-actions mt-3">
+                <button type="button" onClick={() => setSetCooking(true)} className="ui-button ui-button--primary"><ChefHat size={16} />献立をまとめて作った</button>
+              </div>
+              <p className="ui-form-note mt-2">1品だけ作ったときは、その料理の「作った」を押してください。</p>
+              {setCooking && (
+                <CookedDialog
+                  recipe={combineMealSet(result.recipes)}
+                  items={items}
+                  savedRecipeId={null}
+                  onClose={() => setSetCooking(false)}
+                  onDone={({ changed, removed }) => {
+                    setSetCooking(false);
+                    setSetCooked(changed
+                      ? `${changed}件の在庫を減らしました。${removed ? `使い切った${removed}件は在庫から消しました。` : ""}`
+                      : "減らす量がすべて0だったので、在庫は変えていません。");
+                  }}
+                />
+              )}
+            </div>
           )}
           {result.recipes.map((recipe, index) => (
             <SuggestionCard

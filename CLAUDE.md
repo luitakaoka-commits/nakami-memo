@@ -123,6 +123,13 @@ GitHub: `luitakaoka-commits/nakami-memo` ／ Vercel: `nakami-memo.vercel.app`
   （前30日の差の大きさの中央値。7夜未満なら決めない）の1.5倍を超えたら高め→塩分控えめ・カリウム多め。
   本人の 9/22〜9/28 の画面（9/27 だけ「やや低い」、ほかは「順調」）と、実データで判定が一致することを確かめた（値は見ず、順位と日付だけで照合）。
   AIには「医療的な指示ではなく、在庫と条件が優先」と伝える。レシピ画面の「からだの記録を生かす」で切れる
+- **レシピ提案で「いつ食べるか」を選ぶ**（2026-09-28 ユーザー決定）。おまかせ・朝ごはん・昼ごはん・晩ごはん・おやつ・デザート・
+  お弁当・つくりおき の6つから1つ（`MEAL_TYPES`）。最初の選択は開いた時刻（5〜9時 朝、10〜14時 昼、ほかは晩。`defaultMealForHour`）。
+  朝ごはんを選ぶと調理時間を15分に合わせる（選び直せる）。**晩ごはんだけは別々の3案ではなく、主菜・副菜・汁物を1品ずつの献立セット**
+  （ユーザー希望）。`sanitizeSuggestions` が主菜→副菜→汁物に並べ、`mealSet: true` と、3品合わせて在庫を超える・欠けた品の注意（`setWarnings`）を返す。
+  「献立をまとめて作った」は `combineMealSet` で3品の材料をつなげ、同じ在庫は `defaultConsumption` が足し合わせる。
+  デザートは期限の近い肉・魚を無理に使わせない。AGEs の「甘い味付けを控える」が出ている日は甘さ控えめにさせる。
+  品の種類を選ぶ列（主菜・副菜…）は作らない（場面と二重になり、「朝ごはん＋デザート」のような食い違いが起きるため）
 - **レシピの量は、在庫の単位に合わせる**（2026-09-28 ユーザー要望）。冷蔵庫のものをグラムで管理する人はいないのに、
   レシピが「300g」で在庫が「1パック」だと、以前は「1パック使い切った」として減らしていた（600gのうち300gでも1パック減る）。
   いまは **AIに在庫の単位のまま書かせる**（`amount`「1/2」`unit`「パック」）。料理の分量は `refAmount`（「約300g」）に入れ、
@@ -260,7 +267,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 14 / migrate 7 / recipes 40 / household 10 / health 29 / stale-assets 6 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 14 / migrate 7 / recipes 47 / household 10 / health 29 / stale-assets 6 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 

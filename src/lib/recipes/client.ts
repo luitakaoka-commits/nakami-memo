@@ -11,6 +11,9 @@ export type SuggestResponse = {
   fallbackModel?: string;
   /** からだの記録から出した希望と、その理由（2026-09-28） */
   healthHints?: Array<{ key: string; reason: string; instruction: string }>;
+  /** 晩ごはんの献立セット（主菜・副菜・汁物）として出したとき true（2026-09-28） */
+  mealSet?: boolean;
+  setWarnings?: string[];
 };
 
 /** /api/recipes/suggest を呼ぶ。失敗したら画面に出せる日本語のメッセージで Error を投げる。 */
@@ -28,5 +31,5 @@ export async function requestSuggestions(user: User, options: SuggestOptions): P
   }
   const data = (await response.json().catch(() => ({}))) as Partial<SuggestResponse> & { error?: string };
   if (!response.ok) throw new Error(data.error || "レシピを提案できませんでした。");
-  return { recipes: data.recipes ?? [], uncoveredMustUse: data.uncoveredMustUse ?? [], assumedBasicTools: Boolean(data.assumedBasicTools), fallbackModel: String(data.fallbackModel ?? ""), healthHints: Array.isArray(data.healthHints) ? data.healthHints : [] };
+  return { recipes: data.recipes ?? [], uncoveredMustUse: data.uncoveredMustUse ?? [], assumedBasicTools: Boolean(data.assumedBasicTools), fallbackModel: String(data.fallbackModel ?? ""), healthHints: Array.isArray(data.healthHints) ? data.healthHints : [], mealSet: data.mealSet === true, setWarnings: Array.isArray(data.setWarnings) ? data.setWarnings : [] };
 }

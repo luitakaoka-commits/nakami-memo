@@ -8,6 +8,7 @@ import {
   clearCachedSuggestions, readCachedSuggestions, relativeTimeLabel, writeCachedSuggestions, SUGGESTION_CACHE_KEY,
   geminiErrorMessage, isRetryableGeminiStatus,
   DEFAULT_GEMINI_FALLBACK_MODELS, geminiErrorDetail, geminiModelChain, nextGeminiStep, pickFallbackModels, triedModelsSummary,
+  BREAKFAST_MINUTES, MEAL_SET_CATEGORIES, MEAL_TYPES, combineMealSet, defaultMealForHour, isMealSet,
 } from "./suggest-core.ts";
 import * as sharedCook from "../../../public/shared/cook-stock.js";
 import { readFileSync } from "node:fs";
@@ -66,7 +67,8 @@ t("器具は名前の無いものを落とし、知らない種類は「その�
 t("条件は安全な範囲にそろえ、在庫に無いIDは必ず使う食材から外す", () => {
   const o = normalizeOptions({ servings: 99, maxMinutes: "15", mustUseItemIds: ["egg", "ghost", "egg"], excludeIngredients: [" ピーマン ", "", 3] }, pantry);
   // useHealth は 2026-09-28 に足した項目（からだの記録を生かすか。指定が無ければ生かす）
-  eq(o, { servings: 2, maxMinutes: 15, mustUseItemIds: ["egg"], excludeIngredients: ["ピーマン"], useHealth: true }, "条件");
+  // meal も 2026-09-28 に足した項目（いつ食べるか。指定が無ければおまかせ）
+  eq(o, { servings: 2, maxMinutes: 15, mustUseItemIds: ["egg"], excludeIngredients: ["ピーマン"], useHealth: true, meal: "おまかせ" }, "条件");
 });
 
 t("AIへの指示に、4つの約束（必ず使う・器具・調味料・量）と在庫のIDが入る", () => {
@@ -424,6 +426,88 @@ t("エラーの文には必ず番号を入れる（画面の写真だけで原�
   });
   ok(geminiErrorMessage(503).includes("混み合って"), "503は混雑と分かる文");
   ok(geminiErrorMessage(400).includes("写真を送って"), "400は待っても直らないので連絡を頼む");
+});
+
+/* ---------- いつ食べるか・晩ごはんの献立セット（2026-09-28） ---------- */
+
+t("いつ食べるかの選択肢と、開いた時刻で最初に選んでおく場面", () => {
+  eq([...MEAL_TYPES], ["おまかせ", "朝ごはん", "昼ごはん", "晩ごはん", "おやつ・デザート", "お弁当・つくりおき"], "選択肢");
+  eq([4, 5, 9, 10, 14, 15, 23].map(defaultMealForHour), ["晩ごはん", "朝ごはん", "朝ごはん", "昼ごはん", "昼ごはん", "晩ごはん", "晩ごはん"], "時刻");
+  eq(BREAKFAST_MINUTES, 15, "朝ごはんは15分");
+  eq(normalizeOptions({ meal: "晩ごはん" }, pantry).meal, "晩ごはん", "選んだ場面");
+  eq(normalizeOptions({ meal: "夜食" }, pantry).meal, "おまかせ", "知らない場面はおまかせ");
+  eq(MEAL_TYPES.filter(isMealSet), ["晩ごはん"], "献立セットは晩ごはんだけ");
+});
+
+t("AIへの指示：場面ごとの条件が入り、おまかせなら今までどおり", () => {
+  const prompt = (meal, health = []) => buildPrompt(pantry, tools, normalizeOptions({ meal }, pantry), health);
+  ok(!prompt("おまかせ").includes("朝ごはん") && prompt("おまかせ").includes("似た料理を並べない"), "おまかせ");
+  ok(prompt("朝ごはん").includes("軽めで、手順と洗い物が少ない"), "朝");
+  ok(prompt("昼ごはん").includes("1皿で済む"), "昼");
+  ok(prompt("お弁当・つくりおき").includes("冷めてもおいしく"), "お弁当");
+  const dessert = prompt("おやつ・デザート");
+  ok(dessert.includes("category は お菓子") && dessert.includes("デザートに合うものだけ"), "デザート（肉や魚を無理に使わせない）");
+  ok(!dessert.includes("甘さ控えめ"), "からだの記録の希望が無ければ、甘さの話はしない");
+  ok(prompt("おやつ・デザート", ["", "【からだの記録からの希望】", "- 揚げ物・強い焼き色・甘い味付けを控え、蒸す・ゆでる・煮る料理を優先する"]).includes("甘さ控えめ・焼き色少なめ"), "AGEs の希望と食い違わない");
+});
+
+t("AIへの指示：晩ごはんは主菜・副菜・汁物の献立で、在庫は3品の合計で超えない", () => {
+  const prompt = buildPrompt(pantry, tools, normalizeOptions({ meal: "晩ごはん", maxMinutes: 45 }, pantry));
+  for (const phrase of ["主菜・副菜・汁物を1品ずつ", "味付けと調理法を変え", "合わせて45分ほど", "3品で使う量の合計", "献立のどれかで必ず使う"]) {
+    ok(prompt.includes(phrase), `「${phrase}」が無い`);
+  }
+  ok(!prompt.includes("似た料理を並べない"), "別々の3案の指示は出さない");
+  eq([...MEAL_SET_CATEGORIES], ["主菜", "副菜", "汁物"], "3品");
+});
+
+const dinner = normalizeOptions({ meal: "晩ごはん", mustUseItemIds: ["moyashi"] }, pantry);
+const dish = (title, category, ingredients) => ({ title, category, servings: 2, estMinutes: 15, ingredients, shoppingNeeded: [], steps: ["作る"], toolIds: [], usesItemIds: [] });
+const egg1 = { name: "卵", amount: "1", unit: "個", itemId: "egg", inStock: true };
+
+t("献立セット：主菜・副菜・汁物の順に並べ直し、献立だったことを返す", () => {
+  const result = sanitizeSuggestions({ recipes: [
+    dish("かきたま汁", "汁物", [egg1]),
+    dish("もやしナムル", "副菜", [{ name: "もやし", amount: "1", unit: "袋", itemId: "moyashi", inStock: true }]),
+    dish("オムレツ", "主菜", [egg1]),
+  ] }, pantry, tools, dinner);
+  eq(result.recipes.map((r) => r.category), ["主菜", "副菜", "汁物"], "並び");
+  eq(result.mealSet, true, "献立");
+  eq(result.setWarnings, [], "卵は1個ずつで合計2個＝在庫どおり");
+  eq(result.uncoveredMustUse, [], "もやしは副菜で使った");
+});
+
+t("献立セット：1品ずつなら足りても、3品合わせて在庫を超えたら注意。欠けた品も知らせる", () => {
+  const result = sanitizeSuggestions({ recipes: [
+    dish("オムレツ", "主菜", [{ ...egg1, amount: "2" }]),
+    dish("かきたま汁", "汁物", [egg1]),
+  ] }, pantry, tools, dinner);
+  eq(result.setWarnings, ["献立に副菜が入りませんでした", "献立全体で卵を3個使いますが、在庫は2個です"], "注意");
+  const single = sanitizeSuggestions({ recipes: [dish("大きなオムレツ", "主菜", [{ ...egg1, amount: "3" }]), dish("ナムル", "副菜", []), dish("汁", "汁物", [])] }, pantry, tools, dinner);
+  eq(single.setWarnings, [], "1品で超えている分はその料理の注意に出ているので、重ねて言わない");
+  ok(single.recipes[0].warnings.some((w) => w.includes("卵を3個")), "その料理の注意");
+});
+
+t("献立セット：「まとめて作った」は3品の材料を足し合わせて減らす", () => {
+  const recipes = sanitizeSuggestions({ recipes: [
+    dish("オムレツ", "主菜", [egg1]),
+    dish("もやしナムル", "副菜", [{ name: "もやし", amount: "1", unit: "袋", itemId: "moyashi", inStock: true }]),
+    dish("かきたま汁", "汁物", [egg1]),
+  ] }, pantry, tools, dinner).recipes;
+  const combined = combineMealSet(recipes);
+  eq(combined.title, "オムレツ・もやしナムル・かきたま汁", "題名");
+  const rows = defaultConsumption(combined, pantry);
+  eq(rows.map((r) => [r.itemId, r.use]), [["egg", 2], ["moyashi", 1]], "卵は2品分で2個");
+});
+
+t("献立セットだったことは、とっておいた提案にも残る（別々の3案のときは今までどおり）", () => {
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) };
+  const recipes = [dish("オムレツ", "主菜", [egg1])];
+  writeCachedSuggestions(storage, "u1", { recipes, uncoveredMustUse: [], mealSet: true, setWarnings: ["献立に副菜・汁物が入りませんでした"] }, NOW);
+  const cached = readCachedSuggestions(storage, "u1", NOW + 1000);
+  eq([cached.result.mealSet, cached.result.setWarnings], [true, ["献立に副菜・汁物が入りませんでした"]], "献立");
+  writeCachedSuggestions(storage, "u1", { recipes, uncoveredMustUse: [] }, NOW);
+  eq(Object.keys(readCachedSuggestions(storage, "u1", NOW + 1000).result), ["recipes", "uncoveredMustUse"], "別々の3案");
 });
 
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);

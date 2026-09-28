@@ -1444,6 +1444,19 @@
   color: #fff;
 }
 
+/* レシピ提案の「いつ食べるか」。選んでいるものを塗る（2026-09-28） */
+.ui-chip[aria-pressed="true"],
+.ui-chip[aria-pressed="true"]:hover {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #fff;
+}
+
+.ui-meal-set-head {
+  border-left: 4px solid var(--brand);
+  padding-left: 10px;
+}
+
 /* ===== 同居人と共有（2026-09-28） ===== */
 .ui-mobile-actions {
   display: flex;

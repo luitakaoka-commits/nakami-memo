@@ -35,6 +35,30 @@ export const MUST_USE_WITHIN_DAYS = 3;
 /** 1回に提案させる数。多いと待ち時間が延び、選ぶのも大変になる。 */
 export const MAX_SUGGESTIONS = 3;
 
+/**
+ * いつ食べるか（2026-09-28 ユーザー要望）。1つだけ選ぶ。
+ * 晩ごはんだけは、別々の3案ではなく **主菜・副菜・汁物を1品ずつの献立セット** で出す（ユーザー希望）。
+ */
+export const MEAL_TYPES = ["おまかせ", "朝ごはん", "昼ごはん", "晩ごはん", "おやつ・デザート", "お弁当・つくりおき"] as const;
+export type MealType = (typeof MEAL_TYPES)[number];
+
+/** 献立セットの3品（この順に並べる） */
+export const MEAL_SET_CATEGORIES = ["主菜", "副菜", "汁物"] as const;
+
+/** 朝ごはんを選んだときの調理時間（画面で選び直せる） */
+export const BREAKFAST_MINUTES = 15;
+
+export function isMealSet(meal: MealType): boolean {
+  return meal === "晩ごはん";
+}
+
+/** 画面を開いた時刻で、最初に選んでおく場面。5〜9時は朝、10〜14時は昼、それ以外は晩 */
+export function defaultMealForHour(hour: number): MealType {
+  if (hour >= 5 && hour < 10) return "朝ごはん";
+  if (hour >= 10 && hour < 15) return "昼ごはん";
+  return "晩ごはん";
+}
+
 export type PantryItem = {
   id: string;
   name: string;
@@ -60,6 +84,8 @@ export type SuggestOptions = {
   excludeIngredients: string[];
   /** からだの記録（Samsung Health）をレシピに生かすか。既定は生かす（2026-09-28） */
   useHealth: boolean;
+  /** いつ食べるか。既定は「おまかせ」（2026-09-28） */
+  meal: MealType;
 };
 
 export type SuggestedIngredient = {
@@ -96,6 +122,10 @@ export type SuggestResult = {
   recipes: RecipeSuggestion[];
   /** 必ず使うはずだったのに、どのレシピにも入らなかった食材の名前。 */
   uncoveredMustUse: string[];
+  /** 晩ごはんの献立セット（主菜・副菜・汁物）として出したとき true。別々の3案のときは項目ごと無い */
+  mealSet?: boolean;
+  /** 献立セット全体での注意（3品合わせると在庫を超える、汁物が入らなかった、など） */
+  setWarnings?: string[];
 };
 
 /* ---------- 在庫と器具を、提案に使う形へ ---------- */
@@ -182,7 +212,46 @@ export function normalizeOptions(raw: Partial<Record<keyof SuggestOptions, unkno
     mustUseItemIds: [...new Set(mustUse)],
     excludeIngredients: exclude.map((name) => name.slice(0, 30)),
     useHealth: raw.useHealth !== false,
+    meal: (MEAL_TYPES as readonly string[]).includes(text(raw.meal)) ? (text(raw.meal) as MealType) : "おまかせ",
   };
+}
+
+/** 場面ごとの、AIへの条件 */
+function mealLines(options: SuggestOptions, hasHealthLines: boolean): string[] {
+  switch (options.meal) {
+    case "朝ごはん":
+      return ["- 朝ごはん。軽めで、手順と洗い物が少ないもの"];
+    case "昼ごはん":
+      return ["- 昼ごはん。丼・麺・チャーハンなど、1皿で済むもの"];
+    case "晩ごはん":
+      return ["- 晩ごはんの献立（主菜・副菜・汁物を1品ずつ）"];
+    case "おやつ・デザート":
+      return [
+        "- おやつ・デザート。甘いもの（果物・乳製品・卵・いもなど、在庫から作れるもの）。category は お菓子",
+        ...(hasHealthLines ? ["- からだの記録の希望に「甘い味付けを控え」とあるときは、甘さ控えめ・焼き色少なめにする"] : []),
+      ];
+    case "お弁当・つくりおき":
+      return ["- お弁当・つくりおき。冷めてもおいしく、汁気が少なく、冷蔵で2〜3日もつもの"];
+    default:
+      return [];
+  }
+}
+
+/** 何品をどう出すか・必ず使う食材の扱い（献立セットかどうか、デザートかどうかで変わる） */
+function shapeLines(options: SuggestOptions): string[] {
+  if (isMealSet(options.meal)) {
+    return [
+      `- 主菜・副菜・汁物を1品ずつ、合わせて1つの献立にする（レシピは${MAX_SUGGESTIONS}つ。category はそれぞれ ${MEAL_SET_CATEGORIES.join("・")}）。`,
+      "- 3品で味付けと調理法を変え、同じ食材ばかりにしない。",
+      `- 3品を並行して作り、合わせて${options.maxMinutes}分ほどで食卓に出せるようにする。`,
+      "- 在庫の量は、3品で使う量の合計で超えない。",
+      "- 必ず使う食材は、献立のどれかで必ず使う（指定がある場合）。",
+    ];
+  }
+  const mustUse = options.meal === "おやつ・デザート"
+    ? "- 必ず使う食材は、デザートに合うものだけ使う（肉・魚など合わないものは無理に使わない）。"
+    : "- 必ず使う食材は、どれかのレシピで必ず使う。各レシピは必ず使う食材を1つ以上含める（指定がある場合）。";
+  return [`- レシピは${MAX_SUGGESTIONS}つ。似た料理を並べない。`, mustUse];
 }
 
 /* ---------- AI への指示 ---------- */
@@ -223,12 +292,12 @@ export function buildPrompt(pantry: PantryItem[], tools: KitchenTool[], options:
     "【条件】",
     `- ${options.servings}人分`,
     `- 調理時間は${options.maxMinutes}分以内`,
+    ...mealLines(options, healthLines.length > 0),
     ...(options.excludeIngredients.length ? [`- 次の食材は使わない: ${options.excludeIngredients.join("、")}`] : []),
     ...healthLines,
     "",
     "【必ず守ること】",
-    `- レシピは${MAX_SUGGESTIONS}つ。似た料理を並べない。`,
-    "- 必ず使う食材は、どれかのレシピで必ず使う。各レシピは必ず使う食材を1つ以上含める（指定がある場合）。",
+    ...shapeLines(options),
     "- 使える調理器具に無い器具（オーブンなど）が要る料理は出さない。使う器具の id を toolIds に入れる。",
     "- 在庫の量を超えて使わない。卵が2個しかなければ3個以上使わない。",
     "- 量は在庫と同じ単位で書く（amount と unit）。在庫が mL なら mL、g なら g。",
@@ -443,7 +512,57 @@ export function sanitizeSuggestions(raw: unknown, pantry: PantryItem[], tools: K
     .map((id) => byId.get(id)?.name ?? "")
     .filter(Boolean);
 
-  return { recipes, uncoveredMustUse };
+  if (!isMealSet(options.meal)) return { recipes, uncoveredMustUse };
+
+  // 献立セット：主菜・副菜・汁物の順に並べ、3品を合わせて見たときの注意を出す
+  const order = (recipe: RecipeSuggestion) => {
+    const index = (MEAL_SET_CATEGORIES as readonly string[]).indexOf(recipe.category);
+    return index < 0 ? MEAL_SET_CATEGORIES.length : index;
+  };
+  const ordered = recipes.map((recipe, index) => ({ recipe, index }))
+    .sort((a, b) => order(a.recipe) - order(b.recipe) || a.index - b.index)
+    .map(({ recipe }) => recipe);
+  const setWarnings: string[] = [];
+  if (ordered.length) {
+    const missing = MEAL_SET_CATEGORIES.filter((category) => !ordered.some((recipe) => recipe.category === category));
+    if (missing.length) setWarnings.push(`献立に${missing.join("・")}が入りませんでした`);
+  }
+  // 1品ずつなら足りても、3品合わせると在庫を超えることがある（卵2個を主菜と汁物で1個ずつ、なら足りる）
+  const totals = new Map<string, number>();
+  for (const recipe of ordered) {
+    for (const ing of recipe.ingredients) {
+      const stock = ing.itemId ? byId.get(ing.itemId) : undefined;
+      const needed = stock?.unit ? amountInStockUnit(ing.amount, ing.unit, stock.unit) : null;
+      if (stock && needed !== null) totals.set(stock.id, (totals.get(stock.id) ?? 0) + needed);
+    }
+  }
+  totals.forEach((needed, id) => {
+    const stock = byId.get(id)!;
+    const perRecipeTooMuch = ordered.some((recipe) => recipe.warnings.some((w) => w.startsWith(`${stock.name}を`)));
+    if (needed > stock.quantity && !perRecipeTooMuch) {
+      setWarnings.push(`献立全体で${stock.name}を${Math.round(needed * 100) / 100}${stock.unit}使いますが、在庫は${stock.quantity}${stock.unit}です`);
+    }
+  });
+  return { recipes: ordered, uncoveredMustUse, mealSet: true, setWarnings };
+}
+
+/**
+ * 献立セットの3品を、「まとめて作った」ための1つのレシピにする。
+ * 材料をつなげるだけで、同じ在庫の量は defaultConsumption が足し合わせる
+ */
+export function combineMealSet(recipes: RecipeSuggestion[]): RecipeSuggestion {
+  return {
+    title: recipes.map((recipe) => recipe.title).join("・"),
+    category: "その他",
+    servings: recipes[0]?.servings ?? 2,
+    estMinutes: Math.max(0, ...recipes.map((recipe) => recipe.estMinutes)),
+    ingredients: recipes.flatMap((recipe) => recipe.ingredients),
+    shoppingNeeded: [...new Set(recipes.flatMap((recipe) => recipe.shoppingNeeded))],
+    steps: recipes.flatMap((recipe) => recipe.steps),
+    toolIds: [...new Set(recipes.flatMap((recipe) => recipe.toolIds))],
+    usesItemIds: [...new Set(recipes.flatMap((recipe) => recipe.usesItemIds))],
+    warnings: [],
+  };
 }
 
 /* ---------- Firestore REST の返答を読む ---------- */
@@ -530,7 +649,14 @@ export function readCachedSuggestions(storage: MiniStorage, uid: string, nowMs: 
   return {
     uid,
     savedAt: cached.savedAt,
-    result: { recipes, uncoveredMustUse: Array.isArray(cached.result?.uncoveredMustUse) ? cached.result.uncoveredMustUse : [] },
+    result: {
+      recipes,
+      uncoveredMustUse: Array.isArray(cached.result?.uncoveredMustUse) ? cached.result.uncoveredMustUse : [],
+      // 献立セットだったことも覚えておく（画面を移って戻っても、献立としてまとめて出す）
+      ...(cached.result?.mealSet === true
+        ? { mealSet: true, setWarnings: Array.isArray(cached.result.setWarnings) ? cached.result.setWarnings : [] }
+        : {}),
+    },
   };
 }
 
