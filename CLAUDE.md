@@ -246,6 +246,15 @@ CSS・JS が読めなかったら **1回だけ** 読み込み直す（1分に1�
 **アプリの JS の中に置かないこと**（前の版の JS も消えているので動かない）。本物のブラウザでも確かめた。
 お金管理とつくりおきノートは CSS の名前が固定（`styles.css?v=` など）なので、この事故は起きない。
 
+**インストールしたアプリでログインすると「missing initial state」と出て止まった（2026-09-28）。**
+つくりおきノートはポップアップが使えないとリダイレクト方式に切り替えるが、ログインの受け口（authDomain）が
+別のサイト（`cash-manege.firebaseapp.com`）だったので、Chrome の保存領域の仕切りで途中の情報が消えた。
+Firebase 公式の対処（redirect-best-practices の Option 3）どおり、`next.config.ts` の rewrites で `/__/auth/…` と
+`/__/firebase/…` を cash-manege.firebaseapp.com へ中継し、**3アプリの authDomain を `nakami-memo.vercel.app` にした**
+（`rules.test.mjs` が揃っているか見る）。**Google Cloud の OAuth クライアントに
+`https://nakami-memo.vercel.app/__/auth/handler` を承認済みリダイレクト URI として足しておくこと**（無いと redirect_uri_mismatch）。
+authDomain を cash-manege.firebaseapp.com に戻さないこと。
+
 **ルールはデプロイしないと効かない。** リポジトリの `firestore.rules` はただのファイルです。
 Firebase Console で公開するまで反映されません。レシートが保存できなかった原因はこれでした。
 
@@ -267,7 +276,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 14 / migrate 7 / recipes 47 / household 10 / health 29 / stale-assets 6 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 15 / migrate 7 / recipes 47 / household 10 / health 29 / stale-assets 6 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 

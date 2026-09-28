@@ -57,10 +57,33 @@ const staticAppRedirects = [
   { source: "/migrate", destination: "/migrate/index.html", permanent: false },
 ];
 
+/**
+ * Google ログインの受け口（/__/auth/…）を、このサイトから Firebase（cash-manege.firebaseapp.com）へ中継する（2026-09-28）。
+ *
+ * 以前は authDomain が cash-manege.firebaseapp.com で、ログインの途中だけ別のサイトを通っていた。
+ * Chrome などは別のサイトの保存領域を仕切るので、インストールしたアプリからのログイン（リダイレクト方式）で
+ * 「Unable to process request due to missing initial state」と出て止まった（ユーザーの実機、つくりおきノート）。
+ * Firebase 公式の対処（redirect-best-practices の Option 3）どおり、受け口を同じサイトに置き、authDomain を
+ * nakami-memo.vercel.app にした。3アプリの authDomain は public/shared/rules.test.mjs が揃っているか確かめる。
+ *
+ * **Google Cloud の OAuth クライアントに https://nakami-memo.vercel.app/__/auth/handler を
+ * 承認済みのリダイレクト URI として足しておかないと、Google ログインが redirect_uri_mismatch で失敗する。**
+ * ここは rewrite（中継）でよい。受け口のページは /__/auth/ の下の相対パスしか読まないので、上の redirect の事故は起きない。
+ */
+const FIREBASE_AUTH_PROXY = "https://cash-manege.firebaseapp.com";
+
+const authProxyRewrites = [
+  { source: "/__/auth/:path*", destination: `${FIREBASE_AUTH_PROXY}/__/auth/:path*` },
+  { source: "/__/firebase/:path*", destination: `${FIREBASE_AUTH_PROXY}/__/firebase/:path*` },
+];
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   async redirects() {
     return staticAppRedirects;
+  },
+  async rewrites() {
+    return authProxyRewrites;
   },
   images: {
     remotePatterns: [

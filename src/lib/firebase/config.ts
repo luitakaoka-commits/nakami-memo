@@ -13,7 +13,7 @@
  */
 export const firebaseConfig = {
   apiKey: "AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A",
-  authDomain: "cash-manege.firebaseapp.com",
+  authDomain: "nakami-memo.vercel.app",
   projectId: "cash-manege",
   storageBucket: "cash-manege.firebasestorage.app",
   messagingSenderId: "529145553530",

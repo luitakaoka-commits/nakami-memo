@@ -109,6 +109,21 @@ t("3アプリが同じ Firebase プロジェクト（cash-manege）の同じ設�
   }
 });
 
+t("3アプリのログインの受け口（authDomain）が自分のサイトで、そこから Firebase へ中継している（2026-09-28）", () => {
+  // 別のサイト（cash-manege.firebaseapp.com）のままだと、インストールしたアプリのログインが
+  // 「missing initial state」で止まる。1つでも戻すと、そのアプリだけ止まる
+  const pick = (text) => (text.match(/authDomain:\s*["']([^"']+)["']/) || [])[1];
+  const apps = {
+    "お金管理（public/money/firebase-sync.js）": read("public", "money", "firebase-sync.js"),
+    "つくりおきノート（public/recipe/firebase-config.js）": read("public", "recipe", "firebase-config.js"),
+    "なかみメモ（src/lib/firebase/config.ts）": read("src", "lib", "firebase", "config.ts"),
+  };
+  for (const [label, text] of Object.entries(apps)) ok(pick(text) === "nakami-memo.vercel.app", `${label} の authDomain が ${pick(text)}`);
+  const config = read("next.config.ts");
+  ok(config.includes('FIREBASE_AUTH_PROXY = "https://cash-manege.firebaseapp.com"'), "中継先が cash-manege ではない");
+  for (const source of ["/__/auth/:path*", "/__/firebase/:path*"]) ok(config.includes(`source: "${source}"`), `${source} の中継が無い`);
+});
+
 t("なかみメモは Firebase の接続先を環境変数から読まない（Vercel に古い値が残っているため）", () => {
   const client = read("src", "lib", "firebase", "client.ts");
   ok(!client.includes("process.env"), "client.ts が環境変数を読んでいる");
