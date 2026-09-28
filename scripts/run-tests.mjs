@@ -42,6 +42,13 @@ const SUITES = [
     file: "household-core.test.mjs",
     nodeArgs: ["--experimental-strip-types", "--no-warnings"],
   },
+  // 新しい版を出したあと、前の版のページが CSS なしで出たら1回だけ読み込み直す（2026-09-28）
+  {
+    name: "stale-assets",
+    cwd: path.join(ROOT, "src", "lib", "utils"),
+    file: "stale-asset-recovery.test.mjs",
+    nodeArgs: ["--experimental-strip-types", "--no-warnings"],
+  },
   // からだの記録（Samsung Health の取り込みとレシピ提案への生かし方。2026-09-28）
   {
     name: "health",

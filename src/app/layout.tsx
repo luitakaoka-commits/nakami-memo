@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./tokens.css";
 import "./globals.css";
 import { Providers } from "@/components/layout/Providers";
+import { STALE_ASSET_RECOVERY } from "@/lib/utils/stale-asset-recovery";
 
 export const metadata: Metadata = {
   title: {
@@ -30,6 +31,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ja">
+      <head>
+        {/* 新しい版を出したあと、前の版のページが CSS なしで出たら1回だけ読み込み直す（2026-09-28） */}
+        <script dangerouslySetInnerHTML={{ __html: STALE_ASSET_RECOVERY }} />
+      </head>
       <body>
         <Providers>{children}</Providers>
       </body>

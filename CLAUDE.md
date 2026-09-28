@@ -224,6 +224,15 @@ Google の説明は「This model is currently experiencing high demand.」（利
 写真をもらえば原因が分かる。決め方は `suggest-core.ts` の `geminiModelChain` / `nextGeminiStep` /
 `pickFallbackModels` / `triedModelsSummary` / `geminiErrorDetail` / `geminiErrorMessage`。
 
+**新しい版を出したあと、なかみメモが青いリンクだけの画面になった（2026-09-28）。** Vercel は新しい版を出すと、
+前の版の CSS・JS（`/_next/static/…`、名前に中身の指紋が付く）を消す（本番で確かめた：前の版の CSS は 404）。
+前の版のときに開いていたページを Chrome がタブの復元などで出し直すと、消えた CSS を読みに行って飾りが全部外れる。
+本番のページ自体は正常だった（全ページの CSS が 200）。再読み込みで直るが、本人にさせない。
+`src/app/layout.tsx` の head に `STALE_ASSET_RECOVERY`（`src/lib/utils/stale-asset-recovery.ts`）を直接書き込み、
+CSS・JS が読めなかったら **1回だけ** 読み込み直す（1分に1回まで。直らないときに止まらなくならないように）。
+**アプリの JS の中に置かないこと**（前の版の JS も消えているので動かない）。本物のブラウザでも確かめた。
+お金管理とつくりおきノートは CSS の名前が固定（`styles.css?v=` など）なので、この事故は起きない。
+
 **ルールはデプロイしないと効かない。** リポジトリの `firestore.rules` はただのファイルです。
 Firebase Console で公開するまで反映されません。レシートが保存できなかった原因はこれでした。
 
@@ -245,7 +254,7 @@ Firebase Console で公開するまで反映されません。レシートが保
 ## 検証のやり方（毎回これを通す）
 
 ```bash
-npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 14 / migrate 7 / recipes 40 / household 10 / health 21 / inventory-outcome 22
+npm test                 # money 227 / recipe 16 / recipe-stock 22 / recipe-pantry 20 / app-switcher 26 / install 10 / rules 14 / migrate 7 / recipes 40 / household 10 / health 21 / stale-assets 6 / inventory-outcome 22
 npm run test:ui          # お金管理のブラウザ実測 31項目（初回だけ npx playwright install chromium）
 npm run typecheck && npm run lint && npm run build
 
