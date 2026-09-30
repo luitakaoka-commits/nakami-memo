@@ -989,7 +989,7 @@
         category: item.event.category || ''
       }));
 
-    const cardBills = aggregateCardBills(realTransactions, input.cards || [], today)
+    const cardBills = aggregateCardBills(realTransactions, input.cards || [], today, holidayOptions)
       .filter(bill => bill.dueDate <= endDate);
 
     return {
@@ -1331,10 +1331,12 @@
    * 12. 既存API（互換維持）
    * ========================================================== */
 
-  function aggregateCardBills(transactions = [], cards = [], fromDate = '') {
+  function aggregateCardBills(transactions = [], cards = [], fromDate = '', options = {}) {
     const cardsById = new Map(cards.map(card => [card.id, card]));
     const groups = new Map();
-    transactions.forEach(transaction => {
+    // 請求総額があるサイクルの明細は内数。ホームの請求見込みも主計算と同じ採用行だけを使う。
+    const adopted = groupCardCharges(transactions, cards, options).flatMap(group => group.adopted);
+    adopted.forEach(transaction => {
       if (transaction.kind !== 'payment' || transaction.status !== 'planned' || !transaction.cardId || !transaction.dueDate) return;
       if (fromDate && transaction.dueDate < fromDate) return;
       const key = `${transaction.cardId}:${transaction.dueDate}`;
@@ -1396,20 +1398,21 @@
     if (entryTypeOf(statement) !== STATEMENT) return [];
 
     const absorbed = (transactions || []).filter(item => item && item.absorbedBy === statement.id);
-    if (absorbed.length) return sortByUsageDesc(absorbed);
 
     const card = (cards || []).find(item => item.id === statement.cardId) || null;
     const cycle = cardBillingCycleOf(statement, card, options);
-    if (!cycle) return [];
+    if (!cycle) return sortByUsageDesc(absorbed);
     const siblings = (transactions || []).filter(item => {
       if (!item || item.id === statement.id) return false;
       if (item.kind !== 'payment' || item.cardId !== statement.cardId) return false;
       if (entryTypeOf(item) !== ITEMIZED) return false;
       if (item.status === 'cancelled') return false;
+      if (item.absorbedBy === statement.id) return false;
       if (item.absorbedBy && item.absorbedBy !== statement.id) return false;
       return cardBillingCycleOf(item, card, options) === cycle;
     });
-    return sortByUsageDesc(siblings);
+    // 総額を確定した後で届いた明細も、既に吸収した内訳と一緒に返す。
+    return sortByUsageDesc([...absorbed, ...siblings]);
   }
 
   /** 記録の集計で「支出」に数える取引か */

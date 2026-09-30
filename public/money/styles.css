@@ -382,6 +382,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .floating-add { position: fixed; right: max(1.1rem, calc((100vw - 36rem) / 2 + 1rem)); bottom: calc(5.5rem + env(safe-area-inset-bottom)); z-index: 45; display: grid; place-items: center; width: 3.65rem; height: 3.65rem; border: 1px solid rgba(255, 255, 255, .22); border-radius: 50%; background: linear-gradient(180deg, #ff5b51, var(--red)); color: white; box-shadow: 0 16px 30px rgba(150, 29, 26, .38), 0 1px 0 rgba(255, 255, 255, .35) inset; transition: transform 120ms var(--spring), box-shadow 180ms ease; }
 .floating-add:hover { transform: translateY(-2px) scale(1.02); }
 .floating-add:active { transform: scale(.88); box-shadow: 0 5px 12px rgba(150, 29, 26, .3); transition-duration: 70ms; }
+@media (max-width: 699px) { .plan-detail-list { margin-bottom: 6rem; } }
 
 /* Sheets and dialogs */
 .add-menu-backdrop, .modal-backdrop { position: fixed; inset: 0; z-index: 70; display: grid; align-items: end; justify-items: center; padding-top: env(safe-area-inset-top); background: rgba(0, 10, 8, .46); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); animation: scrim-in 200ms ease-out; }

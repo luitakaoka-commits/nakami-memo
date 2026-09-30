@@ -432,6 +432,41 @@ const closeModals = page => page.evaluate(() => {
     assert(await page.locator('.detail-panel').count() === 0, 'もう一度タップしても閉じない');
   });
 
+  await record('plan_details_by_card', async () => {
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      const state = api.getState();
+      state.cards.push({ ...state.cards.find(card => card.id === 'c1'), id: 'c2', name: '予備カード' });
+      state.transactions.push({ ...state.transactions.find(item => item.id === 'dx-old'), id: 'dx-other', cardId: 'c2', memo: '別カードの利用' });
+      api.setPage('plans');
+    });
+    const names = () => page.locator('#page-container .list-row');
+    assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '「すべて」に明細が混ざっている');
+    assert(await names().filter({ hasText: 'セブン' }).count() === 0, '「すべて」に新しい明細が混ざっている');
+    await page.click('[data-plan-filter="payment"]');
+    assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '「支払い」に明細が混ざっている');
+    await page.click('[data-plan-filter="details"]');
+    assert(await page.locator('[data-plan-detail-card="c1"]').count() === 1, '1枚目のカードが選べない');
+    assert(await page.locator('[data-plan-detail-card="c2"]').count() === 1, '2枚目のカードが選べない');
+    assert(await names().filter({ hasText: 'セブン' }).count() === 1, '1枚目の明細が見えない');
+    assert(await names().filter({ hasText: '別カードの利用' }).count() === 0, '別カードの明細が混ざっている');
+    await page.click('[data-plan-detail-card="c2"]');
+    assert(await names().filter({ hasText: '別カードの利用' }).count() === 1, '2枚目の明細が見えない');
+    assert(await names().filter({ hasText: 'セブン' }).count() === 0, '1枚目の明細が混ざっている');
+    await page.click('[data-plan-detail-card="c1"]');
+    await page.click('[data-action="settle-event"][data-id="dx-old"]');
+    const blockedStatus = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'dx-old').status);
+    assert(blockedStatus === 'planned', '請求総額に含む明細を個別に確定できてしまう');
+    await closeModals(page);
+    await page.evaluate(() => {
+      const state = window.__YORYOKU__.getState();
+      state.cards = state.cards.filter(card => card.id !== 'c2');
+      state.transactions = state.transactions.filter(item => item.id !== 'dx-other');
+      window.__YORYOKU__.setPage('plans');
+    });
+    await page.click('[data-plan-filter="all"]');
+  });
+
   await record('statement_absorbs_details', async () => {
     await closeModals(page);
     const before = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').currentBalance);
@@ -470,6 +505,40 @@ const closeModals = page => page.evaluate(() => {
     await page.waitForSelector('#page-container .detail-panel');
     const names = await page.evaluate(() => [...document.querySelectorAll('#page-container .detail-panel .detail-name')].map(node => node.textContent.trim()));
     assert(names.length === 2 && names[0].includes('セブン'), `記録の明細が新しい順に出ていない: ${JSON.stringify(names)}`);
+  });
+
+  await record('late_detail_after_settlement', async () => {
+    await closeModals(page);
+    const before = await page.evaluate(() => ({
+      spendable: window.__YORYOKU__.spendableAmount().total,
+      cashflow: window.__YORYOKU__.cashflowCheck().minBalance
+    }));
+    await page.evaluate(() => window.__YORYOKU__.setImportCandidates([
+      { id: 'late-candidate', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-05T02:00:00.000Z', usedDate: '2026-09-05', amount: 321, cardHint: 'SMBC', merchant: '後から届いた店', type: 'purchase', status: 'pending', fingerprint: 'late-fp', note: '' }
+    ]));
+    await page.evaluate(async () => {
+      await window.__YORYOKU__.acceptCandidate('late-candidate');
+      await window.__YORYOKU__.acceptCandidate('late-candidate');
+    });
+    const after = await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      const list = api.getState().transactions.filter(item => item.id === 'mail_late-candidate');
+      const statement = api.getState().transactions.find(item => item.id === 'dx-st');
+      const raw = JSON.parse(JSON.stringify(api.getState()));
+      raw.transactions.push({ ...list[0], id: 'late-from-cloud', status: 'planned', absorbedBy: '' });
+      const normalized = api.normalizeState(raw);
+      return {
+        count: list.length, status: list[0]?.status, absorbedBy: list[0]?.absorbedBy,
+        spendable: api.spendableAmount().total, cashflow: api.cashflowCheck().minBalance,
+        detailCount: window.FinanceEngine.detailsOfStatement(statement, api.getState().transactions, api.getState().cards).length,
+        cloudDetailStatus: normalized.transactions.find(item => item.id === 'late-from-cloud')?.status
+      };
+    });
+    assert(after.count === 1, `同じ候補が複数回取り込まれた: ${after.count}`);
+    assert(after.status === 'absorbed' && after.absorbedBy === 'dx-st', `確定済みの総額へ吸収されていない: ${JSON.stringify(after)}`);
+    assert(after.spendable === before.spendable && after.cashflow === before.cashflow, `確定済みの総額と明細が重複した: ${JSON.stringify({ before, after })}`);
+    assert(after.detailCount === 3, '後から届いた明細が総額の内訳から見えない');
+    assert(after.cloudDetailStatus === 'absorbed', 'クラウドから再読込した遅着の明細が再計上される');
   });
 
   await record('statement_release_on_unsettle', async () => {

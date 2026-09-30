@@ -135,6 +135,14 @@ test('12. 開始日が今日なら、今使える金額と同じ結果になる'
   equal(future.isFuture, false, '将来扱いにしない');
 });
 
+test('13. ホームのカード請求見込みも総額と明細を重複させない', () => {
+  const bills = engine.aggregateCardBills([STATEMENT_AUG, ITEM_AUG_A, ITEM_AUG_B, ITEM_SEP], [CARD], TODAY);
+  equal(bills.length, 2, '8月分と9月分');
+  equal(bills[0].total, 94899, '8月分は請求総額だけ');
+  equal(bills[0].count, 1, '内数の明細は件数からも外す');
+  equal(bills[1].total, 500, '次の請求期間の明細は残す');
+});
+
 if (!failures.length) { console.log(JSON.stringify({ suite: 'card-netting', total, passed: total, failed: 0 })); process.exit(0); }
 console.log(JSON.stringify({ suite: 'card-netting', total, passed: total - failures.length, failed: failures.length, failures }, null, 2));
 process.exit(1);

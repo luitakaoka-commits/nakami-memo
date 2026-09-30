@@ -86,6 +86,14 @@ test('確定済みの総額からは、吸収済みの明細が取り出せる',
   equal(details.map(item => item.id).join(','), 'ib,ia', '吸収済みだけを新しい順で返す');
 });
 
+test('総額の確定後に届いた明細も、既存の内訳と一緒に取り出せる', () => {
+  const settled = { ...STATEMENT, status: 'settled' };
+  const absorbed = { ...ITEM_A, status: 'absorbed', absorbedBy: 'st' };
+  const late = { ...ITEM_B, status: 'planned' };
+  const details = engine.detailsOfStatement(settled, [settled, absorbed, late], [CARD]);
+  equal(details.map(item => item.id).join(','), 'ib,ia', '遅れて届いた明細も新しい順に出す');
+});
+
 test('明細の行からは何も展開しない', () => {
   equal(engine.detailsOfStatement(ITEM_A, [STATEMENT, ITEM_A, ITEM_B], [CARD]).length, 0, '明細は展開対象外');
 });

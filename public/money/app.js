@@ -52,6 +52,7 @@
   let syncStatus = 'saved';
   let currentPage = 'home';
   let planFilter = 'all';
+  let planDetailCardFilter = '';
   let recordFilter = 'settled';
   // 記録ページの集計期間。'month' は月単位、'custom' はユーザー指定の期間。
   let recordRangeMode = 'month';
@@ -213,11 +214,11 @@
   }
 
   /**
-   * v6より前に「請求総額を確定したのに、同じ請求サイクルの明細が未確定のまま残っている」
-   * 状態を修正する。放置すると、その明細が二重に差し引かれてしまう。
+   * 確定済みの請求総額と同じサイクルにある未確定明細を吸収する。
+   * 古いデータの移行時だけでなく、総額確定後にメールが届いた場合も必要。
    * 取引は消さず、吸収済みに変えるだけなので、総額をタップすれば内訳として見られる。
    */
-  function absorbLegacyStatementDetails(migrated) {
+  function absorbSettledStatementDetails(migrated) {
     if (!Array.isArray(migrated?.transactions)) return 0;
     const absorbed = migrated.transactions
       .filter(item => item.status === 'settled' && item.entryType === 'statement' && item.cardId)
@@ -247,7 +248,7 @@
     if (!raw || typeof raw !== 'object') return emptyState();
     if (Array.isArray(raw.accounts) && Array.isArray(raw.transactions)) {
       const base = emptyState();
-      return {
+      const normalized = {
         ...base,
         ...raw,
         schemaVersion: SCHEMA_VERSION,
@@ -304,6 +305,8 @@
         })),
         recurringPlans: Array.isArray(raw.recurringPlans) ? raw.recurringPlans : []
       };
+      absorbSettledStatementDetails(normalized);
+      return normalized;
     }
 
     // 旧アプリのJSONエクスポートを読み込めるようにする。
@@ -376,7 +379,6 @@
       snapshotBeforeMigration(raw);
       const migrated = normalizeState(raw);
       verifyMigration(raw, migrated);
-      if (Number(raw.schemaVersion || 0) < 6) absorbLegacyStatementDetails(migrated);
       return migrated;
     } catch (error) {
       console.warn('保存データを読み込めませんでした', error);
@@ -480,19 +482,25 @@
   }
   function formatTransactionAmount(transaction) { return formatFlowAmount(transaction.amount, transactionDirection(transaction)); }
 
+  /** 請求総額に含まれるカード明細を除いた、実際に計算対象となる未確定取引。 */
+  function effectivePlannedTransactions() {
+    const suppressed = new Set(finance.groupCardCharges(state.transactions, state.cards, holidayOptions())
+      .flatMap(group => group.suppressed.map(item => item.id)));
+    return state.transactions.filter(item => item.status === 'planned'
+      && item.affectsForecast !== false && !suppressed.has(item.id));
+  }
+
   /** 期限までに基準口座から出ていく予定額。renderAccounts の「予定」表示に使う。 */
   function pendingExp(accountId) {
     const deadline = getNextDeadline();
-    return state.transactions
-      .filter(transaction => transaction.status === 'planned'
-        && transaction.sourceAccountId === accountId
+    return effectivePlannedTransactions()
+      .filter(transaction => transaction.sourceAccountId === accountId
         && transaction.dueDate >= today()
         && transaction.dueDate <= deadline
         && transaction.kind !== 'income'
         && transaction.kind !== 'saving'
         && transaction.kind !== 'nisa'
-        && (transaction.kind !== 'transfer' || isExternalTransfer(transaction))
-        && transaction.affectsForecast !== false)
+        && (transaction.kind !== 'transfer' || isExternalTransfer(transaction)))
       .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
   }
 
@@ -626,7 +634,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=31" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=32" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -870,8 +878,9 @@
     const salaryRecord = salaryRecordState(salary.paymentMonth, salary);
     const wageConfigured = Number(state.settings.wage.hourlyRate || 0) > 0;
 
-    const upcoming = sortedTransactions(state.transactions.filter(item => item.status === 'planned' && item.dueDate >= today())).slice(0, 4);
-    const cardBillGroups = finance.aggregateCardBills(state.transactions, state.cards, today());
+    const upcoming = sortedTransactions(state.transactions.filter(item => item.status === 'planned'
+      && item.entryType !== 'itemized' && item.dueDate >= today())).slice(0, 4);
+    const cardBillGroups = finance.aggregateCardBills(state.transactions, state.cards, today(), holidayOptions());
     const nextBill = cardBillGroups[0] || null;
 
     if (!spendable || !check) {
@@ -1079,7 +1088,10 @@
   /** 候補を正式なカード取引へ変換する。承認するまで計算には含めない。 */
   async function acceptCandidate(id) {
     const candidate = importCandidates.find(item => item.id === id);
-    if (!candidate) return;
+    if (!candidate || !['pending', 'needs_review'].includes(candidate.status)) return;
+    // クラウドの候補更新を待つ間の連打や、再読込後の再取込を防ぐ。
+    const transactionId = `mail_${id}`;
+    if (state.transactions.some(item => item.id === transactionId)) return;
     if (!state.cards.length) { showToast('先にクレジットカードを登録してください'); return; }
     if (!Number(candidate.amount)) { showToast('金額が読み取れていません。予定を手入力してください'); return; }
 
@@ -1092,6 +1104,7 @@
     const isNegative = ['refund', 'cancel'].includes(candidate.type);
 
     const transaction = createTransaction({
+      id: transactionId,
       kind: 'payment',
       amount: Math.abs(Number(candidate.amount || 0)) * (isNegative ? -1 : 1),
       transactionDate,
@@ -1107,12 +1120,13 @@
     });
 
     state.transactions.push(transaction);
+    absorbSettledStatementDetails(state);
     persist();
     try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), status: 'accepted' }); }
     catch (error) { console.warn('取込候補の更新に失敗しました', error); }
     renderPage();
-    showToast('取り込みました。内容は予定から編集できます');
-    openEventModal(transaction.id);
+    showToast(transaction.status === 'absorbed' ? '請求総額の内訳にまとめました。予定の明細タブから確認できます' : '取り込みました。内容は予定の明細タブから編集できます');
+    if (transaction.status !== 'absorbed') openEventModal(transaction.id);
   }
 
   async function ignoreCandidate(id) {
@@ -2047,22 +2061,44 @@
       </section>`;
   }
 
+  function renderPlanDetails(details) {
+    const cardIds = [...new Set(details.map(item => item.cardId))]
+      .sort((a, b) => cardName(a).localeCompare(cardName(b), 'ja'));
+    if (!cardIds.includes(planDetailCardFilter)) planDetailCardFilter = cardIds[0] || '';
+    const selected = finance.sortByUsageDesc(details.filter(item => item.cardId === planDetailCardFilter));
+    const pending = selected.filter(item => item.status === 'planned');
+    const included = selected.filter(item => item.status === 'absorbed');
+    const cardButtons = cardIds.map(id => {
+      const count = details.filter(item => item.cardId === id).length;
+      return `<button type="button" class="filter-button ${id === planDetailCardFilter ? 'active' : ''}" data-plan-detail-card="${esc(id)}" aria-pressed="${id === planDetailCardFilter}">${esc(cardName(id))} ${count}件</button>`;
+    }).join('');
+    return `
+      <section class="card info-card"><p class="check-detail">カード利用の明細を、カードごとに表示します。請求総額がある分はその内訳として扱い、金額には重ねて計上しません。確定済みの内訳もここで確認できます。</p></section>
+      ${cardButtons ? `<div class="filters" role="group" aria-label="カードを選ぶ">${cardButtons}</div>` : ''}
+      <div class="summary-strip"><div class="stat-card"><span>表示中の明細</span><strong>${selected.length}件</strong></div><div class="stat-card"><span>未確定の明細</span><strong>${pending.length}件</strong></div><div class="stat-card"><span>請求総額の内訳</span><strong>${included.length}件</strong></div></div>
+      <section class="card list-card plan-detail-list"><div class="list-card-header"><h2>${planDetailCardFilter ? `${esc(cardName(planDetailCardFilter))}の明細` : 'カードの明細'}</h2><small class="muted">利用日の新しい順</small></div><div class="list">${renderTransactionRows(selected, false, 'usage') || emptyBlock('明細はありません', 'カード利用の明細を登録すると、カード別に表示されます。')}</div></section>`;
+  }
+
   function renderPlans() {
     const planned = sortedTransactions(state.transactions.filter(transaction => transaction.status === 'planned'));
-    const filters = [['all', 'すべて'], ['payment', '支払い'], ['income', '収入'], ['saving', '貯金'], ['nisa', 'NISA'], ['transfer', '振込']];
-    const filtered = planned.filter(transaction => planFilter === 'all' || transaction.kind === planFilter);
+    const mainPlans = planned.filter(transaction => transaction.entryType !== 'itemized');
+    const details = state.transactions.filter(transaction => transaction.kind === 'payment'
+      && transaction.entryType === 'itemized' && ['planned', 'absorbed'].includes(transaction.status));
+    const filters = [['all', 'すべて'], ['details', `明細 ${details.length}件`], ['payment', '支払い'], ['income', '収入'], ['saving', '貯金'], ['nisa', 'NISA'], ['transfer', '振込']];
+    const filtered = mainPlans.filter(transaction => planFilter === 'all' || transaction.kind === planFilter);
     const deadline = getNextDeadline();
-    const within = planned.filter(transaction => transaction.dueDate <= deadline && transaction.dueDate >= today());
-    const withinAmount = within.reduce((sum, transaction) => {
-      if (['income', 'reimbursement'].includes(transaction.kind)) return sum + Number(transaction.amount);
-      if (transaction.kind === 'transfer' && !isExternalTransfer(transaction)) return sum;
-      return sum - Number(transaction.amount);
-    }, 0);
+    const within = effectivePlannedTransactions().filter(transaction => transaction.dueDate <= deadline && transaction.dueDate >= today());
+    const spendableIds = new Set(state.accounts.filter(item => !['savings', 'investment'].includes(item.role)
+      && item.includeInSpendable !== false).map(item => item.id));
+    const withinAmount = within.reduce((sum, transaction) => sum + finance.accountDeltasFor(transaction)
+      .filter(delta => spendableIds.has(delta.accountId))
+      .reduce((amount, delta) => amount + delta.delta, 0), 0);
     return `
       <div class="page-heading"><div><span class="eyebrow">予定</span><h1>予定</h1></div></div>
-      <div class="summary-strip"><div class="stat-card"><span>${formatDate(deadline)}までの予定</span><strong>${within.length}件</strong></div><div class="stat-card"><span>期限内の収支見込み</span><strong class="${withinAmount >= 0 ? 'value-positive' : 'value-negative'}">${formatSigned(withinAmount)}</strong></div><div class="stat-card"><span>登録済みの予定</span><strong>${planned.length}件</strong></div></div>
       <div class="filters">${filters.map(([value, label]) => `<button class="filter-button ${planFilter === value ? 'active' : ''}" data-plan-filter="${value}">${label}</button>`).join('')}</div>
-      <section class="card list-card"><div class="list-card-header"><h2>予定一覧</h2><small class="muted">確定すると残高に反映</small></div><div class="list">${renderTransactionRows(filtered, false) || emptyBlock('この種類の予定はありません', 'ホームの「予定を追加」から登録できます。')}</div></section>`;
+      ${planFilter === 'details' ? renderPlanDetails(details) : `
+        <div class="summary-strip"><div class="stat-card"><span>${formatDate(deadline)}までの計算対象</span><strong>${within.length}件</strong></div><div class="stat-card"><span>期限内の収支見込み</span><strong class="${withinAmount >= 0 ? 'value-positive' : 'value-negative'}">${formatSigned(withinAmount)}</strong></div><div class="stat-card"><span>登録済みの予定</span><strong>${mainPlans.length}件</strong></div></div>
+        <section class="card list-card"><div class="list-card-header"><h2>予定一覧</h2><small class="muted">確定すると残高に反映</small></div><div class="list">${renderTransactionRows(filtered, false) || emptyBlock('この種類の予定はありません', 'ホームの「予定を追加」から登録できます。')}</div></section>`}`;
   }
 
   /* ==========================================================
@@ -2407,7 +2443,7 @@
     return `<div class="detail-panel"><div class="detail-panel-head"><span>メール取込の明細 ${details.length}件</span><strong>${formatAbsoluteYen(total)}</strong></div><div class="detail-rows">${rows}</div><p class="detail-note ${diff < 0 ? 'warn-note' : ''}">${esc(note)}</p></div>`;
   }
 
-  function renderTransactionRows(transactions, compact) {
+  function renderTransactionRows(transactions, compact, dateMode = 'due') {
     return transactions.map(transaction => {
       const meta = kindMeta(transaction.kind);
       const isPositive = ['income', 'reimbursement'].includes(transaction.kind);
@@ -2418,7 +2454,7 @@
         : transaction.kind === 'payment' && transaction.cardId
           ? `${esc(cardName(transaction.cardId))} ・ ${esc(accountName(transaction.sourceAccountId))}`
           : `${esc(transaction.category || 'その他')} ・ ${esc(accountName(transaction.sourceAccountId))}`;
-      const statusBadge = transaction.status === 'settled' ? '<span class="badge badge-settled">確定済み</span>' : transaction.status === 'cancelled' ? '<span class="badge">取消済み</span>' : '<span class="badge badge-planned">未確定</span>';
+      const statusBadge = transaction.status === 'settled' ? '<span class="badge badge-settled">確定済み</span>' : transaction.status === 'absorbed' ? '<span class="badge badge-muted">請求総額の内訳</span>' : transaction.status === 'cancelled' ? '<span class="badge">取消済み</span>' : '<span class="badge badge-planned">未確定</span>';
       const details = transaction.cardId && transaction.entryType === 'statement' ? statementDetails(transaction) : [];
       const expanded = details.length > 0 && expandedStatements.has(transaction.id);
       const grainBadge = transaction.cardId
@@ -2433,7 +2469,9 @@
         : '';
       const settleButton = transaction.status === 'planned' ? `<button class="mini-button" data-action="settle-event" data-id="${transaction.id}">確定</button>` : '';
       const detailPanel = expanded ? renderStatementDetailPanel(transaction, details) : '';
-      return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${formatDate(transaction.dueDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge} ${salaryBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact ? `<div class="list-actions">${settleButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button></div>` : ''}</div></div>${detailPanel}</div>`;
+      const actions = transaction.status === 'absorbed' ? '' : `${settleButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button>`;
+      const shownDate = dateMode === 'usage' ? formatUsageMoment(transaction) : formatDate(transaction.dueDate);
+      return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${esc(shownDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge} ${salaryBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact && actions ? `<div class="list-actions">${actions}</div>` : ''}</div></div>${detailPanel}</div>`;
     }).join('');
   }
 
@@ -2614,12 +2652,33 @@
     if (target) target.currentBalance = Number(target.currentBalance || 0) + Number(delta || 0);
   }
 
+  /** 個別明細の確定額と同じ請求期間の総額を、残高から二度引かないための入力チェック。 */
+  function cardSettlementOverlapError(transaction) {
+    if (transaction.kind !== 'payment' || !transaction.cardId) return '';
+    const card = creditCard(transaction.cardId);
+    const cycle = finance.cardBillingCycleOf(transaction, card, holidayOptions());
+    const sameCycle = state.transactions.filter(item => item.id !== transaction.id
+      && item.kind === 'payment' && item.cardId === transaction.cardId && item.status !== 'cancelled'
+      && finance.cardBillingCycleOf(item, card, holidayOptions()) === cycle);
+    if (transaction.entryType === 'itemized' && transaction.status === 'settled'
+      && sameCycle.some(item => item.entryType !== 'itemized' && ['planned', 'settled'].includes(item.status))) {
+      return 'この明細は請求総額に含まれます。総額の取引を確定してください';
+    }
+    if (transaction.entryType !== 'itemized' && ['planned', 'settled'].includes(transaction.status)
+      && sameCycle.some(item => item.entryType === 'itemized' && item.status === 'settled')) {
+      return '同じ請求分の明細が確定済みです。先に明細の確定を取り消してください';
+    }
+    return '';
+  }
+
   /**
    * 「確定する」ときに満たしていなければならない条件。
    * 予定一覧の確定ボタン(settleEvent)と、確定済みで保存するとき(saveEvent)の両方から呼ぶ。
    * 問題があればユーザーに見せるメッセージを返し、問題が無ければ空文字を返す。
    */
   function validateSettlement(transaction) {
+    const overlapError = cardSettlementOverlapError({ ...transaction, status: 'settled' });
+    if (overlapError) return overlapError;
     const needsDestination = ['saving', 'nisa'].includes(transaction.kind)
       || (transaction.kind === 'transfer' && transaction.transferType === 'internal');
     if (needsDestination && !transaction.destinationAccountId) return '確定する前に移動先口座を指定してください';
@@ -2706,6 +2765,8 @@
     // 確定した給与はもう見込みではないので、自動で付けたメモの「（シフトからの見込み）」を外す
     if (next.salaryPaymentMonth && next.status === 'settled') next.memo = next.memo.replace('（シフトからの見込み）', '');
     if (!next.amount || !next.dueDate || !next.sourceAccountId) { showToast('日付・金額・口座を入力してください'); return; }
+    const overlapError = cardSettlementOverlapError(next);
+    if (overlapError) { showToast(overlapError); return; }
     if (next.kind === 'transfer' && next.transferType === 'internal' && (!next.destinationAccountId || next.destinationAccountId === next.sourceAccountId)) { showToast('自分の別口座を移動先に指定してください'); return; }
     if (next.kind === 'transfer' && next.transferType === 'external' && !next.destinationName) { showToast('振込先の名前を入力してください'); return; }
     if (next.status === 'settled') {
@@ -2993,6 +3054,8 @@
     if (pageButton) { currentPage = pageButton.dataset.page; $('#sidebar').classList.remove('open'); renderPage(); return; }
     const planButton = event.target.closest('[data-plan-filter]');
     if (planButton) { planFilter = planButton.dataset.planFilter; renderPage(); return; }
+    const planCardButton = event.target.closest('[data-plan-detail-card]');
+    if (planCardButton) { planDetailCardFilter = planCardButton.dataset.planDetailCard; renderPage(); return; }
     const recordButton = event.target.closest('[data-record-filter]');
     if (recordButton) { recordFilter = recordButton.dataset.recordFilter; renderPage(); return; }
     const action = event.target.closest('[data-action]');
