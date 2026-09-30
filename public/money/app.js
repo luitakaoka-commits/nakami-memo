@@ -306,7 +306,7 @@
         recurringPlans: Array.isArray(raw.recurringPlans) ? raw.recurringPlans : []
       };
       const salaryRecovery = finance.planLegacySalaryRecovery(normalized.transactions, normalized.settings.wage,
-        { overrides: normalized.settings.holidayOverrides });
+        { overrides: normalized.settings.holidayOverrides }, normalized.workEntries);
       salaryRecovery.updates.forEach(({ id, patch }) => {
         Object.assign(normalized.transactions.find(item => item.id === id), patch);
       });
@@ -639,7 +639,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=33" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=34" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>

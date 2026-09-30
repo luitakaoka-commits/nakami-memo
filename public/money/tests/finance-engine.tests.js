@@ -387,6 +387,33 @@
       equal(engine.calculateSpendableAmount({ ...input, includeSalary: false }).incomeTotal, 0, '給与の見込みを含めない設定も効く');
     });
 
+    test('給与: シフトと一致する旧見込みを復旧し、変更後も支払い能力に1回だけ含める', () => {
+      const entries = [work('2026-08-01', 10)];
+      const legacy = tx({ id: 'old-forecast', kind: 'income', category: '給与', memo: '2026年8月分の給与（シフトからの見込み）', amount: 12000, dueDate: '2026-09-15', sourceAccountId: 'a1' });
+      const recovery = engine.planLegacySalaryRecovery([legacy], WAGE, {}, entries);
+      const restored = { ...legacy, ...recovery.updates[0].patch };
+      equal(restored.salaryManual, false, '未確定の見込みは固定しない');
+      const input = { today: TODAY, endDate: '2026-09-30', accounts: [account('a1', '生活費口座', 'primary', 100000)], transactions: [restored], workEntries: [...entries, work('2026-08-02', 5)], wage: WAGE, includeSalary: true };
+      const plan = engine.planSalaryRecords(input);
+      equal(plan.creates.length, 0, '別の給与を増やさない');
+      equal(plan.updates.length, 1, '元の給与を更新する');
+      equal(plan.updates[0].patch.amount, 18000, '追加シフトを反映する');
+      input.transactions = [{ ...restored, ...plan.updates[0].patch }];
+      const check = engine.calculateCashflowCheck(input);
+      equal(check.salaryEvents.length, 0, '裏の見込みを重ねない');
+      equal(check.timeline.at(-1).primaryBalance, 118000, '更新した見込み額を1回だけ含める');
+      equal(engine.planSalaryRecords({ ...input, workEntries: [] }).removes.length, 1, 'シフトを全削除したら見込みも消える');
+    });
+
+    test('給与: 復旧時に金額・日付・手修正の目印が違う給与は固定して守る', () => {
+      const entries = [work('2026-08-01', 10)];
+      const legacy = tx({ id: 'old-forecast', kind: 'income', category: '給与', memo: '2026年8月分の給与（シフトからの見込み）', amount: 12000, dueDate: '2026-09-15' });
+      for (const change of [{ amount: 11500 }, { dueDate: '2026-09-16' }, { salaryManual: true }, { status: 'settled' }, { memo: '2026年8月分の給与' }]) {
+        const recovery = engine.planLegacySalaryRecovery([{ ...legacy, ...change }], WAGE, {}, entries);
+        equal(recovery.updates[0].patch.salaryManual, true, `保持する: ${JSON.stringify(change)}`);
+      }
+    });
+
     test('給与: 旧記録の復旧は、似たメモや重複した月から推測しない', () => {
       const legacy = tx({ id: 'old', kind: 'income', category: '給与', memo: '2026年8月分の給与', amount: 12000, dueDate: '2026-09-15' });
       equal(engine.planLegacySalaryRecovery([{ ...legacy, memo: '給与の追加分' }], WAGE).updates.length, 0, '自由なメモは対象外');

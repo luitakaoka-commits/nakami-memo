@@ -469,9 +469,10 @@
   /**
    * 以前の画面が給与の目印を落として保存したデータを復旧する。
    * 自動生成と同じカテゴリ・メモ・支給月がそろい、その月に1件だけある場合に限る。
-   * 金額や日付は手で直した可能性があるため、そのまま保持してシフトで上書きしない。
+   * 未確定の見込みが現在のシフトの額・支給日と一致すれば、自動更新を継続する。
+   * 確定済みや、額・日付を直した可能性のある記録は保持する。
    */
-  function planLegacySalaryRecovery(transactions = [], wage = {}, options = {}) {
+  function planLegacySalaryRecovery(transactions = [], wage = {}, options = {}, workEntries = []) {
     const recorded = recordedSalaryMonths(transactions);
     const candidates = new Map();
     (transactions || []).forEach(item => {
@@ -494,7 +495,12 @@
         conflicts.push({ paymentMonth: month, ids: items.map(item => item.id) });
         return;
       }
-      updates.push({ id: items[0].id, patch: { salaryPaymentMonth: month, salaryManual: true } });
+      const item = items[0];
+      const salary = calculateSalaryByPaymentMonth(workEntries, month, wage, options);
+      const followsShifts = item.status === 'planned' && item.salaryManual !== true
+        && item.memo === salaryMemoOf(salary.workMonth) && salary.totalAmount > 0
+        && Number(item.amount) === salary.totalAmount && item.dueDate === salary.paymentDate;
+      updates.push({ id: item.id, patch: { salaryPaymentMonth: month, salaryManual: !followsShifts } });
     });
     return { updates, conflicts };
   }

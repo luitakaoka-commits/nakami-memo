@@ -285,6 +285,19 @@ const SAMPLE_STATE = {
     equal(raw.transactions[0].salaryPaymentMonth, undefined, '元のオブジェクトは変えない');
   });
 
+  test('旧見込みの読み込み時にシフトを渡し、自動更新を継続する', () => {
+    const raw = JSON.parse(JSON.stringify(SAMPLE_STATE));
+    raw.settings.wage = { hourlyRate: 1200, salaryPaymentDay: 15, salaryMonthOffset: 1 };
+    raw.workEntries = [{ id: 'shift', date: '2026-08-01', hours: 10, status: 'planned' }];
+    raw.transactions = [{ ...SAMPLE_TRANSACTION, id: 'old-forecast', kind: 'income', cardId: '', entryType: '', category: '給与', memo: '2026年8月分の給与（シフトからの見込み）', amount: 12000, dueDate: '2026-09-15', status: 'planned' }];
+    delete raw.transactions[0].salaryPaymentMonth;
+    delete raw.transactions[0].salaryManual;
+    const normalized = api.normalizeState(raw);
+    equal(normalized.transactions[0].salaryPaymentMonth, '2026-09', '支給月を復旧');
+    equal(normalized.transactions[0].salaryManual, false, 'シフト連動を維持');
+    equal(normalized.transactions[0].amount, 12000, '読込時の見込み額は維持');
+  });
+
   /* ---------- today() が日本時間であること ---------- */
 
   test('today() は日本時間で判定する（UTC 2026-01-01T20:00Z は日本では 2026-01-02）', () => {
