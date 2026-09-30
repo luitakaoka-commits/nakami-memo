@@ -826,6 +826,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .notice-card,
 .shift-control-card,
 .info-card { padding: 1.3rem 1.45rem; }
+.statement-duplicate-warning { margin-bottom: 1.15rem; }
+.statement-duplicate-warning h2 { margin: 0 0 .5rem; font-size: 1rem; line-height: 1.5; }
+.statement-duplicate-warning ul { margin-bottom: 0; padding-left: 1rem; }
 
 /* カード側で余白を持つため、内側のヘッダーのパディングと二重にしない */
 .check-summary-card > .list-card-header { padding: 0 0 .9rem; }

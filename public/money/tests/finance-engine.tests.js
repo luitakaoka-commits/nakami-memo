@@ -371,6 +371,43 @@
       equal(engine.salaryRecordSummary([salaryTx({ status: 'cancelled' })], '2026-09', salary, WAGE).status, 'none', '取消は無いものとして扱う');
     });
 
+    test('給与: 目印が失われた旧記録を復旧すると、裏の見込みと作り直しが止まる', () => {
+      const legacy = tx({ id: 'legacy-salary', kind: 'income', category: '給与', memo: '2026年8月分の給与（シフトからの見込み）', amount: 11500, dueDate: '2026-09-15', sourceAccountId: 'a1' });
+      const recovery = engine.planLegacySalaryRecovery([legacy], WAGE);
+      equal(recovery.updates.length, 1, '生成した書式と支給月が一致する1件だけ復旧');
+      equal(legacy.salaryPaymentMonth, undefined, '元データは書き換えない');
+      const restored = { ...legacy, ...recovery.updates[0].patch };
+      equal(restored.salaryPaymentMonth, '2026-09', '支給月を復旧');
+      equal(restored.salaryManual, true, '既存の金額と日付を守る');
+      const input = { today: TODAY, deadline: '2026-09-30', endDate: '2026-09-30', accounts: [account('a1', '生活費口座', 'primary', 100000)], transactions: [restored], workEntries: [work('2026-08-01', 10)], wage: WAGE };
+      equal(engine.calculateCashflowCheck(input).salaryEvents.length, 0, '給与をもう一度加算しない');
+      equal(engine.calculateCashflowCheck(input).timeline.at(-1).primaryBalance, 111500, '記録の給与を1回だけ加算');
+      equal(engine.planSalaryRecords(input).creates.length, 0, '給与を作り直さない');
+      equal(engine.planSalaryRecords(input).updates.length, 0, 'シフトの額で上書きしない');
+      equal(engine.calculateSpendableAmount({ ...input, includeSalary: false }).incomeTotal, 0, '給与の見込みを含めない設定も効く');
+    });
+
+    test('給与: 旧記録の復旧は、似たメモや重複した月から推測しない', () => {
+      const legacy = tx({ id: 'old', kind: 'income', category: '給与', memo: '2026年8月分の給与', amount: 12000, dueDate: '2026-09-15' });
+      equal(engine.planLegacySalaryRecovery([{ ...legacy, memo: '給与の追加分' }], WAGE).updates.length, 0, '自由なメモは対象外');
+      equal(engine.planLegacySalaryRecovery([{ ...legacy, category: '収入' }], WAGE).updates.length, 0, '別カテゴリは対象外');
+      equal(engine.planLegacySalaryRecovery([{ ...legacy, dueDate: '2026-10-15' }], WAGE).updates.length, 0, '勤務月と支給月が合わないものは対象外');
+      const duplicate = engine.planLegacySalaryRecovery([legacy, { ...legacy, id: 'another' }], WAGE);
+      equal(duplicate.updates.length, 0, '同じ月に複数あれば決めない');
+      equal(duplicate.conflicts.length, 1, '重複を知らせる');
+      equal(engine.planLegacySalaryRecovery([legacy, salaryTx()], WAGE).updates.length, 0, '既に目印のある給与があれば重ねない');
+    });
+
+    test('給与: 確定済みの旧記録を復旧しても、残高や確定額は動かさない', () => {
+      const legacy = tx({ id: 'paid', kind: 'income', category: '給与', memo: '2026年8月分の給与', amount: 11000, dueDate: '2026-09-15', status: 'settled', sourceAccountId: 'a1' });
+      const recovery = engine.planLegacySalaryRecovery([legacy], WAGE);
+      const restored = { ...legacy, ...recovery.updates[0].patch };
+      const result = engine.calculateCashflowCheck({ today: TODAY, endDate: '2026-09-30', accounts: [account('a1', '生活費口座', 'primary', 111000)], transactions: [restored], workEntries: [work('2026-08-01', 10)], wage: WAGE });
+      equal(result.salaryEvents.length, 0, '確定済みの給与の見込みを作らない');
+      equal(result.timeline.at(-1).primaryBalance, 111000, '現在残高のまま');
+      equal(restored.amount, 11000, '確定額のまま');
+    });
+
     test('不足解消の提案が振替元と金額を返す', () => {
       const accounts = [
         account('a1', '生活費口座', 'primary', 100000),

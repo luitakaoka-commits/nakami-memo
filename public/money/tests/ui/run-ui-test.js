@@ -467,6 +467,47 @@ const closeModals = page => page.evaluate(() => {
     await page.click('[data-plan-filter="all"]');
   });
 
+  await record('duplicate_statement_blocked', async () => {
+    await closeModals(page);
+    const before = await page.evaluate(() => window.__YORYOKU__.getState().transactions.length);
+    assert(await page.locator('.statement-duplicate-warning').count() === 1, '既存の重複した総額に警告が出ない');
+    await page.click('#floating-add');
+    await page.click('[data-action="add-event"][data-kind="payment"]');
+    await page.selectOption('#event-card', 'c1');
+    await page.selectOption('#event-entry-type', 'statement');
+    await page.fill('#event-date', '2026-10-13');
+    await page.fill('#event-amount', '23000');
+    await page.click('#event-form button[type="submit"]');
+    const blocked = await page.evaluate(() => ({ count: window.__YORYOKU__.getState().transactions.length, toast: document.querySelector('#toast').textContent }));
+    assert(blocked.count === before && blocked.toast.includes('既存の総額を編集'), '同じ請求分の総額を新しく追加できてしまう');
+    await closeModals(page);
+
+    // 更新は既存の1件を編集する。登録済みという理由で更新まで拒まない。
+    await page.click('[data-action="edit-event"][data-id="dx-st"]');
+    await page.fill('#event-amount', '23000');
+    await page.click('#event-form button[type="submit"]');
+    const updated = await page.evaluate(() => ({ count: window.__YORYOKU__.getState().transactions.length, amount: window.__YORYOKU__.getState().transactions.find(item => item.id === 'dx-st').amount }));
+    assert(updated.count === before && updated.amount === 23000, '既存の総額を1件のまま更新できない');
+    await page.click('[data-action="edit-event"][data-id="dx-st"]');
+    await page.fill('#event-amount', '20000');
+    await page.click('#event-form button[type="submit"]');
+
+    await page.click('#floating-add');
+    await page.click('[data-action="add-event"][data-kind="payment"]');
+    await page.selectOption('#event-card', 'c1');
+    await page.fill('#event-date', '2026-12-10');
+    await page.fill('#event-amount', '1000');
+    await page.fill('#event-memo', '別の請求期間の検査');
+    await page.click('#event-form button[type="submit"]');
+    const added = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.memo === '別の請求期間の検査'));
+    assert(added && added.status === 'planned', '別の請求期間の総額まで拒まれる');
+    await page.evaluate(id => {
+      const api = window.__YORYOKU__;
+      api.getState().transactions = api.getState().transactions.filter(item => item.id !== id);
+      api.setPage('plans');
+    }, added.id);
+  });
+
   await record('statement_absorbs_details', async () => {
     await closeModals(page);
     const before = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').currentBalance);

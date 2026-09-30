@@ -271,6 +271,20 @@ const SAMPLE_STATE = {
     equal(api.getState().receipts, undefined, 'state に receipts は生えない');
   });
 
+  test('読み込み時に、給与の目印を失った旧記録を復旧する', () => {
+    const raw = JSON.parse(JSON.stringify(SAMPLE_STATE));
+    raw.settings.wage = { salaryPaymentDay: 15, salaryMonthOffset: 1 };
+    raw.transactions = [{ ...SAMPLE_TRANSACTION, id: 'legacy-salary', kind: 'income', cardId: '', entryType: '', category: '給与', memo: '2026年8月分の給与', dueDate: '2026-09-15', status: 'settled' }];
+    delete raw.transactions[0].salaryPaymentMonth;
+    delete raw.transactions[0].salaryManual;
+    const normalized = api.normalizeState(raw);
+    equal(normalized.transactions.length, 1, '取引を増やさない');
+    equal(normalized.transactions[0].salaryPaymentMonth, '2026-09', '支給月を復旧');
+    equal(normalized.transactions[0].salaryManual, true, '既存の確定額を守る');
+    equal(normalized.accounts[0].currentBalance, raw.accounts[0].currentBalance, '残高を変えない');
+    equal(raw.transactions[0].salaryPaymentMonth, undefined, '元のオブジェクトは変えない');
+  });
+
   /* ---------- today() が日本時間であること ---------- */
 
   test('today() は日本時間で判定する（UTC 2026-01-01T20:00Z は日本では 2026-01-02）', () => {

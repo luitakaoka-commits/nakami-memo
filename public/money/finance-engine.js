@@ -466,6 +466,39 @@
       && item.salaryPaymentMonth === paymentMonth && item.status !== 'cancelled') || null;
   }
 
+  /**
+   * 以前の画面が給与の目印を落として保存したデータを復旧する。
+   * 自動生成と同じカテゴリ・メモ・支給月がそろい、その月に1件だけある場合に限る。
+   * 金額や日付は手で直した可能性があるため、そのまま保持してシフトで上書きしない。
+   */
+  function planLegacySalaryRecovery(transactions = [], wage = {}, options = {}) {
+    const recorded = recordedSalaryMonths(transactions);
+    const candidates = new Map();
+    (transactions || []).forEach(item => {
+      if (!item || item.kind !== 'income' || item.category !== '給与'
+        || item.salaryPaymentMonth || item.status === 'cancelled') return;
+      const match = /^(\d{4})年([1-9]|1[0-2])月分の給与(?:（シフトからの見込み）)?$/.exec(item.memo || '');
+      if (!match || !/^\d{4}-\d{2}-\d{2}$/.test(item.dueDate || '')) return;
+      const month = item.dueDate.slice(0, 7);
+      const workMonth = `${match[1]}-${String(match[2]).padStart(2, '0')}`;
+      try {
+        if (calculateSalaryByPaymentMonth([], month, wage, options).workMonth !== workMonth) return;
+      } catch { return; }
+      if (!candidates.has(month)) candidates.set(month, []);
+      candidates.get(month).push(item);
+    });
+    const updates = [];
+    const conflicts = [];
+    candidates.forEach((items, month) => {
+      if (items.length !== 1 || recorded.has(month)) {
+        conflicts.push({ paymentMonth: month, ids: items.map(item => item.id) });
+        return;
+      }
+      updates.push({ id: items[0].id, patch: { salaryPaymentMonth: month, salaryManual: true } });
+    });
+    return { updates, conflicts };
+  }
+
   function salaryMemoOf(workMonth) {
     const { year, monthIndex } = parseMonthKey(workMonth);
     return `${year}年${monthIndex + 1}月分の給与（シフトからの見込み）`;
@@ -1987,7 +2020,7 @@
     summarizePeriod,
     // 給与
     calculateSalaryPaymentDate, calculateSalaryByPaymentMonth, paymentMonthForWorkDate, collectSalaryEvents,
-    recordedSalaryMonths, salaryMonthsOutsideForecast, salaryRecordOf, planSalaryRecords, salaryRecordSummary,
+    recordedSalaryMonths, salaryMonthsOutsideForecast, salaryRecordOf, planLegacySalaryRecovery, planSalaryRecords, salaryRecordSummary,
     // 予定
     expandScheduledTransactions,
     // 2つの主計算（必ず別関数・別結果）

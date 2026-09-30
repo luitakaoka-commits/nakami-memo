@@ -305,6 +305,11 @@
         })),
         recurringPlans: Array.isArray(raw.recurringPlans) ? raw.recurringPlans : []
       };
+      const salaryRecovery = finance.planLegacySalaryRecovery(normalized.transactions, normalized.settings.wage,
+        { overrides: normalized.settings.holidayOverrides });
+      salaryRecovery.updates.forEach(({ id, patch }) => {
+        Object.assign(normalized.transactions.find(item => item.id === id), patch);
+      });
       absorbSettledStatementDetails(normalized);
       return normalized;
     }
@@ -634,7 +639,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=32" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=33" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -679,12 +684,21 @@
     $('#page-title').textContent = titles[currentPage] || titles.home;
     $$('.nav-link[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === currentPage));
     const renderers = { home: renderHome, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
-    $('#page-container').innerHTML = renderers[currentPage]();
+    const warning = ['home', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
+    $('#page-container').innerHTML = warning + renderers[currentPage]();
     if (currentPage === 'home') requestAnimationFrame(animateHeroAmount);
     if (currentPage === 'spendable') requestAnimationFrame(() => {
       animateHeroAmount();
       updateWhatIf(whatIfAmount);
     });
+  }
+
+  function renderStatementDuplicateWarning() {
+    const groups = finance.groupCardCharges(state.transactions, state.cards, holidayOptions())
+      .filter(group => group.statements.length > 1);
+    if (!groups.length) return '';
+    const rows = groups.map(group => `<li>${esc(group.cardName)}・${formatMonthLabel(group.billingCycle)}分：${group.statements.length}件、合計${formatAbsoluteYen(group.statementTotal)}</li>`).join('');
+    return `<section class="card info-card statement-duplicate-warning" role="alert"><h2>請求総額の重複を確認</h2><p class="check-detail">同じ請求分に総額が複数あり、すべて加算されています。更新後の総額を追加した場合は、予定から以前の総額を削除してください。</p><ul class="form-note">${rows}</ul></section>`;
   }
 
   function animateHeroAmount() {
@@ -2671,6 +2685,22 @@
     return '';
   }
 
+  /** 総額の更新を新しい予定として足してしまうことを防ぐ。既存の予定は編集できる。 */
+  function cardStatementRegistrationError(transaction, current) {
+    if (transaction.kind !== 'payment' || !transaction.cardId || transaction.entryType !== 'statement'
+      || !['planned', 'settled'].includes(transaction.status)) return '';
+    const card = creditCard(transaction.cardId);
+    const cycle = finance.cardBillingCycleOf(transaction, card, holidayOptions());
+    if (current?.kind === 'payment' && current.cardId === transaction.cardId && current.entryType === 'statement'
+      && ['planned', 'settled'].includes(current.status)
+      && finance.cardBillingCycleOf(current, card, holidayOptions()) === cycle) return '';
+    const existing = state.transactions.find(item => item.id !== transaction.id && item.kind === 'payment'
+      && item.cardId === transaction.cardId && item.entryType === 'statement'
+      && ['planned', 'settled'].includes(item.status)
+      && finance.cardBillingCycleOf(item, card, holidayOptions()) === cycle);
+    return existing ? '同じ請求分の総額が登録済みです。予定から既存の総額を編集してください' : '';
+  }
+
   /**
    * 「確定する」ときに満たしていなければならない条件。
    * 予定一覧の確定ボタン(settleEvent)と、確定済みで保存するとき(saveEvent)の両方から呼ぶ。
@@ -2765,6 +2795,8 @@
     // 確定した給与はもう見込みではないので、自動で付けたメモの「（シフトからの見込み）」を外す
     if (next.salaryPaymentMonth && next.status === 'settled') next.memo = next.memo.replace('（シフトからの見込み）', '');
     if (!next.amount || !next.dueDate || !next.sourceAccountId) { showToast('日付・金額・口座を入力してください'); return; }
+    const statementError = cardStatementRegistrationError(next, current);
+    if (statementError) { showToast(statementError); return; }
     const overlapError = cardSettlementOverlapError(next);
     if (overlapError) { showToast(overlapError); return; }
     if (next.kind === 'transfer' && next.transferType === 'internal' && (!next.destinationAccountId || next.destinationAccountId === next.sourceAccountId)) { showToast('自分の別口座を移動先に指定してください'); return; }
