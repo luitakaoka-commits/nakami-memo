@@ -207,6 +207,9 @@ const closeModals = page => page.evaluate(() => {
   });
 
   await record('candidate_not_counted_before_approval', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+    await page.getByRole('button', { name: 'メール取込を確認', exact: true }).click();
+    assert(await page.getByRole('heading', { name: '通知・メールからの取込候補' }).isVisible(), '未確認0件のホームから取込候補を確認できない');
     const CANDIDATES = [
       { id: 'cand1', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-08-24T10:00:00.000Z', usedDate: '2026-08-24', amount: 12000, cardHint: 'メインカード', merchant: 'ローソン', type: 'purchase', status: 'pending', fingerprint: 'fp-a', note: '' },
       { id: 'cand2', sourcePackage: 'rakuten-card.co.jp', sourceLabel: '楽天カード', detectedAt: '2026-08-24T10:05:00.000Z', usedDate: '2026-08-24', amount: 12000, cardHint: 'メインカード', type: 'purchase', status: 'pending', fingerprint: 'fp-a', note: '' },
@@ -218,7 +221,9 @@ const closeModals = page => page.evaluate(() => {
     const after = await page.evaluate(() => ({ spendable: window.__YORYOKU__.spendableAmount().total, min: window.__YORYOKU__.cashflowCheck().minBalance }));
     assert(before.spendable === after.spendable, '承認前の候補が今使える金額に反映されている');
     assert(before.min === after.min, '承認前の候補が支払い能力チェックに反映されている');
-    await page.evaluate(() => window.__YORYOKU__.setPage('imports'));
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+    assert((await page.locator('.home-mail-import').innerText()).includes('未確認の取込候補が3件'), 'ホームの未確認件数が更新されていない');
+    await page.getByRole('button', { name: 'メール取込を確認', exact: true }).click();
     await page.waitForSelector('.candidate-row');
     const rows = await page.$$eval('.candidate-row', nodes => nodes.length);
     assert(rows === 3, `候補の表示件数が違う: ${rows}`);

@@ -639,7 +639,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=36" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=37" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -882,6 +882,11 @@
 
   /* ================= ホーム ================= */
 
+  function renderMailImportPrompt() {
+    const count = pendingCandidates().length;
+    return `<section class="card notice-card home-mail-import"><strong>メール取り込み</strong><p>${count ? `未確認の取込候補が${count}件あります。` : '未確認の取込候補は0件です。'}カード利用のお知らせメールの内容を確認して、取り込むか判断できます。取り込むまで金額には反映されません。</p><button class="button button-quiet button-small" data-page="imports">メール取込を確認</button></section>`;
+  }
+
   function renderHome() {
     const spendable = spendableAmount();
     publishSwitcherStatus(spendable);
@@ -901,6 +906,7 @@
       return `
         <div class="page-heading"><div><span class="eyebrow">ホーム</span><h1>ホーム</h1></div></div>
         ${renderReviewPrompt()}
+        ${renderMailImportPrompt()}
         <section class="card empty"><div><strong>口座を追加してください</strong>口座を登録すると、今使える金額と支払い能力チェックを計算できます。</div></section>`;
     }
 
@@ -917,7 +923,7 @@
         <div class="hero-actions"><button class="button button-primary button-small" data-page="spendable">内訳と試算を見る</button><button class="button button-quiet button-small" data-action="open-future">将来の期間で試算</button></div>
       </section>
 
-      ${pendingCandidates().length ? `<section class="card notice-card"><strong>取込候補が${pendingCandidates().length}件あります</strong><p>カード利用のお知らせメールから作られた候補です。取り込むまで金額には反映されません。</p><button class="button button-quiet button-small" data-page="imports">確認する</button></section>` : ''}
+      ${renderMailImportPrompt()}
 
       <section class="card check-summary-card">
         <div class="list-card-header"><div><span class="eyebrow">支払い能力チェック</span><h2>${formatDate(check.endDate)}までの見通し</h2></div><span class="status-pill ${checkStatus.className}"><span class="status-dot" aria-hidden="true"></span>${checkStatus.label}</span></div>
