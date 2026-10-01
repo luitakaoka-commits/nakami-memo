@@ -639,7 +639,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=34" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=36" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -951,6 +951,48 @@
 
   /* ================= 機能B｜今使える金額（詳細） ================= */
 
+  function renderUnpaidCardBreakdown(result) {
+    return result.unpaidCardByCard.map(card => {
+      const bills = new Map();
+      card.items.forEach(item => {
+        const dueDate = item.dueDate || '';
+        if (!bills.has(dueDate)) bills.set(dueDate, []);
+        bills.get(dueDate).push(item);
+      });
+      const billRows = [...bills].sort(([a], [b]) => a.localeCompare(b)).map(([dueDate, items]) => {
+        const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        const statements = items.filter(item => item.entryType !== 'itemized');
+        const details = statements.length
+          ? [...new Map(statements.flatMap(item => finance.detailsOfStatement(item, state.transactions, state.cards, holidayOptions()))
+            .map(item => [item.id, item])).values()]
+          : items;
+        const detailTotal = details.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        const difference = total - detailTotal;
+        const note = !statements.length
+          ? '請求総額は未登録です。利用明細の合計を計算に使っています。'
+          : !details.length
+            ? `店舗ごとの利用明細は未登録です。${formatAbsoluteYen(total)}は登録した請求総額で計算しています。`
+            : difference > 0
+              ? `このアプリに明細がない額：${formatAbsoluteYen(difference)}。カード会社の明細で確認できます。`
+              : difference < 0
+                ? `明細の合計が請求総額を${formatAbsoluteYen(Math.abs(difference))}上回っています。請求総額と明細を確認してください。`
+                : '登録した請求総額と利用明細の合計が一致しています。';
+        const detailRows = finance.sortByUsageDesc(details).map(item => `<div class="unpaid-detail-row"><span>${esc(formatUsageMoment(item))}</span><span>${esc(item.memo || item.category || '名称未登録')}</span><strong>${formatSigned(-Number(item.amount || 0))}</strong></div>`).join('');
+        const statementRows = statements.map(item => `<div class="unpaid-statement-row"><span>登録した請求総額 ${formatAbsoluteYen(item.amount)}${item.memo ? `・${esc(item.memo)}` : ''}</span><button class="mini-button" data-action="edit-event" data-id="${esc(item.id)}">総額を確認・編集</button></div>`).join('');
+        return `<section class="unpaid-bill" data-card-bill-date="${esc(dueDate)}">
+          <div class="unpaid-bill-heading"><div><strong>${dueDate ? `${formatDate(dueDate, true)} 支払い` : '支払日未登録'}</strong><span class="badge ${dueDate && dueDate <= result.deadline ? 'badge-settled' : 'badge-muted'}">${dueDate && dueDate <= result.deadline ? '判定期限内' : '判定期限より後'}</span></div><strong class="${total < 0 ? 'value-positive' : 'value-negative'}">${formatSigned(-total)}</strong></div>
+          <p class="form-note">${statements.length ? '請求総額で計算。利用明細はその内訳なので重ねて加算しません。' : '利用明細からの見込み（請求総額は未登録）'}</p>
+          ${statementRows}<p class="unpaid-detail-note">${esc(note)}</p>
+          ${details.length ? `<details class="unpaid-usage-details"><summary>利用明細 ${details.length}件・合計 ${formatSigned(-detailTotal)}</summary><div>${detailRows}</div></details>` : ''}
+        </section>`;
+      }).join('');
+      return `<details class="unpaid-card" data-unpaid-card="${esc(card.cardId)}" open>
+        <summary><span><strong>${esc(cardName(card.cardId))}</strong><small>${bills.size}回の支払い・支払日ごとの内訳</small></span><strong class="${card.total < 0 ? 'value-positive' : 'value-negative'}">${formatSigned(-card.total)}</strong></summary>
+        <div class="unpaid-bills">${billRows}</div>
+      </details>`;
+    }).join('');
+  }
+
   function renderSpendable() {
     const result = spendableAmount();
     if (!result) return '<div class="page-heading"><div><span class="eyebrow">今使える金額</span><h1>今使える金額</h1></div></div><section class="card empty"><div><strong>口座がありません</strong>口座を追加すると計算できます。</div></section>';
@@ -961,7 +1003,7 @@
 
     const breakdownRows = result.breakdown.map(row => `<div class="breakdown-row"><div class="breakdown-label"><i class="breakdown-dot ${row.direction === 'in' ? 'income' : 'payment'}"></i>${row.label}</div><strong class="breakdown-value ${row.amount < 0 ? 'value-negative' : 'value-positive'}">${formatSigned(row.amount)}</strong></div>`).join('');
 
-    const cardRows = result.unpaidCardByCard.map(group => miniRow({ title: esc(cardName(group.cardId)), sub: `${group.count}件`, amount: group.total, direction: 'out' })).join('');
+    const cardRows = renderUnpaidCardBreakdown(result);
     const listOf = (items, direction) => items.map(item => miniRow({ title: esc(item.memo || item.category || transactionLabel(item)), sub: formatDate(item.dueDate, true), amount: item.amount, direction })).join('');
 
     return `
@@ -1004,9 +1046,10 @@
         <p class="what-if-note" id="what-if-check-note"></p>
       </section>
 
-      <section class="card list-card">
-        <div class="list-card-header"><div><span class="eyebrow">内訳</span><h2>未払いのカード利用</h2></div><strong class="value-negative">${formatFlowAmount(result.unpaidCardTotal, 'out')}</strong></div>
-        <div class="mini-list">${cardRows || emptyBlock('未払いのカード利用はありません')}</div>
+      <section class="card list-card unpaid-card-breakdown">
+        <div class="list-card-header"><div><span class="eyebrow">複数の支払月を含む</span><h2>未払いカードの合計</h2></div><strong class="value-negative">${formatFlowAmount(result.unpaidCardTotal, 'out')}</strong></div>
+        <div class="unpaid-card-intro"><p>未払いとして登録されている金額の合計です。判定期限より後の引落しも含みます。実際に支払済みの請求が残っている場合は、その取引の確定状況を確認してください。</p><div><span>${formatDate(result.deadline)}までの支払い <strong>${formatAbsoluteYen(result.unpaidCardWithinDeadline)}</strong></span><span>期限より後の支払い <strong>${formatAbsoluteYen(result.unpaidCardBeyondDeadline)}</strong></span></div></div>
+        <div>${cardRows || emptyBlock('未払いのカード利用はありません')}</div>
       </section>
 
       <section class="card list-card">

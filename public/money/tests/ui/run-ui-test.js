@@ -323,6 +323,62 @@ const closeModals = page => page.evaluate(() => {
     await closeModals(page);
   });
 
+  await record('unpaid_card_bill_breakdown', async () => {
+    await closeModals(page);
+    const original = await page.evaluate(() => {
+      const s = window.__YORYOKU__.getState();
+      return { cards: s.cards, transactions: s.transactions };
+    });
+    try {
+      const before = await page.evaluate(() => {
+        const api = window.__YORYOKU__, s = api.getState();
+        s.cards = [
+          { id: 'breakdown-card', name: '検査カード', accountId: 'a1', closingDay: 15, paymentDay: 10, paymentMonthOffset: 1 },
+          { id: 'detail-only-card', name: '明細のみ', accountId: 'a1', closingDay: 15, paymentDay: 10, paymentMonthOffset: 1 },
+          { id: 'total-only-card', name: '総額のみ', accountId: 'a1', closingDay: 15, paymentDay: 10, paymentMonthOffset: 1 }
+        ];
+        const payment = (id, amount, date, entryType, cardId = 'breakdown-card', memo = '') => api.createTransaction({ id, amount, kind: 'payment', status: 'planned', dueDate: date, transactionDate: date === '2026-09-10' ? '2026-08-01' : '2026-09-01', entryType, cardId, sourceAccountId: 'a1', memo });
+        s.transactions = [payment('bill-one', 10000, '2026-09-10', 'statement'), payment('bill-two', 3000, '2026-10-13', 'statement'),
+          payment('bill-detail', 6000, '2026-09-10', 'itemized', 'breakdown-card', '内容を確認するお店'),
+          payment('bill-detail-two', 3000, '2026-10-13', 'itemized', 'breakdown-card', '翌月の利用'),
+          payment('usage-one', 2000, '2026-10-13', 'itemized', 'detail-only-card', '長い店舗名の折り返しも確認するお店です'),
+          payment('usage-refund', -500, '2026-10-13', 'itemized', 'detail-only-card', '返金'),
+          payment('bill-no-details', 500, '2026-09-10', 'statement', 'total-only-card')];
+        api.setPage('spendable');
+        return api.spendableAmount().unpaidCardTotal;
+      });
+      assert(before === 15000, `総額と内訳を重ねて計算した: ${before}`);
+      const card = page.locator('[data-unpaid-card="breakdown-card"]');
+      const text = await card.innerText();
+      assert(text.includes('2回の支払い') && text.includes('10,000') && text.includes('3,000')
+        && await card.locator('[data-card-bill-date="2026-09-10"]').count() === 1
+        && await card.locator('[data-card-bill-date="2026-10-13"]').count() === 1, '支払日ごとの総額を確認できない');
+      assert(text.includes('明細がない額：¥4,000'), '明細が不足している額を表示しない');
+      assert(text.includes('合計が一致'), '総額と明細の一致を表示しない');
+      const intro = await page.locator('.unpaid-card-intro').innerText();
+      assert(intro.includes('10,500') && intro.includes('4,500') && intro.includes('期限より後'), '期限内・期限後の金額が分かれない');
+      await card.locator('.unpaid-usage-details summary').first().click();
+      assert(await card.getByText('内容を確認するお店', { exact: true }).isVisible(), '利用明細を展開できない');
+      const detailsOnly = page.locator('[data-unpaid-card="detail-only-card"]');
+      assert((await detailsOnly.innerText()).includes('請求総額は未登録'), '明細だけの見込みが総額と区別されない');
+      await detailsOnly.locator('.unpaid-usage-details summary').click();
+      assert((await detailsOnly.innerText()).includes('＋¥500'), '返金を支出として表示した');
+      assert((await page.locator('[data-unpaid-card="total-only-card"]').innerText()).includes('店舗ごとの利用明細は未登録'), '総額しかない状態を説明しない');
+      await card.locator('[data-action="edit-event"][data-id="bill-one"]').click();
+      assert(await page.inputValue('#event-amount') === '10000', '請求総額の編集先が違う');
+      await closeModals(page);
+      const after = await page.evaluate(() => window.__YORYOKU__.spendableAmount().unpaidCardTotal);
+      assert(after === before, '内訳の表示・展開で計算結果を変えた');
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
+      assert(!overflow, 'スマホ幅で内訳が横にはみ出す');
+    } finally {
+      await page.evaluate(saved => {
+        const api = window.__YORYOKU__, s = api.getState();
+        s.cards = saved.cards; s.transactions = saved.transactions; api.setPage('home');
+      }, original);
+    }
+  });
+
   await record('future_spendable', async () => {
     await closeModals(page);
     await page.evaluate(() => window.__YORYOKU__.setPage('spendable'));
