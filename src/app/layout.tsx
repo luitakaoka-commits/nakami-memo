@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./tokens.css";
 import "./globals.css";
+import "./home-theme.css";
 import { Providers } from "@/components/layout/Providers";
 import { STALE_ASSET_RECOVERY } from "@/lib/utils/stale-asset-recovery";
 

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>採用した3案 — くらしノート</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='2' width='24' height='28' rx='3' fill='%23713745'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="tokens.css">
+  <style>
+    *{box-sizing:border-box}html{overflow-x:clip}body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-sans);line-height:1.8}header,main,footer{width:min(1320px,calc(100% - 40px));margin:auto}header{padding:38px 0 25px;border-bottom:1px solid var(--rule)}header>p:first-child{font-size:11px;letter-spacing:.14em}h1{font-family:var(--font-serif);font-size:clamp(25px,5vw,40px);font-weight:500;margin:10px 0}header>p:last-child{font-size:13px;color:var(--muted);max-width:65em}a{color:inherit;text-underline-offset:4px}main{padding-top:25px}.screens{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}figure{margin:0;min-width:0}figcaption{margin-bottom:15px}figcaption b{display:block;font-family:var(--font-serif);font-size:21px;font-weight:600}figcaption span{font-size:12px;color:var(--muted)}img{display:block;width:100%;height:auto;border:1px solid var(--rule)}details{margin-top:40px;border-top:1px solid var(--rule);padding-top:20px}summary{cursor:pointer;font-size:14px;min-height:44px}details figure{margin:25px 0}details figcaption{font-size:13px}footer{font-size:12px;color:var(--muted);padding:30px 0 45px}a:focus-visible,summary:focus-visible{outline:3px solid var(--focus);outline-offset:4px}@media(max-width:800px){.screens{grid-template-columns:minmax(0,1fr);gap:32px}.screens figure{width:min(100%,420px);margin-inline:auto}header{padding-top:25px}h1{font-size:28px}}
+  </style>
+</head>
+<body>
+  <header><p>くらしノート / 選んだデザインの実装</p><h1>3つの表情が、日常の画面に。</h1><p>実際の画面コードを、確認用の架空データで表示した画像です。金額・品物・レシピはご本人のデータではありません。スマートフォンとパソコンでの表示を確認できます。</p></header>
+  <main>
+    <div class="screens">
+      <figure><figcaption><b>M5 ボルドーの革手帳</b><span>お金管理 / 革の色、生成りのページ、しおり。</span></figcaption><img src="実装確認/money-mobile.png" alt="ボルドーの背景と生成りの家計手帳で今使える金額を表示したお金管理。架空のデータを使用。" width="375" height="1050"></figure>
+      <figure><figcaption><b>N1 ちいさなおうち</b><span>なかみメモ / 部屋から実際の保管場所へ。</span></figcaption><img src="実装確認/home-mobile.png" alt="キッチンとリビングを部屋として選び、冷蔵庫などの保管場所を開くなかみメモ。架空のデータを使用。" width="375" height="1050"></figure>
+      <figure><figcaption><b>R1 わが家のビストロ</b><span>つくりおきノート / トマト色とメニューの文字。</span></figcaption><img src="実装確認/recipe-mobile.png" alt="ビストロの赤いストライプと明朝体でレシピを並べたつくりおきノート。架空のデータを使用。" width="375" height="1050"></figure>
+    </div>
+    <details><summary>パソコンでの表示も見る</summary>
+      <figure><figcaption>M5 / お金管理</figcaption><img loading="lazy" src="実装確認/money-desktop.png" alt="お金管理のパソコン表示" width="1440" height="1000"></figure>
+      <figure><figcaption>N1 / なかみメモ</figcaption><img loading="lazy" src="実装確認/home-desktop.png" alt="なかみメモのパソコン表示" width="1440" height="1000"></figure>
+      <figure><figcaption>R1 / つくりおきノート</figcaption><img loading="lazy" src="実装確認/recipe-desktop.png" alt="つくりおきノートのパソコン表示" width="1440" height="1000"></figure>
+    </details>
+  </main>
+  <footer><p>動きは3アプリ共通バーでオン／オフを切り替えられます。料理の完成印は「作った」の保存成功後に表示します。</p><p><a href="index.html">もとの15案を見直す</a> · <a href="実装メモ.md">実装と確認の記録</a></p></footer>
+</body>
+</html>

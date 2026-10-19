@@ -639,7 +639,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=37" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=40" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -705,7 +705,7 @@
     const targetNode = $('[data-count-amount]');
     if (!targetNode) return;
     const target = Number(targetNode.dataset.countAmount || 0);
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { targetNode.textContent = formatDisplayedAmount(target); return; }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.kurashiMotion === 'off') { targetNode.textContent = formatDisplayedAmount(target); return; }
     const startedAt = performance.now();
     const duration = 420;
     const step = now => {
@@ -914,7 +914,8 @@
       <div class="page-heading"><div><span class="eyebrow">ホーム</span><h1>ホーム</h1></div></div>
       ${renderReviewPrompt()}
 
-      <section class="card hero-card">
+      <section class="card hero-card ledger-page">
+        <div class="ledger-page-heading"><span>わたしの家計手帳</span><span class="ledger-bookmark" aria-hidden="true">${Number(today().slice(5, 7))}月</span></div>
         <span class="eyebrow">今使える金額・${formatDate(spendable.deadline, true)}まで／あと${spendable.days}日</span>
         <h1 data-count-amount="${spendable.total}">${formatDisplayedAmount(spendable.total)}</h1>
         <div class="hero-daily"><span>1日あたりの目安</span><strong>${formatDisplayedAmount(spendable.daily)}</strong><small>残り${spendable.dailyDays}日で均等に使う場合</small></div>

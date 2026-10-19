@@ -1213,3 +1213,59 @@ button.legend-row.active { background: rgba(42, 120, 214, .12); }
 @media (max-width: 520px) {
   .receipt-list-tabs { padding-inline: 1.2rem; }
 }
+
+/* M5 / ボルドーの革手帳 — existing routes, calculations and actions stay in place.
+   Critique: intent 5, hierarchy 5, execution 4, specificity 5, restraint 4, variety 5. */
+html, body { overflow-x: clip; }
+body { background: var(--bg); font-family: var(--font-ledger-body); }
+::selection { background: var(--ledger-soft); color: var(--ink); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline-color: var(--ledger-focus); }
+.topbar { top: calc(40px + env(safe-area-inset-top, 0px)); background: var(--bg-raised); border-color: var(--ledger-rule-dark); backdrop-filter: none; color: var(--ledger-on-dark); }
+.topbar::after { display: none; }
+.topbar .icon-button { color: var(--ledger-on-dark); background: transparent; border-color: var(--ledger-rule-dark); }
+.topbar-date, .local-badge { color: var(--ledger-muted-dark); }
+.topbar-context { border-color: var(--ledger-rule-dark); }
+.page-heading h1, .brand strong { font-family: var(--font-ledger); font-weight: 600; letter-spacing: .025em; }
+.page-heading .eyebrow { color: var(--ledger-gold); }
+.page-heading p { color: var(--ledger-muted-dark); }
+.card, .settings-card, .account-card, .modal, .auth-panel, .add-menu { border-color: var(--line); background: var(--surface); border-radius: var(--radius); }
+.card h2, .settings-card h2, .account-card h2, .modal h2 { font-family: var(--font-ledger); font-weight: 600; letter-spacing: .025em; }
+.eyebrow { color: var(--ledger-brand); }
+.hero-card { padding: clamp(1.25rem,3vw,2rem); border-left: 5px solid var(--line-strong); background: var(--surface-page); }
+.hero-card::before { display: none; }
+.hero-card h1 { font-family: var(--font-ledger-number); font-weight: 500; letter-spacing: -.035em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.ledger-page { outline: 1px dashed var(--ledger-rule-dark); outline-offset: 6px; margin: 8px 7px 22px; transform-origin: left center; animation: ledger-page-open 300ms var(--ledger-ease); }
+.ledger-page-heading { position: relative; border-bottom: 1px solid var(--line); padding: 0 50px 20px 0; margin-bottom: 26px; font-family: var(--font-ledger); font-size: .8rem; }
+.ledger-bookmark { position: absolute; right: 0; top: -2rem; padding: 21px 8px 24px; min-width: 38px; text-align: center; font-family: var(--font-ledger); font-size: .7rem; background: var(--ledger-brand); color: var(--ledger-on-dark); clip-path: polygon(0 0,100% 0,100% 100%,50% 88%,0 100%); animation: ledger-bookmark-in 360ms var(--spring); }
+.hero-daily { border-color: var(--line); background: var(--surface-soft); border-radius: 3px; }
+.hero-daily strong, .stat-card strong, .account-card strong, .salary-record-amount strong { font-family: var(--font-ledger-number), var(--font-ledger-body); font-variant-numeric: tabular-nums; }
+.button, .mini-button, .filter-button, .icon-button, .add-menu-item { box-shadow: none; border-radius: var(--radius-small); }
+.button-primary, .floating-add, .mini-button.primary { background: var(--ledger-brand); color: var(--ledger-on-dark); border-color: var(--ledger-brand); }
+.button-primary:hover, .floating-add:hover, .mini-button.primary:hover { background: var(--ledger-brand-strong); }
+.button-quiet, .button-danger, .mini-button, .icon-button, .modal-close { background: var(--surface-page); border-color: var(--line-strong); }
+.button-quiet:hover { background: var(--ledger-soft); border-color: var(--ledger-brand); color: var(--ledger-brand); }
+.button, .mini-button, .filter-button, .nav-link { white-space: nowrap; }
+.hero-actions { flex-wrap: wrap; }
+.range-card, .stat-card, .settings-inline, .add-menu-item { background: var(--surface-soft); }
+.range-card, .list-card, .check-summary-card { border-color: var(--line); }
+.range-card .filter-button, .receipt-list-tabs .filter-button { background: var(--surface); color: var(--muted); border-color: var(--line-strong); }
+.range-card .filter-button.active, .receipt-list-tabs .filter-button.active { background: var(--ledger-brand); color: var(--ledger-on-dark); border-color: var(--ledger-brand); }
+input:not([type="checkbox"]):not([type="radio"]), select, textarea, .amount-input, .unit-input { background: var(--surface-page); border-color: var(--line-strong); border-radius: var(--radius-small); box-shadow: none; }
+.bottom-nav { background: var(--surface); border-color: var(--line); border-radius: 8px; box-shadow: 0 8px 24px var(--ledger-shadow); backdrop-filter: none; }
+.bottom-nav .nav-link { color: var(--muted); border-radius: 5px; }
+.bottom-nav .nav-link.active { background: var(--ledger-soft); color: var(--ledger-brand); }
+.modal-backdrop, .add-menu-backdrop { background: var(--ledger-veil); }
+.modal { border-radius: 12px 12px 0 0; backdrop-filter: none; }
+.add-menu-item:hover { background: var(--ledger-soft); }
+.auth-screen { background: var(--bg); }
+.auth-panel { box-shadow: var(--shadow-card); }
+@keyframes ledger-page-open { from { opacity: .6; transform: perspective(900px) rotateY(-3deg); } to { opacity: 1; transform: perspective(900px) rotateY(0); } }
+@keyframes ledger-bookmark-in { from { transform: translateY(-9px); } to { transform: translateY(0); } }
+@media (min-width: 980px) {
+  .sidebar { background: var(--bg-raised); border-color: var(--ledger-rule-dark); backdrop-filter: none; }
+  .sidebar .nav-link { color: var(--ledger-muted-dark); border-radius: 5px; }
+  .sidebar .nav-link:hover, .sidebar .nav-link.active { color: var(--ledger-on-dark); background: var(--ledger-brand); }
+  .sidebar .brand span { color: var(--ledger-muted-dark); }
+}
+@media (max-width: 390px) { .ledger-page { margin-inline: 5px; }.hero-card { padding: 1.15rem; }.hero-card h1 { font-size: clamp(2.5rem,12vw,3.3rem); }.hero-actions .button { flex: 1; }.ledger-bookmark { top: -1.2rem; padding-top: 12px; } }
+@media (prefers-reduced-motion: reduce) { .ledger-page, .ledger-bookmark { animation: none; } }

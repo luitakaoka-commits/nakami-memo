@@ -1,6 +1,4 @@
-/* つくりおきノート
-   レシピと献立をこの端末のブラウザ内（localStorage）に保存する、モバイル優先の個人用アプリ。
-   サーバー通信・アカウント・課金・外部サイト解析は一切行わない。 */
+/* つくりおきノート。レシピ・献立・買い物はFirebaseに保存し、表示設定だけを端末に残す。 */
 
 import { watchAuth, consumeRedirectResult, signIn, signOutUser, configured } from "./firebase.js";
 import {
@@ -14,7 +12,7 @@ import { markPantryHits, pantryHitCount } from "../shared/pantry-check.js";
 const PREFS_KEY = "tsukurioki-note-prefs-v1";
 const LEGACY_KEY = "tsukurioki-note-state-v1";
 /* selectCategory（献立作成時の一時的な絞り込み）は端末に残さない。次に開いたら「すべて」に戻る。 */
-const PREF_FIELDS = ["tab", "sort", "scope", "keywordMode", "category", "theme"];
+const PREF_FIELDS = ["tab", "sort", "scope", "keywordMode", "category", "theme", "design"];
 
 const CATEGORIES = ["主菜", "副菜", "汁物", "ごはん", "麺", "お菓子", "その他"];
 const SOURCES = ["自分のレシピ", "SNS", "レシピサービス", "本・雑誌", "AIの提案"];
@@ -33,6 +31,7 @@ const SCOPES = [
   ["all", "メモ・手順も含める"]
 ];
 const THEMES = [
+  ["bistro", "ビストロ", "#a33c2b", "#8b2e20", "#efd3bd"],
   ["gold", "オレンジ", "#e7a400", "#c88500", "#fff4cf"],
   ["green", "グリーン", "#6fa16a", "#477a48", "#eef5ea"],
   ["blue", "ブルー", "#6f9ccd", "#4774a8", "#eaf1f9"]
@@ -66,7 +65,8 @@ const defaultState = {
   keywordMode: "AND",
   category: "すべて",
   selectCategory: "すべて",
-  theme: "gold",
+  theme: "bistro",
+  design: "bistro-v1",
   returnTo: "home",
   recipes: [],
   plans: [],
@@ -79,6 +79,7 @@ let draftImageBlob = null;
 let draftImageDirty = false;
 let pendingConfirm = null;
 let searchTimer = 0;
+let cookedStampId = null;
 
 /* phase: loading（認証待ち）/ syncing（初回同期待ち）/ signin / ready / setup */
 let phase = "loading";
@@ -95,7 +96,8 @@ function loadState() {
   if (!SORTS.some(([value]) => value === next.sort)) next.sort = "new";
   if (!SCOPES.some(([value]) => value === next.scope)) next.scope = "name-ing";
   if (next.keywordMode !== "OR") next.keywordMode = "AND";
-  if (!THEMES.some(([value]) => value === next.theme)) next.theme = "gold";
+  if (saved.design !== "bistro-v1" || !THEMES.some(([value]) => value === next.theme)) next.theme = "bistro";
+  next.design = "bistro-v1";
   next.screen = "home";
   next.tab = ["recipes", "meal", "shopping", "search", "settings"].includes(next.tab) ? next.tab : "recipes";
   next.query = "";
@@ -482,13 +484,21 @@ function emptyBox(title, body, actionHtml) {
   return '<div class="empty"><h2>' + title + "</h2><p>" + body + "</p>" + (actionHtml || "") + "</div>";
 }
 
+function bistroHeader(recipe) {
+  const feature = recipe ? '<button class="bistro-feature" data-action="detail" data-id="' + esc(recipe.id) + '">' +
+    '<span class="bistro-feature__art">' + ICONS.plate + (recipe.image ? '<img src="' + esc(recipe.image) + '" alt="" onerror="this.remove()" />' : '') + '</span>' +
+    '<span class="bistro-feature__copy"><small>わが家のひと皿</small><strong>' + esc(recipe.title) + '</strong><span>' + esc(recipe.category) + ' · ' + recipe.servings + '人分</span></span>' +
+    '<span class="bistro-feature__go" aria-hidden="true">' + ICONS.chevron + '</span></button>' : '';
+  return '<header class="bistro-heading"><p>わが家のビストロ</p><h2>いつもの、ひと皿。</h2><span>RECIPES FOR EVERYDAY</span></header>' + feature;
+}
+
 function renderHome() {
   if (!state.recipes.length) {
-    return '<section>' + emptyBox("レシピがまだありません", "右下の＋から、材料と手順を入力して登録します。<br>保存先はこの端末のブラウザ内です。", '<button class="btn btn--primary" data-action="new-recipe">最初のレシピを登録する</button>') + fab("new-recipe", "レシピを登録") + "</section>";
+    return '<section>' + bistroHeader(null) + emptyBox("レシピがまだありません", "右下の＋から、材料と手順を入力して登録します。<br>レシピはログインしたアカウントに保存されます。", '<button class="btn btn--primary" data-action="new-recipe">最初のレシピを登録する</button>') + fab("new-recipe", "レシピを登録") + "</section>";
   }
   const list = browseRecipes();
   const sortLabel = (SORTS.find(([value]) => value === state.sort) || SORTS[0])[1];
-  return "<section>" + categoryChips(state.category, "set-category") +
+  return "<section>" + bistroHeader(list[0]) + categoryChips(state.category, "set-category") +
     '<div class="list-head"><span>' + list.length + '件</span><button class="link-btn" data-action="open-sort">' + esc(sortLabel) + "</button></div>" +
     (list.length ? recipeList(list) : emptyBox("この分類のレシピはありません", "上の分類を切り替えてください。", "")) +
     fab("new-recipe", "レシピを登録") + "</section>";
@@ -560,6 +570,7 @@ function renderDetail() {
   return "<section>" + hero +
     '<div class="detail__head"><h1>' + esc(recipe.title) + '</h1><p class="detail__meta">' + esc(recipe.category) + " ／ " + esc(recipe.source) + " ／ " + recipe.servings + "人分</p>" +
     '<p class="detail__cooked">' + esc(daysAgoLabel(recipe.lastCookedAt)) + "</p>" + url + "</div>" +
+    (cookedStampId === recipe.id ? '<p class="bistro-completion" role="status">' + ICONS.check + '<span>作りました</span><small>' + esc(new Date(recipe.lastCookedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })) + '</small></p>' : '') +
     (recipe.memo ? '<div class="card"><h2 class="card__head">メモ</h2><p class="detail__memo">' + esc(recipe.memo) + "</p></div>" : "") +
     '<div class="card"><h2 class="card__head">材料<span class="card__note">' + recipe.servings + "人分</span></h2><ul class=\"plain-list\">" + recipe.ingredients.map((item) => "<li>" + esc(item) + "</li>").join("") + "</ul></div>" +
     '<div class="card"><h2 class="card__head">手順</h2><ol class="step-list">' + recipe.steps.map((item) => "<li>" + esc(item) + "</li>").join("") + "</ol></div>" +
@@ -704,8 +715,18 @@ let stockSheet = null;
 async function markCooked(id) {
   const recipe = state.recipes.find((item) => item.id === id);
   if (!recipe) return;
+  cookedStampId = null;
   recipe.lastCookedAt = Date.now();
-  patchDocument("recipes", id, { lastCookedAt: recipe.lastCookedAt });
+  /* Existing optimistic cooking / stock flow stays responsive offline. The decorative
+     completion stamp appears only after this write has actually been acknowledged. */
+  patchDocument("recipes", id, { lastCookedAt: recipe.lastCookedAt }, { rejectOnError: true }).then(() => {
+    cookedStampId = id;
+    if (state.screen === "detail" && state.detailId === id) render();
+  }).catch(() => {
+    cookedStampId = null;
+    if (state.screen === "detail" && state.detailId === id) render();
+    showToast("作った記録を保存できませんでした", "danger");
+  });
   render();
 
   const source = Array.isArray(recipe.sourceItems) ? recipe.sourceItems : [];

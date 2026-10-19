@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eeeae2">
+  <meta name="description" content="くらしノートの3アプリ、それぞれ5つの触れるデザイン案。">
+  <title>くらしノート — 15のデザイン案</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect x='5' y='3' width='30' height='34' rx='4' fill='%2329302c'/%3E%3Cpath d='M13 3v15l4-3 4 3V3' fill='%23c0b68d'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Klee+One:wght@400;600&family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@400;500;600;700&family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#gallery">デザイン案へ移動</a>
+  <header class="masthead">
+    <a href="#" class="wordmark" aria-label="くらしノート デザイン案の先頭へ"><span class="book-mark" aria-hidden="true"><i></i><i></i><i></i></span>くらしノート<span class="wordmark-sub">DESIGN STUDIES</span></a>
+    <button id="motion-toggle" class="quiet-button" type="button" aria-pressed="true"><span class="motion-dot" aria-hidden="true"></span><span>動き：オン</span></button>
+  </header>
+  <section class="intro" aria-labelledby="page-title">
+    <div><p class="eyebrow">THREE APPS, FIFTEEN EXPRESSIONS</p><h1 id="page-title">いつもの暮らしに、<br>違う表情を。</h1></div>
+    <div class="intro-note"><span class="edition">15<span>案</span></span><p>お金は、頼もしく。家のなかは、楽しく。<br>料理は、もっとおいしそうに。</p><p class="small">ボタンやタブを押して、手触りまで比べてください。<br>表示内容はすべて見本です。</p></div>
+  </section>
+  <div class="sticky-toolbar">
+    <div class="app-tabs" role="tablist" aria-label="デザインを比べるアプリ">
+      <button id="tab-money" role="tab" type="button" aria-selected="true" aria-controls="gallery-panel" data-app="money"><span>01</span>お金管理<i aria-hidden="true"></i></button>
+      <button id="tab-home" role="tab" type="button" aria-selected="false" aria-controls="gallery-panel" data-app="home" tabindex="-1"><span>02</span>なかみメモ<i aria-hidden="true"></i></button>
+      <button id="tab-recipe" role="tab" type="button" aria-selected="false" aria-controls="gallery-panel" data-app="recipe" tabindex="-1"><span>03</span>つくりおき<i aria-hidden="true"></i></button>
+    </div>
+    <a class="shortlist-link" href="#shortlist">選んだ候補 <span id="selected-count">0</span><span aria-hidden="true">↗</span></a>
+  </div>
+  <main id="gallery-panel" role="tabpanel" aria-labelledby="tab-money">
+    <div class="section-heading"><div><p id="section-kicker" class="eyebrow">MONEY / 5 CONCEPTS</p><h2 id="section-title">お金に向き合う、5つの佇まい。</h2></div><p id="section-note">重厚さの中に、金額の読みやすさを。</p></div>
+    <div id="gallery" class="gallery"></div>
+  </main>
+  <section id="shortlist" class="shortlist" aria-labelledby="shortlist-title"><div><p class="eyebrow">YOUR SELECTION</p><h2 id="shortlist-title">いま、気になる組み合わせ。</h2><p>各アプリで1案ずつ選べます。違う案の色や動きを組み合わせても大丈夫です。</p></div><div id="selection-list" class="selection-list"></div><button id="copy-selection" class="copy-button" type="button">選んだ案をコピー</button><p id="copy-status" class="small" role="status" aria-live="polite"></p></section>
+  <footer><span>くらしノート / UIデザイン案</span><p>見本内の操作はデモです。実際の金額・在庫・レシピは変更されません。<br>本番で採用する際は、選んだ案をもとに既存の全画面を整えます。</p></footer>
+  <dialog id="detail-dialog" aria-labelledby="detail-title"><button id="close-dialog" class="close-dialog" type="button" aria-label="拡大表示を閉じる">×</button><div id="detail-body"></div></dialog>
+  <noscript><p>操作できる見本を表示するにはJavaScriptを有効にしてください。各案の説明は同じフォルダの「デザイン案.md」でも読めます。</p></noscript>
+  <script src="concepts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

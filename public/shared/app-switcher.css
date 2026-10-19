@@ -6,15 +6,15 @@
    （どこにいても同じ場所に同じものがある、という手触りが切り替えUIの価値なので）。 */
 
 .appsw {
-  --appsw-bg: #ffffff;
-  --appsw-ink: #16211c;
-  --appsw-muted: #6d7d72;
-  --appsw-line: #e0e5df;
-  --appsw-line-strong: #cbd3c9;
+  --appsw-bg: #fffaf0;
+  --appsw-ink: #513d32;
+  --appsw-muted: #79614b;
+  --appsw-line: #ddcdb6;
+  --appsw-line-strong: #c3ad8f;
   --appsw-sheet-shadow: 0 -8px 32px rgba(12, 24, 18, 0.18);
-  --appsw-money: #14402f;
-  --appsw-nakami: #1f5c43;
-  --appsw-recipe: #8a6a1f;
+  --appsw-money: #713745;
+  --appsw-nakami: #a54b32;
+  --appsw-recipe: #a33c2b;
 
   font-family: inherit;
   box-sizing: border-box;
@@ -26,11 +26,11 @@
 
 @media (prefers-color-scheme: dark) {
   .appsw {
-    --appsw-bg: #161d19;
-    --appsw-ink: #e4ebe5;
-    --appsw-muted: #8fa096;
-    --appsw-line: #29332d;
-    --appsw-line-strong: #3a453e;
+    --appsw-bg: #30251f;
+    --appsw-ink: #faf2e2;
+    --appsw-muted: #d0bfa9;
+    --appsw-line: #594535;
+    --appsw-line-strong: #7b614b;
   }
 }
 
@@ -91,6 +91,13 @@
   flex: none;
   color: var(--appsw-muted);
 }
+
+.appsw-motion { display: inline-flex; align-items: center; gap: 5px; min-height: 40px; margin-left: auto; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--appsw-muted); font: inherit; font-size: 10px; white-space: nowrap; cursor: pointer; touch-action: manipulation; }
+.appsw-motion > span { font-size: 13px; }
+.appsw-motion:hover { background: var(--appsw-line); }
+.appsw-motion:focus-visible { outline: 2px solid var(--appsw-nakami); outline-offset: -2px; }
+.appsw-motion:disabled { cursor: default; }
+html[data-kurashi-motion="off"] *, html[data-kurashi-motion="off"] *::before, html[data-kurashi-motion="off"] *::after { animation: none !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 
 /* ---------- シート ---------- */
 

@@ -286,3 +286,57 @@ textarea { min-height: 84px; resize: vertical; }
 /* ---------- 通信状態 ---------- */
 .net-banner { padding: 5px 12px; background: #4a463f; color: #fff; font-size: 12px; text-align: center; }
 .net-banner--sync { background: var(--accent-deep); }
+
+/* R1 / わが家のビストロ — menu typography, warm paper and tomato stripes.
+   Critique: intent 5, hierarchy 4, execution 4, specificity 5, restraint 4, variety 5. */
+html, body { overflow-x: clip; }
+.topbar-wrap { top: calc(40px + env(safe-area-inset-top, 0px)); }
+.topbar { padding-inline: max(16px, calc((100vw - 840px) / 2)); background: var(--surface); }
+.topbar__title, .sheet__title, .card__head, .empty h2, .gate h1 { font-family: var(--font-menu); font-weight: 600; letter-spacing: .02em; }
+#main-content { width: min(100%, 840px); padding-top: 22px; }
+.bottom-nav { background: var(--surface); border-top-color: var(--line); }
+.bottom-nav__item { min-height: 56px; font-size: 10px; white-space: nowrap; border-radius: 4px; }
+.bottom-nav__item.is-active { background: var(--accent-soft); }
+.btn, .topbar__link, .link-btn, .chip, .sheet-list button { min-height: 44px; white-space: nowrap; touch-action: manipulation; }
+.icon-btn, .icon-btn--sm { min-width: 44px; min-height: 44px; }
+.btn:active, .icon-btn:active, .chip:active, .fab:active { transform: translateY(1px) scale(.97); transition: transform 90ms var(--ease); }
+.btn--primary, .fab, .sheet__primary { background: var(--accent); color: var(--bistro-paper); }
+.btn--primary:hover, .sheet__primary:hover { background: var(--accent-deep); }
+.card, .row-list { background: var(--surface); border-radius: var(--radius-card); }
+.row--recipe { min-height: 92px; padding-block: 15px; }
+.row--recipe .row__title { font-family: var(--font-menu); font-size: 17px; font-weight: 600; line-height: 1.6; }
+.row__go { color: var(--muted); }
+.row__meta, .row__sub { margin-top: 4px; }
+.thumb { border-color: var(--line); background: var(--bistro-plate); }
+.chip-row { margin-top: 24px; }
+.bistro-heading { position: relative; text-align: center; padding: 31px 12px 22px; border-bottom: 1px solid var(--line); margin-bottom: 23px; }
+.bistro-heading::before { content: ''; position: absolute; height: 9px; top: 0; left: 0; right: 0; background: repeating-linear-gradient(90deg,var(--accent) 0 var(--bistro-stripe-width),var(--surface) var(--bistro-stripe-width) calc(var(--bistro-stripe-width)*2)); }
+.bistro-heading > p { font-family: var(--font-menu); font-size: 12px; color: var(--accent-deep); }
+.bistro-heading > h2 { font-family: var(--font-menu); font-size: clamp(24px,5vw,34px); font-weight: 500; letter-spacing: .06em; margin-top: 7px; }
+.bistro-heading > span { display: inline-block; padding-top: 9px; margin-top: 12px; border-top: 1px solid var(--line); font-family: var(--font-number); font-size: 9px; letter-spacing: .2em; color: var(--muted); }
+.bistro-feature { display: grid; grid-template-columns: minmax(100px, .8fr) minmax(0,1fr) 18px; align-items: center; width: 100%; gap: 20px; padding: 18px; border: 1px solid var(--line); background: var(--surface); text-align: left; transition: background 160ms var(--ease), transform 100ms var(--ease); }
+.bistro-feature:hover { background: var(--surface-warm); }.bistro-feature:active { transform: scale(.985); }
+.bistro-feature__art { position: relative; display: grid; min-width: 0; height: 165px; place-items: center; background: var(--bistro-plate); border-radius: 50%; overflow: clip; color: var(--accent-deep); }
+.bistro-feature__art > svg { width: 85px; height: 85px; stroke-width: .8; }
+.bistro-feature__art > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.bistro-feature__copy { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
+.bistro-feature__copy > small { font-size: 10px; color: var(--accent-deep); }
+.bistro-feature__copy > strong { font-family: var(--font-menu); font-weight: 600; font-size: clamp(18px,3vw,25px); line-height: 1.7; overflow-wrap: anywhere; }
+.bistro-feature__copy > span { font-size: 11px; color: var(--muted); }
+.bistro-feature__go > svg { display: block; width: 18px; height: 18px; color: var(--muted); }
+.detail__hero { background: var(--bistro-plate); border: 1px solid var(--line); border-radius: 3px; }
+.detail__hero > svg { stroke-width: 1; color: var(--accent-deep); }
+.detail__head { border-block: 1px solid var(--line); padding-block: 22px; margin-block: 22px; }
+.detail__head h1 { font-family: var(--font-menu); font-size: clamp(25px,4vw,34px); font-weight: 600; line-height: 1.65; }
+.detail__meta, .detail__cooked { color: var(--muted); }
+.step-list li::before { background: var(--accent-soft); color: var(--accent-deep); font-family: var(--font-number); }
+.bistro-completion { display: flex; align-items: center; justify-content: center; gap: 12px; width: fit-content; max-width: 100%; margin: 0 auto 24px; padding: 10px 18px; border: 2px solid var(--accent); color: var(--accent-deep); background: var(--surface); transform: rotate(-3deg); font-family: var(--font-menu); font-weight: 600; animation: bistro-stamp var(--bistro-motion) var(--ease); }
+.bistro-completion > svg { height: 24px; width: 24px; }
+.bistro-completion > small { border-left: 1px solid var(--line); padding-left: 12px; font-size: 11px; }
+.toast.is-success { background: var(--accent-deep); color: var(--bistro-paper); }
+.sheet { background: var(--surface); border-radius: 12px 12px 0 0; }
+.sheet-list button { border-bottom: 1px solid var(--line); }
+.card__head { gap: 12px; flex-wrap: wrap; }
+@keyframes bistro-stamp { 0% { opacity: 0; transform: scale(1.18) rotate(-7deg); } 65% { opacity: 1; transform: scale(.98) rotate(-3deg); } 100% { transform: scale(1) rotate(-3deg); } }
+@media (max-width: 400px) { .bistro-feature { grid-template-columns: 87px minmax(0,1fr) 12px; gap: 12px; padding: 14px; }.bistro-feature__art { height: 108px; }.bistro-feature__art > svg { width: 60px; height: 60px; }.bistro-feature__copy { gap: 7px; }.bistro-feature__copy > strong { font-size: 17px; }.bistro-feature__copy > small { font-size: 9px; }.bistro-feature__copy > span { font-size: 10px; }.bistro-feature__go > svg { width: 12px; }.bistro-completion { gap: 8px; padding-inline: 12px; font-size: 14px; }.row--recipe .row__title { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) { .bistro-completion { animation: none; }.bistro-feature, .btn, .chip, .icon-btn { transition: none; } }

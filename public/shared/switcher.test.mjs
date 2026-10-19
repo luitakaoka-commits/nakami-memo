@@ -171,5 +171,33 @@ t("アイコンのSVGが3種とも組み立てられる", () => {
   }
 });
 
+t("動きを止めると設定と押下状態が一致し、再開できる", () => {
+  const button = bar.querySelector('.appsw-motion');
+  button.click();
+  eq(document.documentElement.dataset.kurashiMotion, 'off', '動きを停止');
+  eq(localStorage.getItem('kurashi-motion'), 'off', '端末に保存');
+  eq(button.getAttribute('aria-pressed'), 'false', '停止中の押下状態');
+  button.click();
+  eq(document.documentElement.dataset.kurashiMotion, 'on', '動きを再開');
+});
+
+t("別のアプリにも動きを止める設定を引き継ぐ", () => {
+  localStorage.setItem('kurashi-motion', 'off');
+  const other = mountAppSwitcher({ current: 'recipe' });
+  eq(other.querySelector('.appsw-motion').getAttribute('aria-pressed'), 'false', '引継ぎ');
+  other.remove();
+  localStorage.removeItem('kurashi-motion');
+});
+
+t("端末の動きを減らす設定を優先する", () => {
+  const previous = window.matchMedia;
+  window.matchMedia = () => ({ matches: true, addEventListener() {} });
+  const other = mountAppSwitcher({ current: 'nakami' });
+  ok(other.querySelector('.appsw-motion').disabled, '端末設定中は動かさない');
+  eq(document.documentElement.dataset.kurashiMotion, 'off', '端末設定に従う');
+  other.remove();
+  window.matchMedia = previous;
+});
+
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);
 process.exit(fail ? 1 : 0);

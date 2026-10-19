@@ -150,6 +150,38 @@ function openSheet(currentId) {
  * 切り替えバーを画面の一番上に差し込む。
  * mount を渡さない場合は body の先頭に入れる（各アプリの既存レイアウトを触らずに済む）。
  */
+function addMotionControl(bar) {
+  const key = 'kurashi-motion';
+  const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'appsw-motion';
+  function update() {
+    let saved = null;
+    try { saved = localStorage.getItem(key); } catch { /* Storage can be unavailable. */ }
+    const stopped = Boolean(media?.matches) || saved === 'off';
+    document.documentElement.dataset.kurashiMotion = stopped ? 'off' : 'on';
+    button.setAttribute('aria-pressed', String(!stopped));
+    button.setAttribute('aria-label', media?.matches ? '端末の設定で動きを減らしています' : (stopped ? 'アニメーションを動かす' : 'アニメーションを止める'));
+    button.title = button.getAttribute('aria-label');
+    button.innerHTML = '<span aria-hidden="true">' + (stopped ? 'Ⅱ' : '▷') + '</span> 動き ' + (stopped ? 'オフ' : 'オン');
+    button.disabled = Boolean(media?.matches);
+  }
+  button.addEventListener('click', () => {
+    const next = document.documentElement.dataset.kurashiMotion === 'off' ? 'on' : 'off';
+    try { localStorage.setItem(key, next); } catch { /* The setting still applies to this page. */ }
+    document.documentElement.dataset.kurashiMotion = next;
+    button.setAttribute('aria-pressed', String(next === 'on'));
+    button.setAttribute('aria-label', next === 'on' ? 'アニメーションを止める' : 'アニメーションを動かす');
+    button.title = button.getAttribute('aria-label');
+    button.innerHTML = '<span aria-hidden="true">' + (next === 'on' ? '▷' : 'Ⅱ') + '</span> 動き ' + (next === 'on' ? 'オン' : 'オフ');
+  });
+  if (media?.addEventListener) media.addEventListener('change', update);
+  window.addEventListener('storage', (event) => { if (event.key === key) update(); });
+  update();
+  bar.appendChild(button);
+}
+
 export function mountAppSwitcher(options) {
   const currentId = (options && options.current) || "nakami";
   const app = APPS.find((entry) => entry.id === currentId) || APPS[1];
@@ -166,6 +198,7 @@ export function mountAppSwitcher(options) {
     "</button>";
 
   bar.querySelector(".appsw-trigger").addEventListener("click", () => openSheet(currentId));
+  addMotionControl(bar);
 
   if (mount) mount.appendChild(bar);
   else document.body.insertBefore(bar, document.body.firstChild);

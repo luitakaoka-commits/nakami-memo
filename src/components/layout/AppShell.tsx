@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="ui-app-shell">
       <aside className="ui-sidebar">
         <Link href="/app" className="ui-sidebar-brand">
-          <span className="ui-brand-mark ui-brand-mark--small" aria-hidden="true"><Box size={21} strokeWidth={1.8} /></span>
+          <span className="ui-brand-mark ui-brand-mark--small" aria-hidden="true"><Home size={21} strokeWidth={1.8} /></span>
           <span className="ui-brand-name">なかみメモ</span>
         </Link>
 
@@ -69,7 +69,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <AppSwitcher />
         <header className="ui-mobile-header">
           <Link href="/app" className="ui-mobile-brand">
-            <span className="ui-brand-mark ui-brand-mark--small" aria-hidden="true"><Box size={21} strokeWidth={1.8} /></span>
+            <span className="ui-brand-mark ui-brand-mark--small" aria-hidden="true"><Home size={21} strokeWidth={1.8} /></span>
             <span className="ui-brand-name">なかみメモ</span>
           </Link>
           <span className="ui-mobile-actions">
