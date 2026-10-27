@@ -13,7 +13,7 @@ export const firebaseSync = {
   addMember: async () => {},
   removeMember: async () => {},
   renameWorkspace: async () => {},
-  updateImportCandidate: async () => {},
+  updateImportCandidate: async (id, patch) => { (window.__TEST_CALLS__ ||= []).push({ fn: 'updateImportCandidate', id, patch }); },
   deleteImportCandidate: async () => {},
   // レシートの保存は Firestore に行かず、呼ばれた中身を window.__TEST_CALLS__ に残す（テストが中身を見る）
   saveReceipt: async (receipt, items) => { (window.__TEST_CALLS__ ||= []).push({ fn: 'saveReceipt', receipt, items }); return receipt.id || 'r-new'; },

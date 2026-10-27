@@ -5,7 +5,8 @@
  *  - 本文の全文、カード番号、口座番号、認証コードは保存もログ出力もしない。
  *  - 解析できたものだけを構造化して保存し、確信が持てないものは needs_review にする。
  *  - 取り込んだ時点では正式な取引にしない。Webアプリでユーザーが承認して初めて取引になる。
- *  - fingerprint を Firestore のドキュメントIDに使い、同じメールを二重に登録しない。
+ *  - メール固有IDからFirestoreのドキュメントIDを作り、同じメールの再処理を防ぐ。
+ *  - fingerprint は似た通知の警告に使う。同額同日の別の利用を勝手に消さない。
  *
  * 認証について
  *  パスワードもAPIキーも保存しない。スクリプトを実行するGoogleアカウント自身の
@@ -20,47 +21,136 @@
 
 var DEFAULT_QUERY = 'newer_than:7d (subject:(利用 OR ご利用 OR 速報 OR お知らせ) OR from:(jcb.co.jp OR vpass.ne.jp OR smbc-card.com OR 01epos.jp OR eposcard.co.jp OR rakuten-card.co.jp OR paypay-card.co.jp OR aeon.co.jp OR saisoncard.co.jp OR cr.mufg.jp))';
 var PROCESSED_LABEL = 'CashManege/取込済み';
-var MAX_THREADS = 50;
+var MAX_MESSAGES = 50;
 
 /** 定期実行のエントリポイント。時間主導型トリガーでこの関数を呼ぶ。 */
 function importCardMails() {
-  var config = readConfig();
-  var label = getOrCreateLabel(PROCESSED_LABEL);
-  var query = (config.gmailQuery || DEFAULT_QUERY) + ' -label:"' + PROCESSED_LABEL + '"';
-  var threads = GmailApp.search(query, 0, MAX_THREADS);
-
   var summary = { scanned: 0, created: 0, duplicated: 0, needsReview: 0, failed: 0 };
-  if (!threads.length) {
-    Logger.log(JSON.stringify(summary));
-    return summary;
-  }
-
-  var token = fetchAccessToken();
-
-  for (var t = 0; t < threads.length; t += 1) {
-    var messages = threads[t].getMessages();
-    var handled = true;
-    for (var m = 0; m < messages.length; m += 1) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) { summary.skipped = true; return summary; }
+  try {
+    var properties = PropertiesService.getScriptProperties();
+    var query = (properties.getProperty('GMAIL_QUERY') || DEFAULT_QUERY) + ' -label:"' + PROCESSED_LABEL + '"';
+    var token = fetchAccessToken();
+    var messageIds = searchMessageIds(query, token);
+    if (!messageIds.length) { Logger.log(JSON.stringify(summary)); return summary; }
+    var labelId = getOrCreateLabelId(PROCESSED_LABEL, token);
+    var config = readConfig();
+    for (var m = 0; m < messageIds.length; m += 1) {
       summary.scanned += 1;
       try {
-        var candidate = buildCandidate(messages[m]);
-        if (!candidate) continue;
-        if (candidate.status === 'needs_review') summary.needsReview += 1;
-        var result = saveCandidate(config, token, candidate);
-        if (result === 'created') summary.created += 1;
-        else if (result === 'duplicate') summary.duplicated += 1;
+        var message = readGmailMessage(messageIds[m], token);
+        if (!message) throw new Error('メールを取得できません');
+        var candidate = buildCandidate(message);
+        if (candidate) {
+          if (candidate.status === 'needs_review') summary.needsReview += 1;
+          var result = saveCandidate(config, token, candidate, messageDocumentId(messageIds[m]));
+          if (result === 'created') summary.created += 1;
+          else if (result === 'duplicate') summary.duplicated += 1;
+        }
+        markMessageProcessed(messageIds[m], labelId, token);
       } catch (error) {
-        handled = false;
         summary.failed += 1;
         // 本文は出力しない。原因の特定に必要な最小限だけ残す。
         Logger.log('取り込みに失敗: ' + error.message);
       }
     }
-    if (handled) threads[t].addLabel(label);
+    Logger.log(JSON.stringify(summary));
+    return summary;
+  } finally {
+    lock.releaseLock();
   }
+}
 
-  Logger.log(JSON.stringify(summary));
-  return summary;
+/** Gmail APIで未処理のメールを1通ずつ検索する。スレッド単位の検索は使わない。 */
+function searchMessageIds(query, token, limit) {
+  var url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=' + (limit || MAX_MESSAGES) + '&q=' + encodeURIComponent(query);
+  var response = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + token } });
+  if (response.getResponseCode() !== 200) throw new Error('Gmailの検索に失敗しました (HTTP ' + response.getResponseCode() + ')');
+  return (JSON.parse(response.getContentText()).messages || []).map(function (message) { return message.id; });
+}
+
+/** gmail.modifyの範囲でラベルとメールを読む。本文は保存・ログ出力しない。 */
+function getOrCreateLabelId(name, token) {
+  var url = 'https://gmail.googleapis.com/gmail/v1/users/me/labels';
+  var response = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + token } });
+  if (response.getResponseCode() !== 200) throw new Error('Gmailラベルを取得できません (HTTP ' + response.getResponseCode() + ')');
+  var labels = JSON.parse(response.getContentText()).labels || [];
+  for (var i = 0; i < labels.length; i += 1) if (labels[i].name === name) return labels[i].id;
+  response = UrlFetchApp.fetch(url, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + token }, payload: JSON.stringify({ name: name }) });
+  if (response.getResponseCode() !== 200) throw new Error('Gmailラベルを作成できません (HTTP ' + response.getResponseCode() + ')');
+  return JSON.parse(response.getContentText()).id;
+}
+
+function readGmailMessage(messageId, token) {
+  var url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + encodeURIComponent(messageId) + '?format=full';
+  var response = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + token } });
+  if (response.getResponseCode() !== 200) throw new Error('メールを取得できません (HTTP ' + response.getResponseCode() + ')');
+  var data = JSON.parse(response.getContentText());
+  var payload = data.payload || {};
+  var headers = payload.headers || [];
+  function header(name) {
+    var found = headers.filter(function (item) { return String(item.name || '').toLowerCase() === name; })[0];
+    return found ? decodeMimeHeader(String(found.value || '')) : '';
+  }
+  function textParts(part) {
+    if (!part) return [];
+    var results = [];
+    if (part.mimeType === 'text/plain' && part.body && part.body.data) {
+      var contentType = (part.headers || []).filter(function (item) { return String(item.name || '').toLowerCase() === 'content-type'; })[0];
+      var charset = contentType && String(contentType.value || '').match(/charset\s*=\s*["']?([^;"'\s]+)/i);
+      var encoded = part.body.data;
+      while (encoded.length % 4) encoded += '=';
+      results.push(Utilities.newBlob(Utilities.base64DecodeWebSafe(encoded)).getDataAsString(charset ? charset[1] : 'UTF-8'));
+    }
+    (part.parts || []).forEach(function (child) { results = results.concat(textParts(child)); });
+    return results;
+  }
+  var receivedMillis = Number(data.internalDate);
+  var receivedAt = new Date(receivedMillis);
+  if (!receivedMillis || !Number.isFinite(receivedAt.getTime())) throw new Error('メールの受信日時を取得できません');
+  var body = textParts(payload).join('\n');
+  return { getFrom: function () { return header('from'); }, getSubject: function () { return header('subject'); },
+    getPlainBody: function () { return body; }, getDate: function () { return receivedAt; } };
+}
+
+/** RFC 2047でエンコードされた件名や差出人を、判定前に元の文字へ戻す。 */
+function decodeMimeHeader(value) {
+  return String(value || '').replace(/(\?=)\s+(?==\?)/g, '$1').replace(/=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
+    function (whole, charset, mode, encoded) {
+      try {
+        var bytes;
+        if (mode.toLowerCase() === 'b') {
+          while (encoded.length % 4) encoded += '=';
+          bytes = Utilities.base64Decode(encoded);
+        } else {
+          var value = encoded.replace(/_/g, ' ');
+          bytes = [];
+          for (var i = 0; i < value.length; i += 1) {
+            if (value[i] === '=' && /^[0-9a-f]{2}$/i.test(value.slice(i + 1, i + 3))) {
+              var byte = parseInt(value.slice(i + 1, i + 3), 16);
+              bytes.push(byte > 127 ? byte - 256 : byte);
+              i += 2;
+            } else bytes.push(value.charCodeAt(i));
+          }
+        }
+        return Utilities.newBlob(bytes).getDataAsString(charset);
+      } catch (error) { return whole; }
+    });
+}
+
+function markMessageProcessed(messageId, labelId, token) {
+  var url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + encodeURIComponent(messageId) + '/modify';
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + token }, payload: JSON.stringify({ addLabelIds: [labelId] })
+  });
+  if (response.getResponseCode() !== 200) throw new Error('処理済みラベルを付けられません (HTTP ' + response.getResponseCode() + ')');
+}
+
+function messageDocumentId(messageId) {
+  return 'gm_' + digestHex('gmail-message:' + messageId).slice(0, 40);
 }
 
 /** 1通のメールから取込候補を組み立てる。保存してよい項目だけを返す。 */
@@ -73,7 +163,7 @@ function buildCandidate(message) {
   var parsed = parseCardMail({ sender: sender, subject: subject, body: body, receivedAt: receivedAt });
   if (!parsed) return null;
 
-  var usedDate = parsed.usedDate || formatDate(receivedAt);
+  var usedDate = parsed.usedDate || '';
   var amount = parsed.amount === null ? 0 : parsed.amount;
   var status = parsed.confident && amount > 0 ? 'pending' : 'needs_review';
 
@@ -91,16 +181,16 @@ function buildCandidate(message) {
     createdAt: new Date().toISOString(),
     createdBy: 'gas-card-mail-import'
   };
-  candidate.fingerprint = buildFingerprint(candidate, subject);
+  candidate.fingerprint = buildFingerprint(candidate, subject, formatDate(receivedAt));
   return candidate;
 }
 
 /**
  * 重複判定用のfingerprint。
  * 通知元・金額・利用日・種別・件名の正規化値から作る。
- * Firestore のドキュメントIDとして使うため、同じメールが再送されても1件しか作られない。
+ * 異なるメールでも同じ値になりうるため、自動で捨てず、重複の可能性を表示する目印にする。
  */
-function buildFingerprint(candidate, subject) {
+function buildFingerprint(candidate, subject, fallbackDate) {
   var normalizedSubject = String(subject || '')
     .replace(/[\s　]+/g, '')
     .replace(/[0-9０-９]/g, '#')
@@ -108,17 +198,21 @@ function buildFingerprint(candidate, subject) {
   var seed = [
     candidate.sourcePackage,
     String(candidate.amount),
-    candidate.usedDate,
+    candidate.usedDate || fallbackDate || '',
     candidate.type,
     normalizedSubject
   ].join('|');
+  return digestHex(seed).slice(0, 40);
+}
+
+function digestHex(seed) {
   var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, seed, Utilities.Charset.UTF_8);
   var hex = '';
   for (var i = 0; i < digest.length; i += 1) {
     var value = (digest[i] + 256) % 256;
     hex += (value < 16 ? '0' : '') + value.toString(16);
   }
-  return hex.slice(0, 40);
+  return hex;
 }
 
 /* ---------- Firebase ---------- */
@@ -177,12 +271,12 @@ function discoverWorkspaceId(config) {
 
 /**
  * 取込候補を保存する。
- * fingerprint をドキュメントIDにしているため、同じ内容は二重に作られない。
+ * メールIDから作ったドキュメントIDにより、同じメールの再処理を重複登録しない。
  */
-function saveCandidate(config, token, candidate) {
+function saveCandidate(config, token, candidate, documentId) {
   var base = 'https://firestore.googleapis.com/v1/projects/' + config.projectId
     + '/databases/(default)/documents/workspaces/' + config.workspaceId + '/importCandidates';
-  var url = base + '?documentId=' + encodeURIComponent(candidate.fingerprint);
+  var url = base + '?documentId=' + encodeURIComponent(documentId || candidate.fingerprint);
 
   var response = UrlFetchApp.fetch(url, {
     method: 'post',
@@ -213,12 +307,11 @@ function toFirestoreFields(object) {
 
 /* ---------- 共通ヘルパ ---------- */
 
-function getOrCreateLabel(name) {
-  return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
-}
-
 function extractSenderDomain(sender) {
-  var match = String(sender).match(/@([A-Za-z0-9.\-]+)/);
+  var address = String(sender || '').trim();
+  var bracketed = address.match(/<([^<>]+)>/);
+  if (bracketed) address = bracketed[1].trim();
+  var match = address.match(/@([A-Za-z0-9.\-]+)$/);
   return match ? match[1].toLowerCase() : 'unknown';
 }
 
@@ -242,12 +335,12 @@ function setup() {
   report.workspaceId = config.workspaceId;
 
   var query = (config.gmailQuery || DEFAULT_QUERY) + ' -label:"' + PROCESSED_LABEL + '"';
-  var threads = GmailApp.search(query, 0, 10);
-  report.gmailMatched = threads.length;
+  var token = fetchAccessToken();
+  var messageIds = searchMessageIds(query, token, 10);
+  report.gmailMatched = messageIds.length;
 
-  threads.forEach(function (thread) {
-    thread.getMessages().forEach(function (message) {
-      var candidate = buildCandidate(message);
+  messageIds.forEach(function (id) {
+      var candidate = buildCandidate(readGmailMessage(id, token));
       if (!candidate) return;
       // 本文は含めない
       report.parsed.push({
@@ -259,7 +352,6 @@ function setup() {
         種別: candidate.type,
         状態: candidate.status
       });
-    });
   });
 
   Logger.log(JSON.stringify(report, null, 2));
@@ -275,11 +367,11 @@ function setup() {
  */
 function dryRun() {
   var config = readConfig();
-  var threads = GmailApp.search(config.gmailQuery || DEFAULT_QUERY, 0, 20);
+  var token = fetchAccessToken();
+  var messageIds = searchMessageIds(config.gmailQuery || DEFAULT_QUERY, token, 20);
   var results = [];
-  threads.forEach(function (thread) {
-    thread.getMessages().forEach(function (message) {
-      var candidate = buildCandidate(message);
+  messageIds.forEach(function (id) {
+      var candidate = buildCandidate(readGmailMessage(id, token));
       if (!candidate) return;
       // 本文は含めない
       results.push({
@@ -292,7 +384,6 @@ function dryRun() {
         状態: candidate.status,
         メモ: candidate.note
       });
-    });
   });
   Logger.log(JSON.stringify({ 件数: results.length, 明細: results }, null, 2));
   return results;

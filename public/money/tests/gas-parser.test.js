@@ -152,6 +152,19 @@ test('カード利用と関係のないメールは候補にしない', () => {
   equal(parse('news@example.com', 'キャンペーンのご案内', '今月のおすすめ商品はこちら'), null, '候補を作らない');
 });
 
+test('利用額のないカード会社の振替案内や、他社の金額入り広告を候補にしない', () => {
+  equal(parse('info@jcb.co.jp', 'カードのお振替内容確定のご案内', 'いつもカードをご利用いただきありがとうございます。内容は会員サイトでご確認ください。'), null, '振替案内は取引として扱わない');
+  equal(parse('news@example.com', 'キャンペーンのお知らせ', 'いつもご利用ありがとうございます。今なら3,000円お得です。'), null, '広告の金額を取引として扱わない');
+});
+
+test('請求総額の通知を1件のカード利用と決めつけない', () => {
+  const result = parse('info@jcb.co.jp', 'ご請求額確定のお知らせ', 'いつもご利用ありがとうございます。\nご請求額：12,345円');
+  equal(result.amount, 12345, '請求額');
+  equal(result.type, 'unknown', '利用明細と決めつけない');
+  equal(result.confident, false, '要確認');
+  assert(result.note.includes('請求'), '請求総額の可能性を案内する');
+});
+
 test('年をまたぐ短い日付表記を補正する', () => {
   const result = parse('info@jcb.co.jp', 'ご利用のお知らせ', 'ご利用日 12/28\nご利用金額 800円', new Date(2027, 0, 3, 12));
   equal(result.usedDate, '2026-12-28', '前年の12月として扱う');
@@ -165,6 +178,32 @@ test('カード番号らしき数字をカード名として保存しない', ()
   );
   equal(result.cardHint, 'ＪＣＢカードＷ', 'カード名のみ');
   assert(!/[0-9]{4}/.test(result.cardHint), 'カード名に4桁以上の数字を含めない');
+  const numbered = parse('info@jcb.co.jp', 'ご利用のお知らせ', 'カード名称：JCBカード 1234\nご利用日 2026/08/24\nご利用金額 500円');
+  assert(!numbered.cardHint.includes('1234'), 'カード名に印字された番号を保存しない');
+});
+
+test('利用日時の後では表記に関係なく最初の金額と店舗を読む', () => {
+  const result = parse('statement@vpass.ne.jp', 'ご利用のお知らせ',
+    'ご利用日時：2026/08/23 15:03\nセブン－イレブン（買物）\n1,234円\n後日ご案内 ¥5,000');
+  equal(result.amount, 1234, '先に現れた利用額');
+  equal(result.merchant, 'セブン－イレブン（買物）', '利用額の直前の利用先');
+});
+
+test('差出人の表示名や別ドメインに含まれる文字列でカード会社と判断しない', () => {
+  const spoofed = parse('JCB jcb.co.jp <alerts@notjcb.co.jp>', 'ご利用のお知らせ',
+    'ご利用日 2026/08/23\nご利用金額 1,000円');
+  equal(spoofed.issuerLabel, '', '差出人は未対応');
+  equal(spoofed.confident, false, '要確認');
+  const subdomain = parse('お知らせ <notice@qa.jcb.co.jp>', 'ご利用のお知らせ',
+    'ご利用日 2026/08/23\nご利用金額 1,000円');
+  equal(subdomain.issuerLabel, 'JCB', '正規のサブドメインは認識');
+});
+
+test('存在しない利用日を別の日付に読み替えず要確認にする', () => {
+  const result = parse('info@jcb.co.jp', 'ご利用のお知らせ', 'ご利用日 2026/02/30\nご利用金額 800円');
+  equal(result.usedDate, '', '不正な日付を保存しない');
+  equal(result.confident, false, '日付が不明なら要確認');
+  assert(result.note.includes('利用日'), '日付の確認を案内する');
 });
 
 if (failures.length === 0) {

@@ -66,6 +66,8 @@
   let searchQuery = '';
   let whatIfAmount = 0;
   let importCandidates = [];
+  const candidateCardSelections = new Map();
+  const candidateEdits = new Map();
   // レシートは state に入れない（1ドキュメント方式の上限に当たるため）。Firestoreの購読結果をここに置く。
   let receipts = [];
   let receiptItems = [];
@@ -639,7 +641,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=40" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=41" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1109,11 +1111,16 @@
   }
 
   /** カード名の候補から登録済みカードを推測する */
-  function guessCardId(candidate) {
+  function matchedCardId(candidate) {
     const hint = String(candidate.cardHint || candidate.sourceLabel || '').trim();
-    if (!hint) return state.cards[0]?.id || '';
-    const matched = state.cards.find(card => hint.includes(card.name) || card.name.includes(hint));
-    return matched?.id || state.cards[0]?.id || '';
+    if (!hint) return '';
+    const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s　]+/g, '');
+    const normalizedHint = normalize(hint);
+    const matches = state.cards.filter(card => {
+      const name = normalize(card.name);
+      return name && (normalizedHint.includes(name) || name.includes(normalizedHint));
+    });
+    return matches.length === 1 ? matches[0].id : '';
   }
 
   function renderImports() {
@@ -1124,17 +1131,24 @@
         const status = CANDIDATE_STATUS[candidate.status] || CANDIDATE_STATUS.pending;
         const actionable = ['pending', 'needs_review'].includes(candidate.status);
         const duplicate = importCandidates.some(other => other.id !== candidate.id && other.fingerprint && other.fingerprint === candidate.fingerprint);
+        const selectedCard = candidateCardSelections.has(candidate.id) ? candidateCardSelections.get(candidate.id) : matchedCardId(candidate);
+        const draft = candidateEdits.get(candidate.id) || {};
+        const amountValue = draft.amount ?? (candidate.amount || '');
+        const dateValue = draft.date ?? candidate.usedDate ?? '';
+        const merchantValue = draft.merchant ?? candidate.merchant ?? '';
+        const entryTypeValue = draft.entryType ?? (['purchase', 'refund', 'cancel'].includes(candidate.type) ? 'itemized' : '');
         return `<div class="candidate-row">
           <div class="candidate-main">
             <div class="candidate-head"><strong>${candidate.amount ? formatAbsoluteYen(candidate.amount) : '金額を確認'}</strong><span class="badge ${status.className}">${status.label}</span><span class="badge badge-muted">${CANDIDATE_TYPE[candidate.type] || '不明'}</span>${duplicate ? '<span class="badge badge-warn">重複の可能性</span>' : ''}</div>
-            <small>${formatDate(candidateDate(candidate), true)}${candidate.merchant ? `・${esc(candidate.merchant)}` : ''}・${esc(candidate.cardHint || 'カード不明')}・${esc(candidate.sourceLabel || candidate.sourcePackage || '取込元不明')}</small>
+            <small>${candidate.usedDate ? '利用日 ' + formatDate(candidateDate(candidate), true) : '受信日 ' + formatDate(candidateDate(candidate), true) + '（利用日未確認）'}${candidate.merchant ? `・${esc(candidate.merchant)}` : ''}・${esc(candidate.cardHint || 'カード不明')}・${esc(candidate.sourceLabel || candidate.sourcePackage || '取込元不明')}</small>
             ${candidate.note ? `<small>${esc(candidate.note)}</small>` : ''}
+            ${actionable ? `<div class="candidate-edit-fields"><label><span>金額</span><input type="number" min="1" step="1" inputmode="numeric" data-candidate-field="amount" data-candidate-id="${esc(candidate.id)}" value="${esc(amountValue)}"></label><label><span>利用日／引落日</span><input type="date" data-candidate-field="date" data-candidate-id="${esc(candidate.id)}" value="${esc(dateValue)}"></label><label><span>内容の種類</span><select data-candidate-field="entryType" data-candidate-id="${esc(candidate.id)}"><option value="">種類を選択</option><option value="itemized" ${entryTypeValue === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${entryTypeValue === 'statement' ? 'selected' : ''}>請求総額</option></select></label><label><span>利用先・メモ</span><input type="text" maxlength="40" data-candidate-field="merchant" data-candidate-id="${esc(candidate.id)}" value="${esc(merchantValue)}"></label></div><small>1件の利用は利用日、請求総額は引落日を入力してください。</small>` : ''}
           </div>
-          ${actionable ? `<div class="list-actions">
+          ${actionable ? `<div class="candidate-actions"><label class="candidate-card-select"><span>取り込むカード</span><select data-candidate-card="${esc(candidate.id)}" aria-label="取り込むカード"><option value="">カードを選択</option>${state.cards.map(card => `<option value="${esc(card.id)}" ${card.id === selectedCard ? 'selected' : ''}>${esc(card.name)}</option>`).join('')}</select></label><div class="list-actions">
             <button class="mini-button primary" data-action="accept-candidate" data-id="${candidate.id}">取り込む</button>
             <button class="mini-button" data-action="ignore-candidate" data-id="${candidate.id}">無視</button>
             <button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button>
-          </div>` : `<div class="list-actions"><button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button></div>`}
+          </div></div>` : `<div class="list-actions"><button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button></div>`}
         </div>`;
       }).join('');
 
@@ -1150,46 +1164,64 @@
   }
 
   /** 候補を正式なカード取引へ変換する。承認するまで計算には含めない。 */
-  async function acceptCandidate(id) {
+  async function acceptCandidate(id, selectedCardId, edits) {
     const candidate = importCandidates.find(item => item.id === id);
     if (!candidate || !['pending', 'needs_review'].includes(candidate.status)) return;
     // クラウドの候補更新を待つ間の連打や、再読込後の再取込を防ぐ。
     const transactionId = `mail_${id}`;
     if (state.transactions.some(item => item.id === transactionId)) return;
     if (!state.cards.length) { showToast('先にクレジットカードを登録してください'); return; }
-    if (!Number(candidate.amount)) { showToast('金額が読み取れていません。予定を手入力してください'); return; }
+    const amount = Number(edits ? edits.amount : candidate.amount);
+    if (!Number.isSafeInteger(amount) || amount <= 0) { showToast('利用金額を入力してください'); return; }
+    const entryType = edits ? edits.entryType : 'itemized';
+    if (!['itemized', 'statement'].includes(entryType)) { showToast('内容の種類を選択してください'); return; }
 
-    const cardId = guessCardId(candidate);
+    // 画面からの取込は選択欄の値を必ず使う。一致しないカードへの自動割当を避ける。
+    const cardId = selectedCardId === undefined ? (matchedCardId(candidate) || (state.cards.length === 1 ? state.cards[0].id : '')) : selectedCardId;
+    if (!cardId || !state.cards.some(item => item.id === cardId)) { showToast('取り込むカードを選択してください'); return; }
     const card = creditCard(cardId);
-    const transactionDate = candidateDate(candidate);
-    const dueDate = card
+    const transactionDate = edits ? edits.date : candidateDate(candidate);
+    const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(transactionDate || '');
+    const checkedDate = dateParts ? new Date(`${transactionDate}T00:00:00Z`) : null;
+    if (!dateParts || !checkedDate || !Number.isFinite(checkedDate.getTime()) || checkedDate.toISOString().slice(0, 10) !== transactionDate) { showToast('利用日を確認してください'); return; }
+    const merchant = edits ? String(edits.merchant || '').trim().slice(0, 40) : (candidate.merchant || '');
+    const similar = state.transactions.some(item => item.id !== transactionId && item.origin === 'mail-import'
+      && item.cardId === cardId && item.transactionDate === transactionDate
+      && Math.abs(Number(item.amount || 0)) === amount
+      && !['cancelled', 'ignored'].includes(item.status));
+    if (similar && !window.confirm('同じカード・利用日・金額の取引があります。別の利用として取り込みますか？')) return;
+    const dueDate = entryType === 'statement' ? transactionDate : card
       ? finance.calculateCardPaymentDate(transactionDate, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions())
       : transactionDate;
     const isNegative = ['refund', 'cancel'].includes(candidate.type);
+    if (isNegative && entryType === 'statement') { showToast('返金・取消は1件の利用として確認してください'); return; }
 
     const transaction = createTransaction({
       id: transactionId,
       kind: 'payment',
-      amount: Math.abs(Number(candidate.amount || 0)) * (isNegative ? -1 : 1),
+      amount: amount * (isNegative ? -1 : 1),
       transactionDate,
-      transactionAt: candidateInstant(candidate),
-      dateEstimated: !candidate.usedDate,
+      transactionAt: entryType === 'statement' ? '' : candidateInstant({ ...candidate, usedDate: transactionDate }),
+      dateEstimated: edits ? false : !candidate.usedDate,
       dueDate,
       sourceAccountId: card?.accountId || primaryAccount()?.id || '',
       cardId,
-      entryType: 'itemized',
+      entryType,
       origin: 'mail-import',
       category: 'カード利用',
-      memo: candidate.merchant || candidate.cardHint || 'メール取込'
+      memo: merchant || candidate.cardHint || 'メール取込'
     });
 
+    const statementError = cardStatementRegistrationError(transaction, null);
+    if (statementError) { showToast(statementError); return; }
     state.transactions.push(transaction);
     absorbSettledStatementDetails(state);
     persist();
-    try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), status: 'accepted' }); }
-    catch (error) { console.warn('取込候補の更新に失敗しました', error); }
+    let candidateUpdated = true;
+    try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), amount, usedDate: transactionDate, merchant, status: 'accepted' }); }
+    catch (error) { candidateUpdated = false; console.warn('取込候補の更新に失敗しました', error); }
     renderPage();
-    showToast(transaction.status === 'absorbed' ? '請求総額の内訳にまとめました。予定の明細タブから確認できます' : '取り込みました。内容は予定の明細タブから編集できます');
+    showToast(!candidateUpdated ? '取引は作成しましたが、候補の更新に失敗しました。同期状態を確認してください' : transaction.status === 'absorbed' ? '請求総額の内訳にまとめました。予定の明細タブから確認できます' : '取り込みました。内容は予定の明細タブから編集できます');
     if (transaction.status !== 'absorbed') openEventModal(transaction.id);
   }
 
@@ -1216,6 +1248,9 @@
 
   function handleImportCandidates(items) {
     importCandidates = Array.isArray(items) ? items : [];
+    const visibleIds = new Set(importCandidates.map(item => item.id));
+    for (const id of candidateCardSelections.keys()) if (!visibleIds.has(id)) candidateCardSelections.delete(id);
+    for (const id of candidateEdits.keys()) if (!visibleIds.has(id)) candidateEdits.delete(id);
     if (['imports', 'settings', 'home'].includes(currentPage)) renderPage();
   }
 
@@ -3185,7 +3220,16 @@
     if (name === 'review-answer') { answerReview(action.dataset.answer); return; }
     if (name === 'review-reason') { answerReviewReason(action.dataset.reason); return; }
     if (name === 'review-cancel-reason') { reviewReasonFor = ''; renderReviewCard(); return; }
-    if (name === 'accept-candidate') { acceptCandidate(action.dataset.id); return; }
+    if (name === 'accept-candidate') {
+      const row = action.closest('.candidate-row');
+      acceptCandidate(action.dataset.id, row?.querySelector('[data-candidate-card]')?.value || '', {
+        amount: row?.querySelector('[data-candidate-field="amount"]')?.value || '',
+        date: row?.querySelector('[data-candidate-field="date"]')?.value || '',
+        merchant: row?.querySelector('[data-candidate-field="merchant"]')?.value || '',
+        entryType: row?.querySelector('[data-candidate-field="entryType"]')?.value || ''
+      });
+      return;
+    }
     if (name === 'ignore-candidate') { ignoreCandidate(action.dataset.id); return; }
     if (name === 'delete-candidate') { deleteCandidate(action.dataset.id); return; }
     if (name === 'add-work') { closeAddMenu(); openWorkModal(); }
@@ -3225,6 +3269,14 @@
     });
     $('#import-file').addEventListener('change', event => importData(event.target.files[0]));
     document.addEventListener('change', event => {
+      const candidateCard = event.target.closest?.('[data-candidate-card]');
+      if (candidateCard) { candidateCardSelections.set(candidateCard.dataset.candidateCard, candidateCard.value); return; }
+      const candidateField = event.target.closest?.('[data-candidate-field]');
+      if (candidateField) {
+        const id = candidateField.dataset.candidateId;
+        candidateEdits.set(id, { ...candidateEdits.get(id), [candidateField.dataset.candidateField]: candidateField.value });
+        return;
+      }
       const outcomeSelect = event.target.closest?.('[data-line-outcome]');
       if (outcomeSelect) { setReceiptOutcome(outcomeSelect.dataset.id, outcomeSelect.value); return; }
       const lineField = event.target.closest?.('[data-line-field]');
@@ -3237,6 +3289,12 @@
       if (['future-start', 'future-end'].includes(event.target.id)) renderFutureResult();
     });
     document.addEventListener('input', event => {
+      const candidateField = event.target.closest?.('[data-candidate-field]');
+      if (candidateField) {
+        const id = candidateField.dataset.candidateId;
+        candidateEdits.set(id, { ...candidateEdits.get(id), [candidateField.dataset.candidateField]: candidateField.value });
+        return;
+      }
       const lineInput = event.target.closest?.('[data-line-field]');
       if (lineInput) { onReceiptLineInput(lineInput); return; }
       if (event.target.id === 'receipt-total') { updateReceiptLineSum(); return; }

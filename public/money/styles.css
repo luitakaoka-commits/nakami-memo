@@ -780,6 +780,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .candidate-row:last-child { border-bottom: 0; }
 
+.candidate-actions { display: grid; gap: 8px; max-width: 100%; }
+.candidate-card-select { display: grid; gap: 4px; font-size: .78rem; }
+.candidate-card-select select { max-width: 100%; min-height: 44px; }
+.candidate-edit-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.candidate-edit-fields label { display: grid; gap: 4px; min-width: 0; font-size: .78rem; }
+.candidate-edit-fields label:last-child { grid-column: 1 / -1; }
+.candidate-edit-fields input { width: 100%; min-width: 0; min-height: 44px; }
+
 .candidate-main {
   display: grid;
   gap: 4px;

@@ -39,7 +39,7 @@ var AMOUNT_PATTERNS = [
 ];
 
 /** 「【ご利用金額】 279円」のように、金額そのものにラベルが付いている場合 */
-var AMOUNT_LABEL_PATTERN = /【?\s*(?:ご利用金額|ご利用額|利用金額|ご請求金額|請求金額|お支払金額|支払金額|決済金額)\s*】?\s*[：:]?\s*[¥￥]?\s*([0-9,]+)\s*(?:円|JPY)?/;
+var AMOUNT_LABEL_PATTERN = /【?\s*(?:ご利用金額|ご利用額|利用金額|ご請求金額|請求金額|ご請求額|請求額|お支払金額|支払金額|決済金額)\s*】?\s*[：:]?\s*[¥￥]?\s*([0-9,]+)\s*(?:円|JPY)?/;
 
 /** 「【ご利用日時(日本時間)】」「ご利用日時：」のような利用日ラベル */
 var USED_AT_LABEL_PATTERN = /【?\s*(?:ご利用日時|ご利用年月日|ご利用日|利用日時|利用日)\s*(?:\([^)\n]{0,12}\)|（[^）\n]{0,12}）)?\s*】?\s*[：:]?\s*/;
@@ -77,12 +77,18 @@ function parseCardMail(mail) {
   var cardHint = extractCardHint(text, issuer);
   var merchant = extractMerchant(text, primary);
 
-  // カード利用のお知らせらしさが無いメールは候補にしない
-  if (!issuer && amounts.length === 0 && !primary) return null;
+  // 会員向けの広告・振替案内を利用明細として扱わない。
+  // 未対応の差出人は、日付と金額の両方に利用ラベルがある場合のみ要確認で残す。
+  var hasUsageDateLabel = USED_AT_LABEL_PATTERN.test(text);
+  var hasAmountLabel = AMOUNT_LABEL_PATTERN.test(text);
+  var transactionSubject = /利用|決済|返金|取消|キャンセル|取り消し/.test(normalizeText(mail.subject));
+  if (!issuer && !(hasUsageDateLabel && hasAmountLabel)) return null;
+  if (issuer && !transactionSubject && !hasUsageDateLabel && !hasAmountLabel && amounts.length === 0) return null;
 
   var amount = primary ? primary.value : (amounts.length ? amounts[0] : null);
   var note = '';
   var confident = true;
+  var statementNotice = /請求|支払/.test(normalizeText(mail.subject)) && type !== 'refund' && type !== 'cancel';
 
   if (amount === null) {
     confident = false;
@@ -101,6 +107,17 @@ function parseCardMail(mail) {
   if (!issuer) {
     confident = false;
     note = note || '未対応の差出人です。内容を確認してください。';
+  }
+
+  if (statementNotice) {
+    type = 'unknown';
+    confident = false;
+    note = note ? note + ' 請求総額か利用明細か確認してください。' : '請求総額か利用明細か確認してください。';
+  }
+
+  if (!usedDate) {
+    confident = false;
+    note = note ? note + ' 利用日も確認してください。' : '利用日を読み取れませんでした。内容を確認してください。';
   }
 
   if (type === 'refund' || type === 'cancel') {
@@ -139,8 +156,8 @@ function findPrimaryAmount(text, issuer) {
   if (usedAt) {
     var offset = usedAt.index + usedAt[0].length;
     var after = text.slice(offset);
-    var found = extractAmounts(after);
-    if (found.length) return { value: found[0], source: 'afterDate', index: offset + after.indexOf(String(found[0])) };
+    var found = findFirstAmount(after);
+    if (found) return { value: found.value, source: 'afterDate', index: offset + found.index };
   }
   return null;
 }
@@ -150,9 +167,15 @@ function toAmount(value) {
 }
 
 function findIssuer(sender) {
-  var lower = String(sender || '').toLowerCase();
+  var address = String(sender || '').toLowerCase().trim();
+  var brackets = address.match(/<([^<>]+)>/);
+  if (brackets) address = brackets[1].trim();
+  var match = address.match(/@([a-z0-9.-]+)$/);
+  if (!match) return null;
+  var domain = match[1];
   for (var i = 0; i < ISSUERS.length; i += 1) {
-    if (lower.indexOf(ISSUERS[i].domain) !== -1) return ISSUERS[i];
+    var expected = ISSUERS[i].domain;
+    if (domain === expected || domain.slice(-(expected.length + 1)) === '.' + expected) return ISSUERS[i];
   }
   return null;
 }
@@ -199,6 +222,38 @@ function extractAmounts(text) {
   return found;
 }
 
+/** 行順と表記中の位置を保ち、候補にすべき最初の金額を返す。 */
+function findFirstAmount(text) {
+  var lines = String(text).split('\n');
+  var offset = 0;
+  for (var i = 0; i < lines.length; i += 1) {
+    var line = lines[i];
+    var ignored = IGNORE_LINE_WORDS.some(function (word) { return line.indexOf(word) !== -1; });
+    var first = null;
+    if (!ignored) {
+      AMOUNT_PATTERNS.forEach(function (pattern) {
+        pattern.lastIndex = 0;
+        var match = pattern.exec(line);
+        while (match) {
+          var value = toAmount(match[1]);
+          if (value > 0 && value < 100000000 && (!first || match.index < first.index)) {
+            first = { value: value, index: match.index };
+          }
+          match = pattern.exec(line);
+        }
+      });
+    }
+    if (first) return { value: first.value, index: offset + first.index };
+    offset += line.length + 1;
+  }
+  return null;
+}
+
+function isValidCalendarDate(year, month, day) {
+  var date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return date.getUTCFullYear() === Number(year) && date.getUTCMonth() + 1 === Number(month) && date.getUTCDate() === Number(day);
+}
+
 /** 利用日を推定する。年が書かれていない場合は受信日の年を使う。 */
 function extractUsedDate(text, receivedAt) {
   // 利用日ラベルがあれば、そこから後ろだけを見る
@@ -207,7 +262,7 @@ function extractUsedDate(text, receivedAt) {
   if (usedAt) scope = text.slice(usedAt.index + usedAt[0].length, usedAt.index + usedAt[0].length + 40);
 
   var full = scope.match(DATE_PATTERNS[0]) || text.match(DATE_PATTERNS[0]);
-  if (full) return pad4(full[1]) + '-' + pad2(full[2]) + '-' + pad2(full[3]);
+  if (full) return isValidCalendarDate(full[1], full[2], full[3]) ? pad4(full[1]) + '-' + pad2(full[2]) + '-' + pad2(full[3]) : '';
 
   var short = scope.match(DATE_PATTERNS[1]) || text.match(DATE_PATTERNS[1]);
   if (short) {
@@ -217,7 +272,7 @@ function extractUsedDate(text, receivedAt) {
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       // 年末年始のまたぎを補正する（受信が1月で利用が12月など）
       if (receivedAt.getMonth() === 0 && month === 12) year -= 1;
-      return pad4(year) + '-' + pad2(month) + '-' + pad2(day);
+      return isValidCalendarDate(year, month, day) ? pad4(year) + '-' + pad2(month) + '-' + pad2(day) : '';
     }
   }
   return '';
@@ -230,11 +285,15 @@ function extractUsedDate(text, receivedAt) {
 function extractCardHint(text, issuer) {
   if (issuer && issuer.cardHint) {
     var matched = text.match(issuer.cardHint);
-    if (matched) return clean(matched[1] || matched[0]);
+    if (matched) return cleanCardHint(matched[1] || matched[0]);
   }
   var labeled = text.match(CARD_LABEL_PATTERN);
-  if (labeled) return clean(labeled[1]);
+  if (labeled) return cleanCardHint(labeled[1]);
   return issuer ? issuer.label : '';
+}
+
+function cleanCardHint(value) {
+  return clean(value).replace(/(?:[0-9][\s-]*){4,}/g, '').trim();
 }
 
 /**

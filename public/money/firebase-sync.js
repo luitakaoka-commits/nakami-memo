@@ -240,7 +240,7 @@ function startCandidateWatch() {
   stopCandidates = onSnapshot(
     collection(db, 'workspaces', workspaceId, 'importCandidates'),
     snapshot => candidateHandler(snapshot.docs.map(item => ({ id: item.id, ...item.data() }))),
-    () => candidateHandler([])
+    error => statusHandler('error', error)
   );
 }
 
