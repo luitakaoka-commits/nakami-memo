@@ -43,6 +43,12 @@ function importCardMails() {
         if (!message) throw new Error('メールを取得できません');
         var candidate = buildCandidate(message);
         if (candidate) {
+          // 旧方式のIDはメールごとのIDではなく、別の利用と衝突することもある。
+          // 一致しても自動削除・自動確定せず、新旧を本人が確認できるよう残す。
+          if (legacyCandidateExists(config, token, candidate.fingerprint)) {
+            candidate.status = 'needs_review';
+            candidate.note = (candidate.note ? candidate.note + ' ' : '') + '以前の取込候補と似ています。同じ利用か確認してください。';
+          }
           if (candidate.status === 'needs_review') summary.needsReview += 1;
           var result = saveCandidate(config, token, candidate, messageDocumentId(messageIds[m]));
           if (result === 'created') summary.created += 1;
@@ -160,12 +166,14 @@ function buildCandidate(message) {
   var body = message.getPlainBody() || '';
   var receivedAt = message.getDate();
 
-  var parsed = parseCardMail({ sender: sender, subject: subject, body: body, receivedAt: receivedAt });
+  var mail = { sender: sender, subject: subject, body: body, receivedAt: receivedAt };
+  var parsed = parseCardMail(mail);
   if (!parsed) return null;
 
   var usedDate = parsed.usedDate || '';
   var amount = parsed.amount === null ? 0 : parsed.amount;
-  var status = parsed.confident && amount > 0 ? 'pending' : 'needs_review';
+  var evidence = assessNoticeEvidence(mail, parsed);
+  var status = parsed.confident && amount > 0 && evidence.safe ? 'pending' : 'needs_review';
 
   var candidate = {
     sourcePackage: extractSenderDomain(sender),
@@ -177,7 +185,7 @@ function buildCandidate(message) {
     merchant: parsed.merchant || '',
     type: parsed.type || 'unknown',
     status: status,
-    note: parsed.note || '',
+    note: [parsed.note || '', evidence.safe ? '' : evidence.reason].filter(Boolean).join(' '),
     createdAt: new Date().toISOString(),
     createdBy: 'gas-card-mail-import'
   };
@@ -290,6 +298,20 @@ function saveCandidate(config, token, candidate, documentId) {
   if (code === 200) return 'created';
   if (code === 409) return 'duplicate';
   throw new Error('Firestoreへ保存できません (HTTP ' + code + ')');
+}
+
+/** 旧候補の存在を確認する。障害時は安全のためメールに処理済みラベルを付けない。 */
+function legacyCandidateExists(config, token, fingerprint) {
+  if (!fingerprint) return false;
+  var url = 'https://firestore.googleapis.com/v1/projects/' + config.projectId
+    + '/databases/(default)/documents/workspaces/' + config.workspaceId
+    + '/importCandidates/' + encodeURIComponent(fingerprint);
+  var response = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + token } });
+  var code = response.getResponseCode();
+  if (code === 200) return true;
+  if (code === 404) return false;
+  throw new Error('以前の取込候補を確認できません (HTTP ' + code + ')');
 }
 
 /** JSONをFirestoreのフィールド表現へ変換する */

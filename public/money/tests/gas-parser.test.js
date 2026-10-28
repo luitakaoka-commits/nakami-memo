@@ -206,6 +206,29 @@ test('存在しない利用日を別の日付に読み替えず要確認にす�
   assert(result.note.includes('利用日'), '日付の確認を案内する');
 });
 
+test('確認したJCBと三井住友の形式だけ金額と利用日の根拠を認める', () => {
+  const check = (sender, subject, body) => {
+    const mail = { sender, subject, body, receivedAt: new Date(2026, 7, 25, 12) };
+    return sandbox.assessNoticeEvidence(mail, sandbox.parseCardMail(mail));
+  };
+  assert(check('info@jcb.co.jp', 'JCBカード／ショッピングご利用のお知らせ',
+    '【ご利用日時(日本時間)】 2026/08/24 10:00\n【ご利用金額】 500円').safe, 'JCBの利用金額を識別できない');
+  assert(check('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+    'ご利用日時：2026/08/23 15:03\nテスト店舗（買物）\n1,234円\n参考 ¥5,000').safe, '三井住友の明細を識別できない');
+  assert(!check('info@01epos.jp', 'エポスカードより「カードご利用のお知らせ」',
+    'ご利用日時：2026/08/23 15:03\nご利用金額：1,234円').safe, 'カードの種類が不明な通知を自動処理した');
+});
+
+test('金額の重複ラベルや利用日不明は自動処理しない', () => {
+  const check = body => {
+    const mail = { sender: 'info@jcb.co.jp', subject: 'JCBカード／ショッピングご利用のお知らせ', body, receivedAt: new Date(2026, 7, 25, 12) };
+    return sandbox.assessNoticeEvidence(mail, sandbox.parseCardMail(mail));
+  };
+  assert(!check('【ご利用日時】2026/08/24\n【ご利用金額】500円\n【ご利用金額】600円').safe, '複数金額を自動処理した');
+  assert(!check('案内日 2026/08/24\n【ご利用金額】500円').safe, '利用日でない日付を使った');
+  assert(!check('【ご利用日時】2026/02/30\n【ご利用金額】500円').safe, '存在しない利用日を使った');
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-parser', total, passed: total, failed: 0 }));
   process.exit(0);

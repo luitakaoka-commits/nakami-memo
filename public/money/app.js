@@ -641,7 +641,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=41" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=42" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1110,17 +1110,40 @@
     return new Date(detectedAt).toISOString();
   }
 
-  /** カード名の候補から登録済みカードを推測する */
+  /** 本人が登録した対応だけを使い、カードの名前や登録順から推測しない。 */
   function matchedCardId(candidate) {
-    const hint = String(candidate.cardHint || candidate.sourceLabel || '').trim();
-    if (!hint) return '';
     const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s　]+/g, '');
-    const normalizedHint = normalize(hint);
-    const matches = state.cards.filter(card => {
-      const name = normalize(card.name);
-      return name && (normalizedHint.includes(name) || name.includes(normalizedHint));
-    });
-    return matches.length === 1 ? matches[0].id : '';
+    const source = String(candidate.sourcePackage || '').trim().toLowerCase();
+    const hint = normalize(candidate.cardHint);
+    if (!source || source === 'unknown' || !hint || hint === normalize(candidate.sourceLabel)) return '';
+    const mappings = Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : [];
+    const matches = mappings.filter(item => item.source === source && normalize(item.hint) === hint && state.cards.some(card => card.id === item.cardId));
+    return matches.length === 1 ? matches[0].cardId : '';
+  }
+
+  function rememberCandidateCard(candidateId, cardId) {
+    const candidate = importCandidates.find(item => item.id === candidateId);
+    const card = state.cards.find(item => item.id === cardId);
+    const source = String(candidate?.sourcePackage || '').trim().toLowerCase();
+    const hint = String(candidate?.cardHint || '').trim();
+    const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s　]+/g, '');
+    if (!candidate || !card) { showToast('先に取り込むカードを選択してください'); return; }
+    if (!source || source === 'unknown' || !hint || normalize(hint) === normalize(candidate.sourceLabel)) {
+      showToast('メールだけではカードの種類を特定できません'); return;
+    }
+    const mappings = Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : [];
+    const previous = mappings.find(item => item.source === source && normalize(item.hint) === normalize(hint));
+    if (previous && previous.cardId !== card.id && !window.confirm('このメールのカード名に登録された対応を変更しますか？')) return;
+    state.settings.mailCardMappings = mappings.filter(item => !(item.source === source && normalize(item.hint) === normalize(hint)));
+    state.settings.mailCardMappings.push({ source, hint, cardId: card.id });
+    persist(); renderPage(); showToast('このメールのカード名と選んだカードの対応を保存しました');
+  }
+
+  function forgetCandidateCard(index) {
+    const mappings = Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : [];
+    if (!Number.isInteger(index) || index < 0 || index >= mappings.length) return;
+    state.settings.mailCardMappings = mappings.filter((_, i) => i !== index);
+    persist(); renderPage(); showToast('カードの対応を解除しました');
   }
 
   function renderImports() {
@@ -1144,7 +1167,7 @@
             ${candidate.note ? `<small>${esc(candidate.note)}</small>` : ''}
             ${actionable ? `<div class="candidate-edit-fields"><label><span>金額</span><input type="number" min="1" step="1" inputmode="numeric" data-candidate-field="amount" data-candidate-id="${esc(candidate.id)}" value="${esc(amountValue)}"></label><label><span>利用日／引落日</span><input type="date" data-candidate-field="date" data-candidate-id="${esc(candidate.id)}" value="${esc(dateValue)}"></label><label><span>内容の種類</span><select data-candidate-field="entryType" data-candidate-id="${esc(candidate.id)}"><option value="">種類を選択</option><option value="itemized" ${entryTypeValue === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${entryTypeValue === 'statement' ? 'selected' : ''}>請求総額</option></select></label><label><span>利用先・メモ</span><input type="text" maxlength="40" data-candidate-field="merchant" data-candidate-id="${esc(candidate.id)}" value="${esc(merchantValue)}"></label></div><small>1件の利用は利用日、請求総額は引落日を入力してください。</small>` : ''}
           </div>
-          ${actionable ? `<div class="candidate-actions"><label class="candidate-card-select"><span>取り込むカード</span><select data-candidate-card="${esc(candidate.id)}" aria-label="取り込むカード"><option value="">カードを選択</option>${state.cards.map(card => `<option value="${esc(card.id)}" ${card.id === selectedCard ? 'selected' : ''}>${esc(card.name)}</option>`).join('')}</select></label><div class="list-actions">
+          ${actionable ? `<div class="candidate-actions"><label class="candidate-card-select"><span>取り込むカード</span><select data-candidate-card="${esc(candidate.id)}" aria-label="取り込むカード"><option value="">カードを選択</option>${state.cards.map(card => `<option value="${esc(card.id)}" ${card.id === selectedCard ? 'selected' : ''}>${esc(card.name)}</option>`).join('')}</select></label><button class="mini-button" data-action="remember-candidate-card" data-id="${esc(candidate.id)}">このカードの対応を覚える</button><div class="list-actions">
             <button class="mini-button primary" data-action="accept-candidate" data-id="${candidate.id}">取り込む</button>
             <button class="mini-button" data-action="ignore-candidate" data-id="${candidate.id}">無視</button>
             <button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button>
@@ -1157,6 +1180,7 @@
       <section class="card info-card">
         <p class="check-detail">カード利用のお知らせメールから作られた候補です。<strong>取り込むまでは、今使える金額にも支払い能力チェックにも反映されません。</strong>内容を確認して取り込むと、正式なカード取引になります。</p>
       </section>
+      <section class="card info-card"><h2>メールとカードの対応</h2><p class="check-detail">候補でカードを選び「このカードの対応を覚える」を押すと、同じ差出人とカード名の候補に選択を表示します。種類が特定できない通知は覚えられません。</p>${(Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : []).map((item, i) => `<div>${esc(item.hint)} → ${esc(state.cards.find(card => card.id === item.cardId)?.name || '削除されたカード')} <button class="mini-button" data-action="forget-candidate-card" data-index="${i}">対応を解除</button></div>`).join('')}</section>
       <section class="card list-card">
         <div class="list-card-header"><div><span class="eyebrow">${pendingCandidates().length}件が未確認</span><h2>候補一覧</h2></div></div>
         <div class="candidate-list">${rows || emptyBlock('取込候補はありません', 'カード利用のお知らせメールが取り込まれると、ここに表示されます。')}</div>
@@ -3230,6 +3254,8 @@
       });
       return;
     }
+    if (name === 'remember-candidate-card') { const row = action.closest('.candidate-row'); rememberCandidateCard(action.dataset.id, row?.querySelector('[data-candidate-card]')?.value || ''); return; }
+    if (name === 'forget-candidate-card') { forgetCandidateCard(Number(action.dataset.index)); return; }
     if (name === 'ignore-candidate') { ignoreCandidate(action.dataset.id); return; }
     if (name === 'delete-candidate') { deleteCandidate(action.dataset.id); return; }
     if (name === 'add-work') { closeAddMenu(); openWorkModal(); }

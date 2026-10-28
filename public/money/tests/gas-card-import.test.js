@@ -8,7 +8,7 @@ let total = 0;
 const test = (name, fn) => { total++; try { fn(); } catch (error) { failures.push({ name, message: error.message }); } };
 const assert = (value, message) => { if (!value) throw new Error(message); };
 
-function fixture({ ids = ['a', 'b'], failModify = false, failSave = false, body = 'ご利用日時：2026/08/23 15:03\nご利用金額：1,000円' } = {}) {
+function fixture({ ids = ['a', 'b'], failModify = false, failSave = false, legacyStatus = 404, body = 'ご利用日時：2026/08/23 15:03\nご利用金額：1,000円' } = {}) {
   const saved = new Map();
   const labeled = [];
   let released = false;
@@ -31,6 +31,7 @@ function fixture({ ids = ['a', 'b'], failModify = false, failSave = false, body 
         labeled.push({ id, label: JSON.parse(opts.payload).addLabelIds[0] });
         return response(200);
       }
+      if (url.includes('/importCandidates/') && (!opts.method || opts.method === 'get')) return response(legacyStatus);
       if (url.includes('/importCandidates?documentId=')) {
         if (failSave) return response(403);
         const id = decodeURIComponent(url.split('documentId=')[1]);
@@ -89,6 +90,20 @@ test('符号化された日本語件名を元の文字に戻す', () => {
   const word = Buffer.from('ご請求額確定').toString('base64');
   assert(f.box.decodeMimeHeader(`=?UTF-8?B?${word}?=`) === 'ご請求額確定', '日本語の件名を復元できない');
   assert(f.box.decodeMimeHeader('=?UTF-8?Q?Card_Notice?=') === 'Card Notice', 'Q形式の件名を復元できない');
+});
+
+test('旧候補と同じ指紋でも別の利用を捨てず、重複を要確認にする', () => {
+  const f = fixture({ ids: ['a'], legacyStatus: 200 });
+  const result = f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(result.created === 1 && fields.status.stringValue === 'needs_review', '旧候補との衝突を確認に回していない');
+  assert(fields.note.stringValue.includes('以前の取込候補'), '確認する理由を表示していない');
+});
+
+test('旧候補を確認できない場合は保存せずラベルも付けない', () => {
+  const f = fixture({ ids: ['a'], legacyStatus: 503 });
+  const result = f.box.importCardMails();
+  assert(result.failed === 1 && f.saved.size === 0 && f.labeled.length === 0, '確認失敗時に処理を進めた');
 });
 
 console.log(JSON.stringify({ suite: 'gas-card-import', total, passed: total - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));

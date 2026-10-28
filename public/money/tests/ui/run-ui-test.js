@@ -1111,6 +1111,24 @@ const closeModals = page => page.evaluate(() => {
     }
   });
 
+  await record('mail_card_mapping_requires_explicit_choice_and_exact_notice', async () => {
+    const candidate = { id: 'map-card-1', sourcePackage: 'notice.example', sourceLabel: 'カード会社', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '2026-09-02', amount: 275, cardHint: 'カード会社の特定カード', type: 'purchase', status: 'pending', fingerprint: 'map-1' };
+    await page.evaluate(item => { const api = window.__YORYOKU__; api.getState().settings.mailCardMappings = []; api.setImportCandidates([item]); api.setPage('imports'); }, candidate);
+    let row = page.locator('.candidate-row').filter({ has: page.locator('[data-id="map-card-1"]') });
+    assert(await row.locator('[data-candidate-card]').inputValue() === '', '対応を登録する前にカードが選ばれた');
+    await row.locator('[data-candidate-card]').selectOption('candidate-card-2');
+    await row.locator('[data-action="remember-candidate-card"]').click();
+    await page.evaluate(item => window.__YORYOKU__.setImportCandidates([{ ...item, id: 'map-card-2' }, { ...item, id: 'map-card-3', sourcePackage: 'other.example' }, { ...item, id: 'map-card-4', cardHint: 'カード会社' }]), candidate);
+    row = page.locator('.candidate-row').filter({ has: page.locator('[data-id="map-card-2"]') });
+    assert(await row.locator('[data-candidate-card]').inputValue() === 'candidate-card-2', '登録した対応が使われない');
+    for (const id of ['map-card-3', 'map-card-4']) {
+      const other = page.locator('.candidate-row').filter({ has: page.locator(`[data-id="${id}"]`) });
+      assert(await other.locator('[data-candidate-card]').inputValue() === '', '異なる差出人または種類不明に対応を使った');
+    }
+    await page.locator('[data-action="forget-candidate-card"]').click();
+    assert(await row.locator('[data-candidate-card]').inputValue() === '', '解除した対応が残っている');
+  });
+
   await record('mail_candidate_edits_survive_live_updates', async () => {
     const candidate = { id: 'editable-candidate', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '', amount: 0, cardHint: '', merchant: '', type: 'purchase', status: 'needs_review', fingerprint: 'editable-fp' };
     await page.evaluate(item => { window.__YORYOKU__.setImportCandidates([item]); window.__YORYOKU__.setPage('imports'); }, candidate);

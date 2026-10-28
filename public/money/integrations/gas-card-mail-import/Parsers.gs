@@ -254,6 +254,36 @@ function isValidCalendarDate(year, month, day) {
   return date.getUTCFullYear() === Number(year) && date.getUTCMonth() + 1 === Number(month) && date.getUTCDate() === Number(day);
 }
 
+/**
+ * 実際の利用通知で確認した形式だけを、自動処理の候補とする。
+ * これはメールの記載内容が確定請求や正当な送信者だという保証ではない。
+ * カードの本人確認と、重複・競合の解決は別途必要。
+ */
+function assessNoticeEvidence(mail, parsed) {
+  var issuer = findIssuer(mail.sender);
+  var subject = normalizeText(mail.subject || '').normalize('NFKC');
+  var body = normalizeText(mail.body || '').normalize('NFKC');
+  var reject = function (reason) { return { safe: false, reason: reason }; };
+  if (!issuer || !parsed || parsed.type !== 'purchase') return reject('通知の種類を確認してください。');
+  var dates = body.match(/(?:ご利用日時(?:\([^\n)]*\))?|ご利用日)\s*[】:：]?\s*20\d{2}[\/\-年]\s*\d{1,2}[\/\-月]\s*\d{1,2}/g) || [];
+  if (dates.length !== 1 || !parsed.usedDate) return reject('利用日を確認してください。');
+
+  if (issuer.label === 'JCB' && subject.indexOf('JCBカード/ショッピングご利用のお知らせ') !== -1) {
+    var amounts = body.match(/(?:【\s*)?ご利用金額\s*(?:】\s*)?[:：]?\s*[¥￥]?\s*[\d,]+\s*円/g) || [];
+    if (amounts.length !== 1) return reject('利用金額の位置を確認してください。');
+    var value = amounts[0].match(/[\d,]+/);
+    return value && toAmount(value[0]) === parsed.amount ? { safe: true, reason: '' } : reject('利用金額を確認してください。');
+  }
+  if (issuer.label === '三井住友カード' && subject.indexOf('ご利用のお知らせ【三井住友カード】') !== -1) {
+    var detail = body.match(/ご利用日時\s*[:：]\s*20\d{2}\/\d{1,2}\/\d{1,2}[^\n]*\n\s*[^\n]{1,80}\(買物\)\s*(?:\n\s*)?([\d,]+)\s*円/g) || [];
+    if (detail.length !== 1) return reject('利用明細の金額を確認してください。');
+    var detailAmount = detail[0].match(/([\d,]+)\s*円\s*$/);
+    return detailAmount && toAmount(detailAmount[1]) === parsed.amount ? { safe: true, reason: '' } : reject('利用明細の金額を確認してください。');
+  }
+  // エポスの通知はクレジット以外のカードも含むためカードを自動特定できない。
+  return reject('通知形式またはカードの種類を確認してください。');
+}
+
 /** 利用日を推定する。年が書かれていない場合は受信日の年を使う。 */
 function extractUsedDate(text, receivedAt) {
   // 利用日ラベルがあれば、そこから後ろだけを見る
