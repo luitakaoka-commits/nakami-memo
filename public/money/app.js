@@ -641,7 +641,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=42" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=43" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -928,16 +928,11 @@
 
       ${renderMailImportPrompt()}
 
-      <section class="card check-summary-card">
-        <div class="list-card-header"><div><span class="eyebrow">支払い能力チェック</span><h2>${formatDate(check.endDate)}までの見通し</h2></div><span class="status-pill ${checkStatus.className}"><span class="status-dot" aria-hidden="true"></span>${checkStatus.label}</span></div>
-        <p class="check-detail">${checkStatus.detail}</p>
-        <div class="summary-strip">
-          <div class="stat-card"><span>期間内の最低予測残高</span><strong class="${check.minBalance < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(check.minBalance)}</strong></div>
-          <div class="stat-card"><span>最も危険な日</span><strong>${formatDate(check.minBalanceDate, true)}</strong></div>
-          <div class="stat-card"><span>${check.shortfallDate ? '不足が発生する日' : '最低残高を下回る日'}</span><strong>${check.shortfallDate ? formatDate(check.shortfallDate, true) : (check.belowDefenseDate ? formatDate(check.belowDefenseDate, true) : 'なし')}</strong></div>
-        </div>
-        <div class="hero-actions"><button class="button button-quiet button-small" data-page="cashflow">日付ごとの推移を見る</button></div>
-      </section>
+      <button type="button" class="card cashflow-status-card ${checkStatus.className}" data-page="cashflow">
+        <span class="cashflow-status-top"><span class="eyebrow">将来の支払いの見通し</span><span class="cashflow-status-action">詳しく見る <span aria-hidden="true">›</span></span></span>
+        <span class="cashflow-status-title"><span class="status-dot" aria-hidden="true"></span>${esc(checkStatus.label)}</span>
+        <span class="cashflow-status-detail">${esc(checkStatus.detail)} ${formatDate(check.endDate)}までの予定から計算しています。</span>
+      </button>
 
       <section class="card list-card">
         <div class="list-card-header"><div><span class="eyebrow">次の重要な支払い</span><h2>これからの予定</h2></div><button class="button button-quiet button-small" data-page="plans">すべて見る</button></div>

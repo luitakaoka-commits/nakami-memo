@@ -1276,4 +1276,17 @@ input:not([type="checkbox"]):not([type="radio"]), select, textarea, .amount-inpu
   .sidebar .brand span { color: var(--ledger-muted-dark); }
 }
 @media (max-width: 390px) { .ledger-page { margin-inline: 5px; }.hero-card { padding: 1.15rem; }.hero-card h1 { font-size: clamp(2.5rem,12vw,3.3rem); }.hero-actions .button { flex: 1; }.ledger-bookmark { top: -1.2rem; padding-top: 12px; } }
+
+/* ホームでは金額を重ねず、状態から詳細へ進める。色と文言の両方で区別する。 */
+.cashflow-status-card { display: flex; width: 100%; flex-direction: column; gap: .7rem; padding: 1.15rem 1.25rem; border: 1px solid; border-left-width: 5px; border-radius: var(--radius, 16px); text-align: left; cursor: pointer; font: inherit; }
+.cashflow-status-card.good { color: #185b40; background: #eaf5ef; border-color: #398363; }
+.cashflow-status-card.warn { color: #704b10; background: #fff3dc; border-color: #b27d24; }
+.cashflow-status-card.bad { color: #842b36; background: #fcebed; border-color: #a34452; }
+.cashflow-status-card:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.cashflow-status-top { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.cashflow-status-card .eyebrow { color: inherit; }
+.cashflow-status-action { font-size: .78rem; font-weight: 700; white-space: nowrap; }
+.cashflow-status-title { display: flex; align-items: center; gap: .55rem; font-size: 1.12rem; font-weight: 750; }
+.cashflow-status-title .status-dot { background: currentColor; }
+.cashflow-status-detail { font-size: .83rem; line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) { .ledger-page, .ledger-bookmark { animation: none; } }

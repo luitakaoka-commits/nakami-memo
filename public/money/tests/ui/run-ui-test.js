@@ -120,6 +120,18 @@ const closeModals = page => page.evaluate(() => {
     assert(Boolean(backup), '移行前バックアップが保存されていない');
   });
 
+  await record('home_cashflow_status', async () => {
+    const card = page.locator('.cashflow-status-card');
+    assert(await card.count() === 1, 'ホームに将来の見通しがない');
+    assert(await card.evaluate(el => ['good', 'warn', 'bad'].some(name => el.classList.contains(name))), '状態に応じた色がない');
+    assert(!/¥|円/.test(await card.innerText()), 'ホームの将来の見通しに金額が表示されている');
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'スマホ画面が横にはみ出している');
+    await card.click();
+    assert((await page.textContent('#page-title')).trim() === '支払い能力チェック', '詳細画面を開けない');
+    assert(await page.locator('.check-hero .stat-card').count() > 0, '詳細画面に金額の内訳がない');
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+  });
+
   await record('spendable_amount', async () => {
     const result = await page.evaluate(() => window.__YORYOKU__.spendableAmount());
     assert(typeof result.total === 'number', '今使える金額が数値でない');
