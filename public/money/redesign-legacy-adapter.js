@@ -84,7 +84,12 @@
         else events.push({ ...base, kind: 'expense', amountConfirmed: false });
       } else throw new Error('旧取引の種類を確認してください');
     }
-    const groups = engine.groupCardCharges(cardTransactions, state.cards, state.settings?.holidayOverrides ? { overrides: state.settings.holidayOverrides } : {});
+    const namedCards = state.cards.map(card => {
+      if (typeof card.name === 'string' && card.name.trim()) return card;
+      issues.push({ type: 'card_name_missing', cardId: card.id });
+      return { ...card, name: card.id };
+    });
+    const groups = engine.groupCardCharges(cardTransactions, namedCards, state.settings?.holidayOverrides ? { overrides: state.settings.holidayOverrides } : {});
     for (const group of groups) {
       if (group.statements.length > 1) throw new Error('同じ請求期間に複数の総額があります');
       const dates = new Set([...group.adopted, ...group.suppressed].map(item => item.dueDate));

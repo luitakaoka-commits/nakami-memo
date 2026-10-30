@@ -6,6 +6,7 @@ const { calculateCardPaymentDate, calculateSpendableAmount, accountDeltasFor } =
 const { compare: compareMigration } = require('../redesign-migration-check.js');
 const { generateRecurring } = require('../redesign-recurring.js');
 const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
+const { previewLegacy } = require('../redesign-legacy-preview.js');
 const { confirmBill, recordDebit } = require('../redesign-bill-lifecycle.js');
 const { planRefund } = require('../redesign-refund.js');
 const { planCsv } = require('../redesign-csv-reconciliation.js');
@@ -608,6 +609,33 @@ test('同じ月の定期支払いが二重登録されていれば警告する',
     { id: 'two', status: 'planned', recurringPlanId: 'utility', dueDate: '2026-11-05' }
   );
   assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /定期支払いが重複/);
+});
+
+test('旧データの締め日と引落判定をまとめて確認し入力を変更しない', () => {
+  const state = legacyFixture(), before = JSON.stringify(state);
+  const result = previewLegacy({ state, today: '2026-10-30', endDate: '2026-12-31', selectedCardIds: ['c'], candidates: [{ id: 'pending', status: 'pending' }] });
+  assert.equal(result.period.deadline, '2026-11-15');
+  assert.equal(result.assessment.nextDate, '2026-11-10');
+  assert.equal(result.assessment.nextStatus, 'review');
+  assert.ok(result.issues.some(issue => issue.type === 'mail_candidate_unreviewed'));
+  assert.equal(JSON.stringify(state), before);
+});
+test('締め日の基準に選ばないカードも引落口座の不足判定に含める', () => {
+  const state = legacyFixture();
+  state.accounts.push({ id: 'b', currentBalance: 1000 });
+  state.cards.push({ id: 'other', accountId: 'b', closingDay: 15, paymentDay: 10 });
+  state.transactions.push({ id: 'other-bill', kind: 'payment', status: 'planned', amount: 5000, cardId: 'other', entryType: 'statement', dueDate: '2026-11-10', transactionDate: '2026-11-10' });
+  const result = previewLegacy({ state, today: '2026-10-30', endDate: '2026-12-31', selectedCardIds: ['c'] });
+  assert.equal(result.assessment.nextStatus, 'shortfall');
+  assert.ok(result.assessment.nextPayments.some(item => item.accountId === 'b'));
+  assert.ok(result.issues.some(issue => issue.type === 'mail_candidates_unavailable'));
+  assert.ok(result.issues.some(issue => issue.type === 'card_name_missing' && issue.cardId === 'other'));
+});
+test('締め日より前に終わる試算期間や不明な基準カードは拒否する', () => {
+  const state = legacyFixture();
+  assert.throws(() => previewLegacy({ state, today: '2026-10-30', endDate: '2026-11-14', selectedCardIds: ['c'] }), /締め日/);
+  assert.throws(() => previewLegacy({ state, today: '2026-10-30', endDate: '2026-12-31', selectedCardIds: ['unknown'] }), /カード/);
+  assert.throws(() => previewLegacy({ state, today: '2026-10-30', endDate: '2026-99-99', selectedCardIds: ['c'] }), /期間/);
 });
 
 const failures = [];
