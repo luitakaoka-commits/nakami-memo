@@ -254,6 +254,14 @@ test('金額の重複ラベルや利用日不明は自動処理しない', () =>
   assert(!check('【ご利用日時】2026/02/30\n【ご利用金額】500円').safe, '存在しない利用日を使った');
 });
 
+test('本文の利用日と解析結果が異なる場合や日付に余分な数字がある場合は根拠としない', () => {
+  const mail = { sender: 'notice@jcb.co.jp', subject: 'JCBカード／ショッピングご利用のお知らせ', body: '【ご利用日時(日本時間)】 2026/08/24 10:00\n【ご利用金額】 500円', receivedAt: new Date(2026, 7, 25) };
+  const parsed = sandbox.parseCardMail(mail);
+  assert(!sandbox.assessNoticeEvidence(mail, { ...parsed, usedDate: '2026-08-23' }).safe, '本文と異なる利用日を根拠として認めた');
+  const malformed = { ...mail, body: mail.body.replace('2026/08/24', '2026/08/240') };
+  assert(!sandbox.assessNoticeEvidence(malformed, sandbox.parseCardMail(malformed)).safe, '数字が続く不正な日付を根拠として認めた');
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-parser', total, passed: total, failed: 0 }));
   process.exit(0);

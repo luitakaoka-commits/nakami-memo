@@ -283,8 +283,11 @@ function assessNoticeEvidence(mail, parsed) {
   var body = normalizeText(mail.body || '').normalize('NFKC');
   var reject = function (reason) { return { safe: false, reason: reason }; };
   if (!issuer || !parsed || parsed.type !== 'purchase') return reject('通知の種類を確認してください。');
-  var dates = body.match(/(?:ご利用日時(?:\([^\n)]*\))?|ご利用日)\s*[】:：]?\s*20\d{2}[\/\-年]\s*\d{1,2}[\/\-月]\s*\d{1,2}/g) || [];
+  var dates = body.match(/(?:ご利用日時(?:\([^\n)]*\))?|ご利用日)\s*[】:：]?\s*20\d{2}[\/\-年]\s*\d{1,2}[\/\-月]\s*\d{1,2}(?!\d)/g) || [];
   if (dates.length !== 1 || !parsed.usedDate) return reject('利用日を確認してください。');
+  var bodyDate = dates[0].match(/(20\d{2})[\/\-年]\s*(\d{1,2})[\/\-月]\s*(\d{1,2})(?!\d)/);
+  if (!bodyDate || !isValidCalendarDate(bodyDate[1], bodyDate[2], bodyDate[3]) ||
+      pad4(bodyDate[1]) + '-' + pad2(bodyDate[2]) + '-' + pad2(bodyDate[3]) !== parsed.usedDate) return reject('本文と解析結果の利用日を確認してください。');
 
   if (issuer.label === 'JCB' && subject.indexOf('JCBカード/ショッピングご利用のお知らせ') !== -1) {
     var amounts = body.match(/(?:【\s*)?ご利用金額\s*(?:】\s*)?[:：]?\s*[¥￥]?\s*[\d,]+\s*円/g) || [];
