@@ -42,6 +42,26 @@
 
     /* ---------- 祝日・営業日エンジン ---------- */
 
+    test('銀行の年末年始休業日は営業日としない', () => {
+      equal(engine.isJapaneseBusinessDay('2026-12-31'), false, '12月31日は銀行休業日');
+      equal(engine.isJapaneseBusinessDay('2026-01-02'), false, '1月2日は銀行休業日');
+      equal(engine.japaneseHolidayName('2026-12-31'), '', '国民の祝日と銀行休業日は区別');
+    });
+    test('年末年始の引落予定日は次の銀行営業日へ', () => {
+      equal(engine.calculateCardPaymentDate('2026-11-30', 0, 31, 1), '2027-01-04', '12月31日から年始休業を越える');
+      equal(engine.calculateCardPaymentDate('2027-12-30', 31, 2, 1), '2028-01-04', '1月2日から1月3日を越える');
+    });
+    test('年始の休業日から前営業日へ戻すと年末休業日を越える', () => {
+      equal(engine.previousBusinessDay('2026-01-02'), '2025-12-30', '年末年始の前営業日');
+    });
+    test('休業日が長く続き営業日を特定できない場合は推測しない', () => {
+      const overrides = {};
+      for (let day = 1; day <= 31; day++) overrides[`2026-07-${String(day).padStart(2, '0')}`] = '臨時休業';
+      let failed = false;
+      try { engine.nextBusinessDay('2026-07-01', { overrides }); } catch { failed = true; }
+      assert(failed, '営業日ではない日を計算結果として返した');
+    });
+
     test('祝日エンジン: 2026年の主要な祝日を正しく判定する', () => {
       equal(engine.japaneseHolidayName('2026-01-01'), '元日', '元日');
       equal(engine.japaneseHolidayName('2026-01-12'), '成人の日', '成人の日は1月第2月曜');

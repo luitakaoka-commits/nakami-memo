@@ -274,9 +274,12 @@
     return day === 0 || day === 6;
   }
 
-  /** 土日でも祝日でもない日を営業日とする */
+  /** 土日・祝日・銀行の年末年始休業日を除いて営業日とする。 */
   function isJapaneseBusinessDay(dateInput, options = {}) {
-    return !isWeekend(dateInput) && !isJapaneseHoliday(dateInput, options);
+    const date = parseLocalDate(dateInput);
+    const bankYearEndOrNewYear = (date.getMonth() === 11 && date.getDate() === 31)
+      || (date.getMonth() === 0 && (date.getDate() === 2 || date.getDate() === 3));
+    return !bankYearEndOrNewYear && !isWeekend(date) && !isJapaneseHoliday(date, options);
   }
 
   /** 営業日でなければ、営業日になるまで前へ戻す（給与の繰り上げ用）。営業日ならそのまま返す。 */
@@ -287,6 +290,7 @@
       cursor = addDays(cursor, -1);
       guard += 1;
     }
+    if (!isJapaneseBusinessDay(cursor, options)) throw new Error('前の銀行営業日を確認できません');
     return toDateString(cursor);
   }
 
@@ -298,6 +302,7 @@
       cursor = addDays(cursor, 1);
       guard += 1;
     }
+    if (!isJapaneseBusinessDay(cursor, options)) throw new Error('次の銀行営業日を確認できません');
     return toDateString(cursor);
   }
 
