@@ -6,6 +6,7 @@ const { calculateCardPaymentDate } = require('../finance-engine.js');
 const { compare: compareMigration } = require('../redesign-migration-check.js');
 const { generateRecurring } = require('../redesign-recurring.js');
 const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
+const { confirmBill, recordDebit } = require('../redesign-bill-lifecycle.js');
 const assert = require('node:assert/strict');
 
 const cases = [];
@@ -85,6 +86,43 @@ test('引落済みの支払いは開始残高から再び引かない', () => {
 test('請求額確定だけでは支払済みとみなさない', () => {
   const r = plan([account('a', 50000)], [bill('next', '2026-11-10', 'a', 20000, { amountConfirmed: true, status: 'planned' })]);
   assert.equal(r.nextPayments[0].projectedBalance, 30000);
+});
+test('カード会社の確定額は見込みを置換し、口座残高を変えない', () => {
+  const before = { account: { id: 'a', balance: 50000, revision: 1 }, bill: { id: 'b', accountId: 'a', amount: 23000, amountConfirmed: false, status: 'planned' } };
+  const after = confirmBill(before, { issuerConfirmed: true, amount: 25000 });
+  assert.equal(after.bill.amount, 25000); assert.equal(after.bill.amountConfirmed, true);
+  assert.equal(after.bill.status, 'planned'); assert.equal(after.account.balance, 50000);
+  assert.equal(before.bill.amount, 23000);
+});
+test('銀行引落を一度だけ反映し、同じ処理の再送は残高を変えない', () => {
+  const state = { account: { id: 'a', balance: 50000, revision: 1 }, bill: { id: 'b', accountId: 'a', amount: 25000, amountConfirmed: true, status: 'planned' } };
+  const input = { operationId: 'op1', amount: 25000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: false, expectedRevision: 1 };
+  const first = recordDebit(state, input), again = recordDebit(first, input);
+  assert.equal(first.account.balance, 25000); assert.equal(first.bill.status, 'settled');
+  assert.equal(again.account.balance, 25000); assert.equal(again.alreadyApplied, true);
+  assert.throws(() => recordDebit(first, { ...input, operationId: 'op2' }), /既に引落済み/);
+});
+test('銀行引落が現在残高に反映済みならもう一度差し引かない', () => {
+  const state = { account: { id: 'a', balance: 25000, revision: 2 }, bill: { id: 'b', accountId: 'a', amount: 25000, amountConfirmed: true, status: 'planned' } };
+  const after = recordDebit(state, { operationId: 'op', amount: 25000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: true, expectedRevision: 2 });
+  assert.equal(after.account.balance, 25000); assert.equal(after.bill.status, 'settled');
+});
+test('残高の反映状況・銀行の確証・請求額が不明なら引落処理しない', () => {
+  const state = { account: { id: 'a', balance: 50000, revision: 1 }, bill: { id: 'b', accountId: 'a', amount: 25000, amountConfirmed: true, status: 'planned' } };
+  const base = { operationId: 'op', amount: 25000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: false, expectedRevision: 1 };
+  for (const patch of [{ bankConfirmed: false }, { amount: 26000 }, { balanceAlreadyIncludesDebit: undefined }, { date: '2026-11-11' }, { expectedRevision: 0 }]) assert.throws(() => recordDebit(state, { ...base, ...patch }));
+  assert.equal(state.account.balance, 50000); assert.equal(state.bill.status, 'planned');
+});
+test('請求元の確定根拠や口座が不正な場合は処理しない', () => {
+  const state = { account: { id: 'a', balance: 50000, revision: 1 }, bill: { id: 'b', accountId: 'a', amount: 25000, amountConfirmed: false, status: 'planned' } };
+  assert.throws(() => confirmBill(state, { issuerConfirmed: false, amount: 25000 }));
+  assert.throws(() => confirmBill({ ...state, bill: { ...state.bill, accountId: 'other' } }, { issuerConfirmed: true, amount: 25000 }));
+});
+test('引落処理後の残高を試算に渡しても同じ支払いを再び引かない', () => {
+  const state = { account: { id: 'a', balance: 50000, revision: 1 }, bill: { id: 'b', accountId: 'a', amount: 25000, amountConfirmed: true, status: 'planned' } };
+  const result = recordDebit(state, { operationId: 'op', amount: 25000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: false, expectedRevision: 1 });
+  const readiness = calculateReadiness({ today: '2026-11-11', endDate: '2026-12-31', coverageVerified: true, accounts: [account('a', result.account.balance)], events: [bill('b', '2026-11-10', 'a', 25000, { status: 'settled' }), bill('next', '2026-12-10', 'a', 10000)] });
+  assert.equal(readiness.nextPayments[0].projectedBalance, 15000);
 });
 test('実行状態が不明または未来日の実行済みは拒否', () => {
   assert.throws(() => plan([account('a', 50000)], [bill('next', '2026-11-10', 'a', 20000, { status: undefined })]));
