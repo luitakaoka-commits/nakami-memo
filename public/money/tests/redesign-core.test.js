@@ -122,6 +122,35 @@ test('請求額確定だけでは支払済みとみなさない', () => {
   const r = plan([account('a', 50000)], [bill('next', '2026-11-10', 'a', 20000, { amountConfirmed: true, status: 'planned' })]);
   assert.equal(r.nextPayments[0].projectedBalance, 30000);
 });
+test('複数月の入出金を手計算と照合し、入金前の引落と後日の水道代を分ける', () => {
+  // 架空の例: 100000+50000-130000=20000、+70000-15000+55000-115000=15000。
+  const events = [income('support1', '2026-11-05', 'a', 50000), bill('nov', '2026-11-10', 'a', 130000), income('salary', '2026-11-13', 'a', 70000), expense('other', '2026-11-27', 'a', 15000), income('support2', '2026-12-07', 'a', 55000), bill('dec', '2026-12-10', 'a', 115000), expense('water', '2026-12-20', 'a', 16000)];
+  const r = plan([account('a', 100000)], events);
+  assert.equal(r.nextDate, '2026-11-10');
+  assert.equal(r.timeline[0].projectedBalance, 20000);
+  assert.equal(r.timeline[1].projectedBalance, 15000);
+  assert.equal(r.nextStatus, 'review');
+  assert.equal(r.futureStatus, 'shortfall');
+  assert.ok(r.issues.some(issue => issue.type === 'projected_shortfall' && issue.date === '2026-12-20' && issue.amount === 1000));
+});
+test('将来の給与が不足に間に合うかどうかは入金日で変わる', () => {
+  const base = [bill('nov', '2026-11-10', 'a', 130000), income('salary', '2026-11-13', 'a', 50000)];
+  const late = plan([account('a', 100000)], base);
+  const early = plan([account('a', 100000)], [base[0], { ...base[1], date: '2026-11-09' }]);
+  assert.equal(late.nextStatus, 'shortfall');
+  assert.equal(early.nextStatus, 'review');
+  assert.equal(early.nextPayments[0].projectedBalance, 20000);
+});
+test('同じ入出金の入力順を変えても判定と口座別残高は変わらない', () => {
+  const events = [income('support', '2026-11-05', 'a', 50000), bill('one', '2026-11-10', 'a', 60000), bill('two', '2026-11-10', 'a', 70000), expense('water', '2026-12-20', 'a', 21000)];
+  const first = plan([account('a', 100000)], events);
+  const second = plan([account('a', 100000)], [...events].reverse());
+  assert.equal(first.nextStatus, second.nextStatus);
+  assert.equal(first.futureStatus, second.futureStatus);
+  assert.equal(first.nextPayments[0].projectedBalance, 20000);
+  assert.equal(second.nextPayments[0].projectedBalance, 20000);
+  assert.ok(second.issues.some(issue => issue.type === 'projected_shortfall' && issue.amount === 1000));
+});
 test('カード会社の確定額は見込みを置換し、口座残高を変えない', () => {
   const before = { account: { id: 'a', balance: 50000, revision: 1 }, bill: { id: 'b', accountId: 'a', amount: 23000, amountConfirmed: false, status: 'planned' } };
   const after = confirmBill(before, { issuerConfirmed: true, amount: 25000 });
