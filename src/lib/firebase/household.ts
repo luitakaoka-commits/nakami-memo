@@ -16,6 +16,7 @@ import type { User } from "firebase/auth";
 import {
   HOUSEHOLD_COLLECTIONS,
   copyMismatches,
+  householdCopyData,
   defaultHouseholdName,
   inviteExpiry,
   newInviteCode,
@@ -104,7 +105,7 @@ export async function createHouseholdFromPersonal(user: User, onProgress: (messa
     // 1回のまとめ書きは500件まで。余裕をみて400件ずつ
     for (let start = 0; start < snap.docs.length; start += 400) {
       const batch = writeBatch(db);
-      snap.docs.slice(start, start + 400).forEach((entry) => batch.set(doc(db, "households", ref.id, name, entry.id), entry.data()));
+      snap.docs.slice(start, start + 400).forEach((entry) => batch.set(doc(db, "households", ref.id, name, entry.id), householdCopyData(name, entry.data())));
       await batch.commit();
     }
     copied[name] = await countDocs(["households", ref.id], name);

@@ -12,6 +12,13 @@
 /** 家に写すコレクション。なかみメモ（areas〜consumptions）とつくりおきノート（recipes〜shopping） */
 export const HOUSEHOLD_COLLECTIONS = ["areas", "locations", "items", "tools", "consumptions", "recipes", "plans", "shopping"] as const;
 
+/** 在庫の購入金額は個人の家計に残し、共有する家へは写さない。 */
+export function householdCopyData(collectionName: string, data: Record<string, unknown>): Record<string, unknown> {
+  const copy = { ...data };
+  if (collectionName === "items") delete copy.purchasePrice;
+  return copy;
+}
+
 /**
  * 「使い切った／捨てた」をお金管理へ返す受け渡し箱（ユーザー決定 B）。
  * 同居人はあなたのお金管理を見られないので、家の中に置いておき、あなたがお金管理を開いたときに書き戻す。

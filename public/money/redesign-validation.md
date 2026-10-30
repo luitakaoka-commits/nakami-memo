@@ -32,6 +32,8 @@
 
 Firestoreルールの候補に関する9項目を、`demo-kurashi` のローカルエミュレーターと架空データで検証済み。新旧の候補を本人が書けること、不正な時刻・時間帯・出所・未知の項目を拒否すること、本人以外と未ログインを拒否することを確認。`public/money/tests/rules-emulator.test.js` は `FIRESTORE_EMULATOR_HOST=127.0.0.1:8487` を明示した場合にのみ実行でき、接続先は固定のデモプロジェクト。自動テストだけではデプロイ済みルールやApps Scriptとの接続、実機の権限を保証しない。
 
+共有の検査では同居人が本人の家計・メール候補を読めず、共有在庫を読めることを確認した。一方、共有在庫に購入金額が入っていれば同居人に読めることも確認した。新規の共有在庫と個人在庫から家を作るコピーでは購入金額を除く修正を追加したが、**すでに共有済みの在庫は変更していない**。ルール自体は共有在庫の金額を遮断しないので、古いアプリや他の書込経路も含めた移行・防止策、既存データのバックアップと実機確認が必要。レシート参照や家計スペースIDは連携のため共有される点にも注意。
+
 `redesign-migration-check.js` は架空の JSON データによる比較の試作で、家計本体とメール候補・レシート・明細・別名辞書の欠落や内容の変化を検出する。取得完了の印は呼び出し側から与える前提で、その真偽は検証できない。Firestore固有の値、取得漏れ、バックアップの作成、実際の復元や認証は未対応。これを完全なバックアップ機能とみなさない。
 
 `redesign-backup-read.js` はFirestore RESTの応答を受け取る読取専用の試作。親文書と4種類のサブコレクションの全ページへ同じ `readTime` を指定し、文書名、重複、ページの繰り返し、取得失敗を検査する。Firestoreの値はRESTの型付きJSONのまま保持する。[Firestore get](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/get) と [list](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/list) の仕様を参照。サーバーが許す読み取り時刻と認証の取得、実通信、ファイル保存、復元、権限、ネットワーク障害、下位の別アプリのデータはまだ未検証。対応した4種類以外や別のアプリを含む完全バックアップではない。

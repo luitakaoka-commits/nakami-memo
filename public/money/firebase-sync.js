@@ -537,7 +537,8 @@ async function addToInventory(plan) {
       unit: row.unit,
       category: row.category,
       purchaseRef: row.purchaseRef,
-      purchasePrice: row.purchasePrice,
+      // 家で共有する在庫に購入金額は載せない。金額は本人のレシート明細に残る。
+      ...(householdId ? {} : { purchasePrice: row.purchasePrice }),
       // なかみメモが「使い切った／捨てた」をこの共有スペースの明細へ返すのに使う
       purchaseWorkspaceId: workspaceId,
       createdAt: now,

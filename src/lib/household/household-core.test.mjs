@@ -3,7 +3,7 @@
  */
 import {
   HOUSEHOLD_COLLECTIONS, INVITE_DAYS, OUTCOME_QUEUE, copyMismatches, defaultHouseholdName, inviteExpiry, inviteLink,
-  inviteStatus, newInviteCode, outcomeQueueEntry, shouldQueueOutcome, spaceSegments,
+  inviteStatus, newInviteCode, outcomeQueueEntry, shouldQueueOutcome, spaceSegments, householdCopyData,
 } from "./household-core.ts";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,16 @@ function eq(actual, expected, label) {
 function ok(cond, label) { if (!cond) throw new Error(label); }
 
 const NOW = new Date("2026-09-28T03:00:00.000Z").getTime();
+
+t("共有する在庫には購入金額を写さず、レシート連携情報と元データを保つ", () => {
+  const original = { name: "食品", purchasePrice: 100, purchaseWorkspaceId: "w1", purchaseRef: "r1#1" };
+  const shared = householdCopyData("items", original);
+  ok(!Object.hasOwn(shared, "purchasePrice"), "共有先に金額が残っている");
+  eq(shared.purchaseWorkspaceId, "w1", "連携先");
+  eq(shared.purchaseRef, "r1#1", "レシート参照");
+  eq(original.purchasePrice, 100, "元の金額を消さない");
+  eq(householdCopyData("recipes", original).purchasePrice, 100, "別のコレクションを変更しない");
+});
 
 t("家に入っていなければ本人の場所、入っていれば家の場所", () => {
   eq(spaceSegments("u1", null), ["users", "u1"], "家なし");
