@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import backup from '../redesign-backup-read.js';
 import migration from '../redesign-migration-check.js';
+import planner from '../redesign-restore-plan.js';
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8487') throw new Error('ローカル模擬環境専用です');
 const base = 'http://127.0.0.1:8487/v1/projects/demo-kurashi/databases/(default)/documents';
@@ -65,11 +66,24 @@ try {
   const historical = await read(sourceId, last.updateTime);
   assert.equal(historical.collections.receiptItems.documents[0].data.fields.amount.integerValue, '1234');
   assert.equal(migration.compare(snapshot, historical).matches, true);
-  await write(`workspaces/${targetId}`, snapshot.workspace.fields); cleanup.push(`workspaces/${targetId}`);
-  for (const name of names) for (const item of snapshot.collections[name].documents) {
-    const path = `workspaces/${targetId}/${name}/${item.id}`;
-    last = await write(path, item.data.fields); cleanup.push(path);
-  }
+  const plan = planner.planRestore({ snapshot, targetId, uid: 'restore-user' });
+  assert.equal(plan.rootWrites.length, 1); assert.equal(plan.childWrites.length, 4);
+  assert.throws(() => planner.planRestore({ snapshot, targetId: sourceId, uid: 'restore-user' }), /上書き/);
+  assert.throws(() => planner.planRestore({ snapshot, targetId, uid: 'other-user' }), /所有者/);
+  // 現行ルールは親の家計が先に存在することを要求する。
+  const createRoot = () => fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes: plan.rootWrites }) });
+  const rootResponse = await createRoot();
+  if (!rootResponse.ok) throw new Error(`親の作成 ${rootResponse.status}: ${(await rootResponse.json()).error?.message}`);
+  cleanup.push(`workspaces/${targetId}`);
+  const repeated = await createRoot();
+  assert.equal(repeated.ok, false);
+  const commit = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes: plan.childWrites }) });
+  if (!commit.ok) throw new Error(`明細の復元 ${commit.status}: ${(await commit.json()).error?.message}`);
+  const result = await commit.json();
+  last = { updateTime: result.commitTime };
+  cleanup.push(...names.map(name => `workspaces/${targetId}/${name}/one`));
+  const duplicateChildren = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes: plan.childWrites }) });
+  assert.equal(duplicateChildren.ok, false);
   const restored = await read(targetId, last.updateTime);
   assert.equal(migration.compareRestored(snapshot, restored).matches, true);
   await write(`workspaces/${targetId}/receiptItems/one`, { ...fields('receiptItems'), amount: { integerValue: '1235' } });
