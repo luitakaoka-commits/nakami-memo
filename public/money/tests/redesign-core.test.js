@@ -379,6 +379,14 @@ test('あり得ない日付やタイムゾーンのない時刻は要確認', ()
   assert.equal(reconcile(null, [row('2', 1000, { usedAt: '2026-11-01T12:00:00' })]).amount, 0);
 });
 test('メール識別子のない通知は自動加算しない', () => assert.equal(reconcile(null, [row('1', 1000, { messageId: '' })]).amount, 0));
+test('メール識別子が空白や文字列以外なら識別の根拠とみなさない', () => {
+  for (const messageId of ['   ', 123, {}, true]) {
+    const result = reconcile(null, [row('1', 1000, { messageId })]);
+    assert.equal(result.amount, 0);
+    assert.equal(result.possibleAdditional, 1000);
+    assert.ok(result.issues.some(issue => issue.type === 'missing_evidence'));
+  }
+});
 test('明細の取得元が不明ならメール重複確認をすり抜けない', () => {
   for (const origin of [undefined, '', 'unknown']) {
     assert.throws(() => reconcile(null, [row('1', 1000, { origin, messageId: '' })]), /取得元/);
@@ -387,6 +395,13 @@ test('明細の取得元が不明ならメール重複確認をすり抜けな�
 test('手入力と明示された明細は証拠があれば利用として扱える', () => {
   const r = reconcile(null, [row('1', 1000, { origin: 'manual', messageId: '' })]);
   assert.equal(r.amount, 1000);
+});
+test('手入力の不要なメールIDは別のメール通知を重複扱いにしない', () => {
+  const manual = row('manual', 1000, { origin: 'manual', messageId: 'same' });
+  const mail = row('mail', 2000, { messageId: 'same' });
+  const result = reconcile(null, [manual, mail]);
+  assert.equal(result.amount, 3000);
+  assert.ok(!result.issues.some(issue => issue.type === 'duplicate_message'));
 });
 test('同一メールに異なる金額がある場合は入力順で上限が変わらない', () => {
   const a = row('1', 1000, { messageId: 'same' });

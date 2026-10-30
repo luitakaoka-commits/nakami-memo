@@ -13,7 +13,7 @@
       if (keys.has(key)) throw new Error('同じカードと請求期間が重複しています');
       keys.add(key);
       for (const entry of bill.entries || []) {
-        if (entry?.origin !== 'email' || !entry.messageId) continue;
+        if (entry?.origin !== 'email' || typeof entry.messageId !== 'string' || !entry.messageId.trim()) continue;
         if (messageGroups.has(entry.messageId) && messageGroups.get(entry.messageId) !== key) throw new Error('同じメールが複数のカードまたは請求期間にあります');
         messageGroups.set(entry.messageId, key);
       }

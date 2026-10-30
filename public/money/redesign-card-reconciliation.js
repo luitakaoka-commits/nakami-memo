@@ -38,7 +38,8 @@
       if (entry.cardId !== cardId || entry.cycle !== cycle) throw new Error('別のカードまたは請求期間の明細です');
       if (!Number.isSafeInteger(entry.amount) || entry.amount < 0) throw new Error('明細額が不正です');
       if (!['email', 'manual'].includes(entry.origin)) throw new Error('明細の取得元が不明です');
-      if (entry.messageId && mailIds.has(entry.messageId)) {
+      const hasMailId = entry.origin === 'email' && typeof entry.messageId === 'string' && entry.messageId.trim().length > 0;
+      if (hasMailId && mailIds.has(entry.messageId)) {
         const previous = mailIds.get(entry.messageId);
         // 同じメールでも抽出額が食い違うなら単なる再取得とは断定できない。
         // 確定額には足さず、未確定の上限に残して確認を求める。
@@ -53,14 +54,14 @@
         items.push({ id: entry.id, treatment: conflict ? 'review' : 'duplicate_message' });
         continue;
       }
-      if (entry.messageId) mailIds.set(entry.messageId, entry);
+      if (hasMailId) mailIds.set(entry.messageId, entry);
       if (entry.type && entry.type !== 'purchase') {
         issues.push({ type: 'refund_or_cancellation', id: entry.id });
         items.push({ id: entry.id, treatment: 'review' });
         continue;
       }
       const hasEvidence = entry.evidenceComplete === true && validInstant(entry.usedAt)
-        && (entry.origin !== 'email' || Boolean(entry.messageId));
+        && (entry.origin !== 'email' || hasMailId);
       // 異なるメールIDでも同じ決済の通知かもしれない。照合未実施は安全扱いしない。
       const duplicateUnchecked = entry.origin === 'email' && entry.duplicateCheck !== 'clear';
       const timeConflict = snapshot && entry.inclusion === 'included' && validInstant(snapshot.checkedAt)
