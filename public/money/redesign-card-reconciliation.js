@@ -35,6 +35,7 @@
       ids.add(entry.id);
       if (entry.cardId !== cardId || entry.cycle !== cycle) throw new Error('別のカードまたは請求期間の明細です');
       if (!Number.isSafeInteger(entry.amount) || entry.amount < 0) throw new Error('明細額が不正です');
+      if (!['email', 'manual'].includes(entry.origin)) throw new Error('明細の取得元が不明です');
       if (entry.messageId && mailIds.has(entry.messageId)) {
         const previous = mailIds.get(entry.messageId);
         // 同じメールでも抽出額が食い違うなら単なる再取得とは断定できない。

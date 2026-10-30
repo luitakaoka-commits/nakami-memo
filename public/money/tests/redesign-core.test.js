@@ -201,6 +201,23 @@ test('あり得ない日付やタイムゾーンのない時刻は要確認', ()
   assert.equal(reconcile(null, [row('2', 1000, { usedAt: '2026-11-01T12:00:00' })]).amount, 0);
 });
 test('メール識別子のない通知は自動加算しない', () => assert.equal(reconcile(null, [row('1', 1000, { messageId: '' })]).amount, 0));
+test('明細の取得元が不明ならメール重複確認をすり抜けない', () => {
+  for (const origin of [undefined, '', 'unknown']) {
+    assert.throws(() => reconcile(null, [row('1', 1000, { origin, messageId: '' })]), /取得元/);
+  }
+});
+test('手入力と明示された明細は証拠があれば利用として扱える', () => {
+  const r = reconcile(null, [row('1', 1000, { origin: 'manual', messageId: '' })]);
+  assert.equal(r.amount, 1000);
+});
+test('同一メールに異なる金額がある場合は入力順で上限が変わらない', () => {
+  const a = row('1', 1000, { messageId: 'same' });
+  const b = row('2', 5000, { messageId: 'same' });
+  const forward = reconcile(null, [a, b]);
+  const reverse = reconcile(null, [b, a]);
+  assert.equal(forward.upperEstimate, 6000); assert.equal(reverse.upperEstimate, 6000);
+  assert.equal(forward.needsReview, true); assert.equal(reverse.needsReview, true);
+});
 test('受信時刻だけでは利用時刻の証拠にならない', () => assert.equal(reconcile(null, [row('1', 1000, { usedAt: '', detectedAt: '2026-11-01T12:00:00+09:00' })]).needsReview, true));
 test('確定請求後に新規利用が届いた場合は勝手に加算せず確認', () => {
   const r = reconcile({ status: 'confirmed', amount: 10000 }, [row('1', 3000, { inclusion: 'not_included' })]);
