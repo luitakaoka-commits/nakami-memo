@@ -193,6 +193,16 @@ test('銀行引落を一度だけ反映し、同じ処理の再送は残高を�
   assert.equal(again.account.balance, 25000); assert.equal(again.alreadyApplied, true);
   assert.throws(() => recordDebit(first, { ...input, operationId: 'op2' }), /既に引落済み/);
 });
+test('同じ銀行引落の処理IDを別の請求に再利用して二重に残高を減らさない', () => {
+  const state = { account: { id: 'a', balance: 50000, revision: 1 }, bill: { id: 'b1', accountId: 'a', amount: 10000, amountConfirmed: true, status: 'planned' } };
+  const input = { operationId: 'bank-op', amount: 10000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: false, expectedRevision: 1 };
+  const first = recordDebit(state, input);
+  const otherBill = { id: 'b2', accountId: 'a', amount: 10000, amountConfirmed: true, status: 'planned' };
+  assert.throws(() => recordDebit({ account: first.account, bill: otherBill }, { ...input, expectedRevision: first.account.revision }), /識別子|別の請求/);
+  assert.equal(first.account.balance, 40000);
+  const second = recordDebit({ account: first.account, bill: otherBill }, { ...input, operationId: 'bank-op-2', expectedRevision: first.account.revision });
+  assert.equal(second.account.balance, 30000);
+});
 test('銀行引落が現在残高に反映済みならもう一度差し引かない', () => {
   const state = { account: { id: 'a', balance: 25000, revision: 2 }, bill: { id: 'b', accountId: 'a', amount: 25000, amountConfirmed: true, status: 'planned' } };
   const after = recordDebit(state, { operationId: 'op', amount: 25000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: true, expectedRevision: 2 });

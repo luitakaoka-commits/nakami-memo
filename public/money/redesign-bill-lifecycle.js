@@ -9,6 +9,7 @@
   function validate(state) {
     const { account, bill } = state || {};
     if (!account?.id || !Number.isSafeInteger(account.balance) || !Number.isSafeInteger(account.revision) || account.revision < 0) throw new Error('口座が不正です');
+    if (account.processedDebitOperations !== undefined && (!Array.isArray(account.processedDebitOperations) || account.processedDebitOperations.some(id => typeof id !== 'string' || !id.trim()) || new Set(account.processedDebitOperations).size !== account.processedDebitOperations.length)) throw new Error('引落処理の識別子が不正です');
     if (!bill?.id || bill.accountId !== account.id || !Number.isSafeInteger(bill.amount) || bill.amount < 0 || !['planned', 'settled'].includes(bill.status)) throw new Error('請求が不正です');
     return { account, bill };
   }
@@ -20,11 +21,12 @@
   }
   function recordDebit(state, input) {
     const { account, bill } = validate(state);
-    if (!input?.operationId || typeof input.operationId !== 'string') throw new Error('処理の識別子が必要です');
+    if (typeof input?.operationId !== 'string' || !input.operationId.trim()) throw new Error('処理の識別子が必要です');
     if (bill.status === 'settled') {
       if (bill.settlement?.operationId === input.operationId && bill.settlement.amount === input.amount && bill.settlement.date === input.date && bill.settlement.balanceAlreadyIncludesDebit === input.balanceAlreadyIncludesDebit) return { account: { ...account }, bill: { ...bill }, alreadyApplied: true };
       throw new Error('既に引落済みです。内容の違いを確認してください');
     }
+    if (account.processedDebitOperations?.includes(input.operationId)) throw new Error('この引落処理の識別子は別の請求で使用済みです');
     if (bill.amountConfirmed !== true || input.bankConfirmed !== true || input.amount !== bill.amount) throw new Error('請求額と実際の引落額を確認してください');
     if (!dateValid(input.today) || !dateValid(input.date) || input.date > input.today) throw new Error('引落日を確認してください');
     if (typeof input.balanceAlreadyIncludesDebit !== 'boolean') throw new Error('残高に引落が反映済みか確認してください');
@@ -32,7 +34,7 @@
     const newBalance = input.balanceAlreadyIncludesDebit ? account.balance : account.balance - input.amount;
     if (!Number.isSafeInteger(newBalance) || !Number.isSafeInteger(account.revision + 1)) throw new Error('計算可能な金額の範囲を超えています');
     return {
-      account: { ...account, balance: newBalance, revision: account.revision + 1 },
+      account: { ...account, balance: newBalance, revision: account.revision + 1, processedDebitOperations: [...(account.processedDebitOperations || []), input.operationId] },
       bill: { ...bill, status: 'settled', settlement: { operationId: input.operationId, amount: input.amount, date: input.date, balanceAlreadyIncludesDebit: input.balanceAlreadyIncludesDebit } },
       alreadyApplied: false
     };
