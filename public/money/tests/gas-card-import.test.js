@@ -104,6 +104,32 @@ test('本文に時間帯がない場合は日本時間を推測しない', () =>
   const fields = [...f.saved.values()][0];
   assert(fields.usedTime.stringValue === '15:03' && fields.usedTimeZone.stringValue === '', '時間帯を推測している');
 });
+test('利用日があっても本文に利用時刻がない通知は要確認', () => {
+  const f = fixture({ ids: ['a'], subject: 'JCBカード／ショッピングご利用のお知らせ', body: 'カード名称：ＪＣＢカードＷ\n【ご利用日時(日本時間)】 2026/08/23\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.status.stringValue === 'needs_review' && fields.usedTime.stringValue === '', '利用時刻不明を見逃した');
+  assert(fields.note.stringValue.includes('時刻'), '要確認の理由がない');
+});
+test('カード種類が不明な通知は要確認', () => {
+  const f = fixture({ ids: ['a'], subject: 'JCBカード／ショッピングご利用のお知らせ', body: '【ご利用日時(日本時間)】 2026/08/23 15:03\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.status.stringValue === 'needs_review', 'カード種類不明を見逃した');
+  assert(fields.note.stringValue.includes('カード'), '要確認の理由がない');
+});
+test('カード名・金額・利用日時の根拠があるJCB通知は確認待ち候補になる', () => {
+  const f = fixture({ ids: ['a'], subject: 'JCBカード／ショッピングご利用のお知らせ', body: 'カード名称：ＪＣＢカードＷ\n【ご利用日時(日本時間)】 2026/08/23 15:03\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.status.stringValue === 'pending', '根拠のある通知が通常の候補にならない');
+});
+test('通知の受信日と本文の利用日が異なっても本文の利用日時を保存', () => {
+  const f = fixture({ ids: ['a'], subject: 'JCBカード／ショッピングご利用のお知らせ', body: 'カード名称：ＪＣＢカードＷ\n【ご利用日時(日本時間)】 2026/08/22 23:59\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.usedDate.stringValue === '2026-08-22' && fields.usedTime.stringValue === '23:59', '受信日時を利用日時に取り違えた');
+});
 
 test('符号化された日本語件名を元の文字に戻す', () => {
   const f = fixture();

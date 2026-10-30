@@ -181,7 +181,12 @@ function buildCandidate(message) {
   var usedDate = parsed.usedDate || '';
   var amount = parsed.amount === null ? 0 : parsed.amount;
   var evidence = assessNoticeEvidence(mail, parsed);
-  var status = parsed.confident && amount > 0 && evidence.safe ? 'pending' : 'needs_review';
+  var cardHint = String(parsed.cardHint || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  var issuerHint = String(parsed.issuerLabel || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  var reviewReasons = [];
+  if (!parsed.usedTime) reviewReasons.push('利用時刻を確認してください。');
+  if (!cardHint || cardHint === issuerHint) reviewReasons.push('利用したカードを確認してください。');
+  var status = parsed.confident && amount > 0 && evidence.safe && reviewReasons.length === 0 ? 'pending' : 'needs_review';
 
   var candidate = {
     sourcePackage: extractSenderDomain(sender),
@@ -196,7 +201,7 @@ function buildCandidate(message) {
     merchant: parsed.merchant || '',
     type: parsed.type || 'unknown',
     status: status,
-    note: [parsed.note || '', evidence.safe ? '' : evidence.reason].filter(Boolean).join(' '),
+    note: [parsed.note || '', evidence.safe ? '' : evidence.reason].concat(reviewReasons).filter(Boolean).join(' '),
     createdAt: new Date().toISOString(),
     createdBy: 'gas-card-mail-import'
   };
