@@ -12,6 +12,7 @@ const { planRefund } = require('../redesign-refund.js');
 const { planCsv } = require('../redesign-csv-reconciliation.js');
 const { periodForCards } = require('../redesign-deadline.js');
 const { evaluateCashflow } = require('../redesign-cashflow-composition.js');
+const { forecast90 } = require('../redesign-forecast.js');
 const assert = require('node:assert/strict');
 
 const cases = [];
@@ -782,6 +783,29 @@ test('隔月の水道代は口座から引き、登録済みの同じ支払い�
   assert.equal(result.nextStatus, 'safe');
   assert.equal(result.futureStatus, 'shortfall');
   assert.ok(result.issues.some(issue => issue.type === 'projected_shortfall' && issue.date === '2026-12-20' && issue.amount === 1000));
+});
+test('90日予測は今日を含む期間にカードと隔月水道代をまとめる', () => {
+  const input = composed({ accounts: [account('a', 15000)], cardBills: [composedBill('jcb', 10000)], recurringPlans: [{ id: 'water', accountId: 'a', firstDate: '2026-10-20', intervalMonths: 2, amount: 6000 }] });
+  const before = JSON.stringify(input), result = forecast90(input);
+  assert.equal(result.endDate, '2027-01-27');
+  assert.deepEqual(result.generated.map(event => event.date), ['2026-12-20']);
+  assert.equal(result.nextStatus, 'safe');
+  assert.equal(result.futureStatus, 'shortfall');
+  assert.ok(result.issues.some(issue => issue.type === 'projected_shortfall' && issue.date === '2026-12-20' && issue.amount === 1000));
+  assert.equal(JSON.stringify(input), before);
+});
+test('90日予測では登録済み定期支払いを再生成せず期限外は含めない', () => {
+  const saved = { id: 'saved', recurringPlanId: 'water', scheduledDate: '2026-12-20', date: '2027-01-05', accountId: 'a', kind: 'expense', amount: 6000, amountConfirmed: true, status: 'planned' };
+  const result = forecast90(composed({ accounts: [account('a', 15000)], cardBills: [composedBill('jcb', 10000)], otherEvents: [saved, expense('outside', '2027-01-28', 'a', 50000)], recurringPlans: [{ id: 'water', accountId: 'a', firstDate: '2026-10-20', intervalMonths: 2, amount: 6000 }] }));
+  assert.equal(result.generated.length, 0);
+  assert.ok(result.issues.some(issue => issue.type === 'projected_shortfall' && issue.date === '2027-01-05' && issue.amount === 1000));
+  assert.ok(!result.issues.some(issue => issue.date === '2027-01-28'));
+});
+test('90日予測は開始日・定期予定の重複や口座不明を拒否する', () => {
+  const recurringPlans = [{ id: 'water', accountId: 'missing', firstDate: '2026-10-20', intervalMonths: 2, amount: 6000 }];
+  assert.throws(() => forecast90(composed({ today: '2026-02-30', recurringPlans: [] })), /開始日/);
+  assert.throws(() => forecast90(composed({ recurringPlans: [...recurringPlans, ...recurringPlans] })), /重複/);
+  assert.throws(() => forecast90(composed({ recurringPlans })), /口座/);
 });
 test('旧カード記録の明細種別が未知なら請求総額として扱わない', () => {
   const state = legacyFixture();
