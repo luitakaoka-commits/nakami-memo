@@ -121,6 +121,24 @@ test('残高・入金・請求の組合せを独立した手計算と比較', ()
     }
   }
 });
+test('複数日・同日支払いを独立した計算で1000通り検証', () => {
+  let seed = 1234567;
+  const amount = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed % 11) * 1000; };
+  for (let i = 0; i < 1000; i++) {
+    const start = amount(), earlyIncome = amount(), earlyExpense = amount(), card = amount(), other = amount(), sameDayIncome = amount();
+    const events = [income('early-in', '2026-11-01', 'a', earlyIncome), expense('early-out', '2026-11-02', 'a', earlyExpense), bill('card', '2026-11-10', 'a', card), expense('other', '2026-11-10', 'a', other), income('same-in', '2026-11-10', 'a', sameDayIncome)];
+    const result = plan([account('a', start)], events);
+    const projected = start + earlyIncome - earlyExpense - card - other;
+    const conservative = start - earlyExpense - card - other;
+    const expected = projected + sameDayIncome < 0 ? 'shortfall' : projected < 0 || conservative < 0 ? 'review' : 'safe';
+    assert.equal(result.nextStatus, expected, `組合せ ${i}`);
+    assert.equal(result.nextPayments[0].projectedBalance, projected, `組合せ ${i}`);
+    const reversed = plan([account('a', start)], [...events].reverse());
+    assert.equal(reversed.nextStatus, result.nextStatus, `入力順 ${i}`);
+    assert.equal(reversed.nextPayments[0].projectedBalance, projected, `入力順 ${i}`);
+    assert.equal(reversed.futureStatus, result.futureStatus, `将来の入力順 ${i}`);
+  }
+});
 test('整数の範囲を超える残高計算を拒否', () => {
   assert.throws(() => plan([account('a', Number.MAX_SAFE_INTEGER)], [income('salary', '2026-11-01', 'a', 1), bill('b', '2026-11-10', 'a', 1)]));
 });
@@ -160,6 +178,13 @@ test('未照合の上限は支払い能力の要確認につながる', () => {
 test('同じメールの再取得は二重加算しない', () => {
   const r = reconcile(null, [row('1', 1000, { messageId: 'same' }), row('2', 1000, { messageId: 'same' })]);
   assert.equal(r.amount, 1000); assert.ok(r.issues.some(x => x.type === 'duplicate_message'));
+});
+test('同じメールの抽出金額が食い違う場合は追加の可能性を残す', () => {
+  const r = reconcile(null, [row('1', 1000, { messageId: 'same' }), row('2', 5000, { messageId: 'same' })]);
+  assert.equal(r.amount, 1000); assert.equal(r.possibleAdditional, 5000);
+  assert.ok(r.issues.some(x => x.type === 'duplicate_message_conflict'));
+  const readiness = plan([account('a', 3000)], [bill('b', '2026-11-10', 'a', r.amount, { amountConfirmed: r.confirmed, additionalPossible: r.possibleAdditional })]);
+  assert.equal(readiness.nextStatus, 'review');
 });
 test('同日同額でも別々の明細を勝手に統合しない', () => assert.equal(reconcile(null, [row('1', 1000), row('2', 1000)]).amount, 2000));
 test('同一取引か曖昧な別メールは要確認', () => {

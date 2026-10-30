@@ -20,7 +20,7 @@
     if (snapshot && (!Number.isSafeInteger(snapshot.amount) || snapshot.amount < 0 || !['estimate', 'confirmed'].includes(snapshot.status))) throw new Error('累計額が不正です');
     if (snapshot && (snapshot.cardId !== cardId || snapshot.cycle !== cycle)) throw new Error('別のカードまたは請求期間の累計額です');
     const ids = new Set();
-    const mailIds = new Set();
+    const mailIds = new Map();
     let known = snapshot ? snapshot.amount : 0;
     let possible = 0;
     const issues = [];
@@ -36,11 +36,16 @@
       if (entry.cardId !== cardId || entry.cycle !== cycle) throw new Error('別のカードまたは請求期間の明細です');
       if (!Number.isSafeInteger(entry.amount) || entry.amount < 0) throw new Error('明細額が不正です');
       if (entry.messageId && mailIds.has(entry.messageId)) {
-        issues.push({ type: 'duplicate_message', id: entry.id });
-        items.push({ id: entry.id, treatment: 'duplicate_message' });
+        const previous = mailIds.get(entry.messageId);
+        // 同じメールでも抽出額が食い違うなら単なる再取得とは断定できない。
+        // 確定額には足さず、未確定の上限に残して確認を求める。
+        const conflict = previous.amount !== entry.amount || previous.usedAt !== entry.usedAt || previous.type !== entry.type || previous.inclusion !== entry.inclusion;
+        if (conflict && snapshot?.status !== 'confirmed') possible = add(possible, entry.amount);
+        issues.push({ type: conflict ? 'duplicate_message_conflict' : 'duplicate_message', id: entry.id });
+        items.push({ id: entry.id, treatment: conflict ? 'review' : 'duplicate_message' });
         continue;
       }
-      if (entry.messageId) mailIds.add(entry.messageId);
+      if (entry.messageId) mailIds.set(entry.messageId, entry);
       if (entry.type && entry.type !== 'purchase') {
         issues.push({ type: 'refund_or_cancellation', id: entry.id });
         items.push({ id: entry.id, treatment: 'review' });
