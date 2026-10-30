@@ -1104,6 +1104,12 @@ const closeModals = page => page.evaluate(() => {
     await closeModals(page);
   });
 
+  await record('mail_receive_time_is_not_purchase_time', async () => {
+    const transaction = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_card-selection-test'));
+    assert(transaction && transaction.transactionDate === '2026-09-02', '利用日が失われた');
+    assert(transaction.transactionAt === '', 'メールの受信時刻を利用時刻として保存している');
+  });
+
   await record('mail_duplicate_requires_confirmation', async () => {
     await page.evaluate(() => {
       window.__originalMailConfirm = window.confirm;

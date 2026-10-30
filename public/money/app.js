@@ -641,7 +641,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=43" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=44" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1091,20 +1091,6 @@
     return candidate.usedDate || finance.jstDateStringOf(candidate.detectedAt) || today();
   }
 
-  /**
-   * 取込候補の利用時刻(UTCのISO文字列)を求める。明細を新しい順に並べるために使う。
-   * メール本文から読み取った利用日と受信日が一致するときだけ、受信時刻を利用時刻とみなす。
-   * ずれている場合は時刻が不明なので空にして、日付だけで並べる。
-   */
-  function candidateInstant(candidate) {
-    const detectedAt = candidate.detectedAt || '';
-    if (!detectedAt) return '';
-    const detectedDate = finance.jstDateStringOf(detectedAt);
-    if (!detectedDate) return '';
-    if (candidate.usedDate && candidate.usedDate !== detectedDate) return '';
-    return new Date(detectedAt).toISOString();
-  }
-
   /** 本人が登録した対応だけを使い、カードの名前や登録順から推測しない。 */
   function matchedCardId(candidate) {
     const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s　]+/g, '');
@@ -1220,7 +1206,8 @@
       kind: 'payment',
       amount: amount * (isNegative ? -1 : 1),
       transactionDate,
-      transactionAt: entryType === 'statement' ? '' : candidateInstant({ ...candidate, usedDate: transactionDate }),
+      // 現行の取込候補には本文中の利用時刻がない。受信時刻を代わりにしない。
+      transactionAt: '',
       dateEstimated: edits ? false : !candidate.usedDate,
       dueDate,
       sourceAccountId: card?.accountId || primaryAccount()?.id || '',
