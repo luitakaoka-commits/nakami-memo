@@ -163,6 +163,15 @@ test('最新利用時刻が確認時刻の後なら照合状態を保留', () =>
   assert.ok(r.issues.some(x => x.type === 'snapshot_time_conflict'));
 });
 test('途中累計に含まれる明細は再加算しない', () => assert.equal(reconcile({ status: 'estimate', amount: 10000 }, [row('1', 3000, { inclusion: 'included' })]).amount, 10000));
+test('累計確認後の利用を確認時点の累計に含まれると断定しない', () => {
+  const later = row('1', 3000, { usedAt: '2026-11-03T12:00:00+09:00', inclusion: 'included' });
+  const estimated = reconcile({ status: 'estimate', amount: 10000 }, [later]);
+  assert.equal(estimated.amount, 10000); assert.equal(estimated.possibleAdditional, 3000);
+  assert.ok(estimated.issues.some(x => x.type === 'inclusion_time_conflict'));
+  const confirmed = reconcile({ status: 'confirmed', amount: 10000 }, [later]);
+  assert.equal(confirmed.amount, 10000); assert.equal(confirmed.confirmed, false);
+  assert.ok(confirmed.issues.some(x => x.type === 'inclusion_time_conflict'));
+});
 test('累計に含まれないことが確認された利用だけ加算', () => assert.equal(reconcile({ status: 'estimate', amount: 10000 }, [row('1', 3000, { inclusion: 'not_included' })]).amount, 13000));
 test('包含不明は確定加算せず追加の可能性として表示', () => {
   const r = reconcile({ status: 'estimate', amount: 10000 }, [row('1', 3000)]);
@@ -334,6 +343,15 @@ test('旧データの不明なカードや複数の請求総額は推測で統�
 test('旧明細と請求総額の引落日が異なる場合は勝手に同日にしない', () => {
   const old = legacyFixture(); old.transactions[1].dueDate = '2026-11-11';
   assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /引落日/);
+});
+test('旧メール明細だけの場合は重複照合がない金額を確定額にしない', () => {
+  const old = legacyFixture();
+  old.transactions = [old.transactions[1], { ...old.transactions[1], id: 'mail2' }];
+  const result = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  const card = result.scenario.events.find(event => event.cardPayment);
+  assert.equal(card.amount, 0); assert.equal(card.additionalPossible, 6000);
+  assert.equal(calculateReadiness(result.scenario).nextStatus, 'review');
+  assert.ok(result.issues.some(issue => issue.type === 'legacy_card_details_unverified'));
 });
 test('旧定期予定は登録済みの同月取引と重複させず残りの月を展開', () => {
   const old = legacyFixture();

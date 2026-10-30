@@ -69,7 +69,11 @@
       const dates = new Set([...group.adopted, ...group.suppressed].map(item => item.dueDate));
       if (dates.size !== 1 || !group.dueDate) throw new Error('カードの引落日が一致しません');
       if (!Number.isSafeInteger(group.adoptedTotal) || !Number.isSafeInteger(group.suppressedTotal)) throw new Error('カード請求額が不正です');
-      events.push({ id: `legacy-card:${group.key}`, date: group.dueDate, status: 'planned', amount: group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed: false, additionalPossible: group.suppressedTotal });
+      // 旧明細にはメールの重複照合や利用日時の根拠が保存されていない。
+      // 総額が無い場合、明細合計を確定額とせず上限側に残す。
+      const detailsOnly = group.source === 'itemized';
+      events.push({ id: `legacy-card:${group.key}`, date: group.dueDate, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed: false, additionalPossible: detailsOnly ? group.adoptedTotal : group.suppressedTotal });
+      if (detailsOnly) issues.push({ type: 'legacy_card_details_unverified', cardId: group.cardId, cycle: group.billingCycle });
       issues.push({ type: 'card_group_unverified', cardId: group.cardId, cycle: group.billingCycle });
     }
     if (!Array.isArray(state.workEntries) || !state.settings?.wage) issues.push({ type: 'salary_data_missing' });

@@ -56,6 +56,14 @@
         && (entry.origin !== 'email' || Boolean(entry.messageId));
       // 異なるメールIDでも同じ決済の通知かもしれない。照合未実施は安全扱いしない。
       const duplicateUnchecked = entry.origin === 'email' && entry.duplicateCheck !== 'clear';
+      const timeConflict = snapshot && entry.inclusion === 'included' && validInstant(snapshot.checkedAt)
+        && validInstant(entry.usedAt) && Date.parse(entry.usedAt) > Date.parse(snapshot.checkedAt);
+      if (timeConflict) {
+        if (snapshot.status !== 'confirmed') possible = add(possible, entry.amount);
+        issues.push({ type: 'inclusion_time_conflict', id: entry.id });
+        items.push({ id: entry.id, treatment: 'review' });
+        continue;
+      }
       if (snapshot && entry.inclusion === 'included' && hasEvidence && !entry.duplicateRisk && !duplicateUnchecked) includedTotal = add(includedTotal, entry.amount);
       if (snapshot?.status === 'confirmed') {
         // 確定請求は優先するが、後着・不一致がないことは勝手に決めない。
