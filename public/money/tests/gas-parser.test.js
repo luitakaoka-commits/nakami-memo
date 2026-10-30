@@ -93,6 +93,31 @@ test('エポスカード: 01epos.jp を差出人として認識する', () => {
 
 /* ---------- 金額の特定 ---------- */
 
+test('JCB本文の明示された利用時刻を日本時間として分離する', () => {
+  const result = parse('notice@jcb.co.jp', 'JCBカード／ショッピングご利用のお知らせ', '【ご利用日時(日本時間)】 2026/08/24 23:09\n【ご利用金額】279円');
+  equal(result.usedTime, '23:09', '利用時刻');
+  equal(result.usedTimeZone, 'Asia/Tokyo', '明示された日本時間');
+});
+test('三井住友の本文時刻は保持するがタイムゾーンは推測しない', () => {
+  const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】', 'ご利用日時：2026/08/23 15:03\n店（買物）\n145円');
+  equal(result.usedTime, '15:03', '利用時刻');
+  equal(result.usedTimeZone, '', '明示されていないタイムゾーン');
+});
+test('日付のみ・受信時刻のみ・不正な時刻は利用時刻にしない', () => {
+  for (const body of ['ご利用日時：2026/08/23\nご利用金額：1,000円', 'ご利用日時：2026/08/23 25:10\nご利用金額：1,000円', 'ご利用日：2026/08/23\nお知らせ送信時刻 15:03\nご利用金額：1,000円']) {
+    const result = parse('notice@jcb.co.jp', 'ご利用のお知らせ', body);
+    equal(result.usedTime, '', '不明な時刻');
+  }
+});
+test('利用日時が複数あれば時刻をひとつに決めない', () => {
+  const result = parse('notice@jcb.co.jp', 'ご利用のお知らせ', 'ご利用日時：2026/08/23 15:03\nご利用日時：2026/08/23 17:30\nご利用金額：1,000円');
+  equal(result.usedTime, '', '曖昧な時刻');
+});
+test('日本時間と矛盾するタイムゾーン表記は確定しない', () => {
+  const result = parse('notice@jcb.co.jp', 'ご利用のお知らせ', '【ご利用日時(日本時間)】2026/08/24 23:09 UTC+0000\n【ご利用金額】279円');
+  equal(result.usedTimeZone, '', '矛盾する時間帯');
+});
+
 test('ラベル付きの金額は、他に数字があっても確定する', () => {
   const result = parse(
     '三井住友カード <statement@vpass.ne.jp>',

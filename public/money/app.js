@@ -641,7 +641,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=44" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=45" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1091,6 +1091,14 @@
     return candidate.usedDate || finance.jstDateStringOf(candidate.detectedAt) || today();
   }
 
+  /** 本文に日本時間と明記された場合だけ、利用時刻を保存する。 */
+  function confirmedCandidateInstant(candidate, date) {
+    if (candidate.usedTimeSource !== 'mail-body' || candidate.usedTimeZone !== 'Asia/Tokyo' || candidate.usedDate !== date) return '';
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(candidate.usedTime || '')) return '';
+    const instant = new Date(`${date}T${candidate.usedTime}:00+09:00`);
+    return Number.isFinite(instant.getTime()) ? instant.toISOString() : '';
+  }
+
   /** 本人が登録した対応だけを使い、カードの名前や登録順から推測しない。 */
   function matchedCardId(candidate) {
     const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s　]+/g, '');
@@ -1206,8 +1214,7 @@
       kind: 'payment',
       amount: amount * (isNegative ? -1 : 1),
       transactionDate,
-      // 現行の取込候補には本文中の利用時刻がない。受信時刻を代わりにしない。
-      transactionAt: '',
+      transactionAt: entryType === 'statement' ? '' : confirmedCandidateInstant(candidate, transactionDate),
       dateEstimated: edits ? false : !candidate.usedDate,
       dueDate,
       sourceAccountId: card?.accountId || primaryAccount()?.id || '',
@@ -1224,7 +1231,10 @@
     absorbSettledStatementDetails(state);
     persist();
     let candidateUpdated = true;
-    try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), amount, usedDate: transactionDate, merchant, status: 'accepted' }); }
+    const sameDate = candidate.usedDate === transactionDate;
+    const timePatch = Object.prototype.hasOwnProperty.call(candidate, 'usedTime')
+      ? { usedTime: sameDate ? candidate.usedTime || '' : '', usedTimeZone: sameDate ? candidate.usedTimeZone || '' : '', usedTimeSource: sameDate ? candidate.usedTimeSource || '' : '' } : {};
+    try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), ...timePatch, amount, usedDate: transactionDate, merchant, status: 'accepted' }); }
     catch (error) { candidateUpdated = false; console.warn('取込候補の更新に失敗しました', error); }
     renderPage();
     showToast(!candidateUpdated ? '取引は作成しましたが、候補の更新に失敗しました。同期状態を確認してください' : transaction.status === 'absorbed' ? '請求総額の内訳にまとめました。予定の明細タブから確認できます' : '取り込みました。内容は予定の明細タブから編集できます');
@@ -1246,7 +1256,7 @@
 
   /** Rulesが許可するフィールドだけに絞る */
   function stripCandidate(candidate) {
-    const allowed = ['sourcePackage', 'sourceLabel', 'detectedAt', 'usedDate', 'amount', 'cardHint', 'merchant', 'type', 'status', 'fingerprint', 'note', 'createdAt', 'createdBy'];
+    const allowed = ['sourcePackage', 'sourceLabel', 'detectedAt', 'usedDate', 'usedTime', 'usedTimeZone', 'usedTimeSource', 'amount', 'cardHint', 'merchant', 'type', 'status', 'fingerprint', 'note', 'createdAt', 'createdBy'];
     const next = {};
     allowed.forEach(key => { if (candidate[key] !== undefined) next[key] = candidate[key]; });
     return next;

@@ -1110,6 +1110,31 @@ const closeModals = page => page.evaluate(() => {
     assert(transaction.transactionAt === '', 'メールの受信時刻を利用時刻として保存している');
   });
 
+  await record('mail_body_time_requires_explicit_timezone_and_matching_date', async () => {
+    const result = await page.evaluate(async () => {
+      const api = window.__YORYOKU__;
+      const base = { sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '2026-09-02', usedTime: '12:34', usedTimeZone: 'Asia/Tokyo', usedTimeSource: 'mail-body', amount: 471, type: 'purchase', status: 'pending' };
+      const options = [
+        { id: 'body-time', date: '2026-09-02' },
+        { id: 'zone-unknown', date: '2026-09-02', usedTimeZone: '' },
+        { id: 'date-changed', date: '2026-09-01' }
+      ];
+      const values = [];
+      for (const [index, option] of options.entries()) {
+        const candidate = { ...base, ...option, amount: base.amount + index };
+        api.setImportCandidates([candidate]);
+        await api.acceptCandidate(candidate.id, 'c1', { amount: candidate.amount, date: option.date, entryType: 'itemized', merchant: '' });
+        const transaction = api.getState().transactions.find(item => item.id === `mail_${candidate.id}`);
+        const saved = window.__TEST_CALLS__.filter(item => item.fn === 'updateImportCandidate' && item.id === candidate.id).pop();
+        values.push({ at: transaction?.transactionAt, patch: saved?.patch });
+      }
+      return values;
+    });
+    assert(result[0].at === '2026-09-02T03:34:00.000Z', '本文の日本時間を正しく保存していない');
+    assert(result[1].at === '', '時間帯不明の時刻を確定している');
+    assert(result[2].at === '' && result[2].patch?.usedTime === '', '変更前の日付の時刻を引き継いでいる');
+  });
+
   await record('mail_duplicate_requires_confirmation', async () => {
     await page.evaluate(() => {
       window.__originalMailConfirm = window.confirm;

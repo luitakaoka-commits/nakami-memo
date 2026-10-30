@@ -84,6 +84,18 @@ test('利用日が不明な場合、受信日を利用日と誤って保存し�
   const fields = [...f.saved.values()][0];
   assert(fields.usedDate.stringValue === '' && fields.status.stringValue === 'needs_review', '受信日を利用日と誤認している');
 });
+test('本文の利用時刻と時間帯の根拠を候補へ保存する', () => {
+  const f = fixture({ ids: ['a'], body: '【ご利用日時(日本時間)】 2026/08/23 15:03\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.usedTime.stringValue === '15:03' && fields.usedTimeZone.stringValue === 'Asia/Tokyo' && fields.usedTimeSource.stringValue === 'mail-body', '本文の時刻または根拠が欠けている');
+});
+test('本文に時間帯がない場合は日本時間を推測しない', () => {
+  const f = fixture({ ids: ['a'], body: 'ご利用日時：2026/08/23 15:03\nご利用金額：1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.usedTime.stringValue === '15:03' && fields.usedTimeZone.stringValue === '', '時間帯を推測している');
+});
 
 test('符号化された日本語件名を元の文字に戻す', () => {
   const f = fixture();

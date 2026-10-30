@@ -45,9 +45,12 @@ service cloud.firestore {
         function validCandidate(data) {
           return data.keys().hasAll(['sourcePackage', 'detectedAt', 'amount', 'type', 'status', 'fingerprint'])
             && data.keys().hasOnly([
-              'sourcePackage', 'sourceLabel', 'detectedAt', 'usedDate', 'amount', 'cardHint',
+              'sourcePackage', 'sourceLabel', 'detectedAt', 'usedDate', 'usedTime', 'usedTimeZone', 'usedTimeSource', 'amount', 'cardHint',
               'merchant', 'type', 'status', 'fingerprint', 'note', 'createdAt', 'updatedAt', 'createdBy'
             ])
+            && (!('usedTime' in data) || (data.usedTime is string && (data.usedTime == '' || data.usedTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+            && (!('usedTimeZone' in data) || data.usedTimeZone in ['', 'Asia/Tokyo'])
+            && (!('usedTimeSource' in data) || data.usedTimeSource in ['', 'mail-body'])
             && data.type in ['purchase', 'refund', 'cancel', 'unknown']
             && data.status in ['pending', 'accepted', 'ignored', 'needs_review'];
         }

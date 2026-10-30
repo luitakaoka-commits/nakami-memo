@@ -74,6 +74,7 @@ function parseCardMail(mail) {
   var amounts = extractAmounts(text);
   var primary = findPrimaryAmount(text, issuer);
   var usedDate = extractUsedDate(text, mail.receivedAt);
+  var usageMoment = extractUsageMoment(mail.body, usedDate);
   var cardHint = extractCardHint(text, issuer);
   var merchant = extractMerchant(text, primary);
 
@@ -128,6 +129,8 @@ function parseCardMail(mail) {
   return {
     amount: amount,
     usedDate: usedDate,
+    usedTime: usageMoment.time,
+    usedTimeZone: usageMoment.timeZone,
     cardHint: cardHint,
     merchant: merchant,
     type: type,
@@ -135,6 +138,21 @@ function parseCardMail(mail) {
     issuerLabel: issuer ? issuer.label : '',
     note: note
   };
+}
+
+/** 明示的な「利用日時」の同じ行だけを見る。受信時刻や年の推定は使わない。 */
+function extractUsageMoment(body, usedDate) {
+  var empty = { time: '', timeZone: '' };
+  var text = normalizeText(body || '').normalize('NFKC');
+  var labels = text.match(/(?:ご利用日時|利用日時)/g) || [];
+  if (labels.length !== 1 || !usedDate) return empty;
+  var line = text.split(/\r?\n/).filter(function (row) { return /(?:ご利用日時|利用日時)/.test(row); })[0] || '';
+  var match = line.match(/(?:ご利用日時|利用日時)[ \t]*(\([^)]{1,12}\))?[ \t]*】?[ \t]*[:：]?[ \t]*(20\d{2})[\/\-年][ \t]*(\d{1,2})[\/\-月][ \t]*(\d{1,2})日?[ \t]+(\d{1,2}):(\d{2})(?![\d:])/);
+  if (!match || !isValidCalendarDate(match[2], match[3], match[4]) || Number(match[5]) > 23 || Number(match[6]) > 59) return empty;
+  var date = pad4(match[2]) + '-' + pad2(match[3]) + '-' + pad2(match[4]);
+  if (date !== usedDate) return empty;
+  var timeZone = match[1] === '(日本時間)' && !/(?:UTC|GMT|[+-]\d{1,2}:?\d{2})/i.test(line) ? 'Asia/Tokyo' : '';
+  return { time: pad2(match[5]) + ':' + pad2(match[6]), timeZone: timeZone };
 }
 
 /**
