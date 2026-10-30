@@ -3,6 +3,7 @@
 const { calculateReadiness } = require('../redesign-readiness.js');
 const { reconcileCardCycle } = require('../redesign-card-reconciliation.js');
 const { calculateCardPaymentDate } = require('../finance-engine.js');
+const { compare: compareMigration } = require('../redesign-migration-check.js');
 const assert = require('node:assert/strict');
 
 const cases = [];
@@ -234,6 +235,40 @@ test('別のカード・請求期間の混入を拒否', () => {
   assert.throws(() => reconcile({ status: 'estimate', amount: 1000, cycle: '2026-12' }, []));
 });
 test('累計と未照合額の合算が安全な整数を超える場合を拒否', () => assert.throws(() => reconcile({ status: 'estimate', amount: Number.MAX_SAFE_INTEGER }, [row('1', 1)])));
+
+function migrationFixture() {
+  return { workspaceId: 'test', workspace: { state: { accounts: [{ id: 'a', currentBalance: 1000 }], transactions: [{ id: 't', amount: 500, futureField: 'preserve' }] } }, collections: Object.fromEntries(['importCandidates', 'receipts', 'receiptItems', 'itemAliases'].map(name => [name, { complete: true, documents: [{ id: 'one', data: { name, flag: true } }] }])) };
+}
+test('移行照合はすべての架空文書と未知の項目を比較する', () => {
+  const source = migrationFixture(), copy = JSON.parse(JSON.stringify(source));
+  assert.equal(compareMigration(source, copy).matches, true);
+  delete copy.workspace.state.transactions[0].futureField;
+  assert.equal(compareMigration(source, copy).matches, false);
+});
+test('レシート明細やメール候補の欠落を移行成功としない', () => {
+  for (const name of ['importCandidates', 'receipts', 'receiptItems', 'itemAliases']) {
+    const source = migrationFixture(), copy = migrationFixture();
+    copy.collections[name].documents = [];
+    assert.equal(compareMigration(source, copy).matches, false, name);
+    copy.collections[name].complete = false;
+    assert.throws(() => compareMigration(source, copy), /取得が完了/);
+  }
+});
+test('移行照合は文書取得順の違いを無視し内容の差は検出', () => {
+  const source = migrationFixture();
+  source.collections.receipts.documents.push({ id: 'two', data: { amount: 100 } });
+  const copy = JSON.parse(JSON.stringify(source)); copy.collections.receipts.documents.reverse();
+  assert.equal(compareMigration(source, copy).matches, true);
+  copy.collections.receipts.documents[0].data.amount = 101;
+  assert.equal(compareMigration(source, copy).matches, false);
+});
+test('同一文書IDの重複やJSONで表せない値を拒否', () => {
+  const source = migrationFixture(), copy = migrationFixture();
+  copy.collections.receipts.documents.push(copy.collections.receipts.documents[0]);
+  assert.throws(() => compareMigration(source, copy), /文書ID/);
+  copy.collections.receipts.documents.pop(); copy.workspace.state.transactions[0].amount = NaN;
+  assert.throws(() => compareMigration(source, copy), /JSON/);
+});
 
 const failures = [];
 for (const c of cases) { try { c.fn(); } catch (error) { failures.push({ name: c.name, message: error.message }); } }
