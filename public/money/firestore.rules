@@ -244,9 +244,17 @@ service cloud.firestore {
       allow delete: if signedIn() && request.auth.uid == resource.data.ownerUid;
 
       match /{collection}/{docId} {
-        allow read, write: if isHouseholdMember(householdId) && allowedHouseholdCollection(collection);
+        allow read, delete: if isHouseholdMember(householdId) && allowedHouseholdCollection(collection);
+        // 新しい共有在庫には個人の購入金額を書かせない。旧在庫の他項目の編集と金額の削除は許す。
+        allow create: if isHouseholdMember(householdId) && allowedHouseholdCollection(collection)
+          && (collection != 'items' || !('purchasePrice' in request.resource.data));
+        allow update: if isHouseholdMember(householdId) && allowedHouseholdCollection(collection)
+          && (collection != 'items'
+            || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['purchasePrice'])
+            || !('purchasePrice' in request.resource.data));
 
-        match /{document=**} {
+        // 再帰ワイルドカードは0階層にも一致するため、直下の制約を迂回しないよう1文書以上を必須にする。
+        match /{nestedCollection}/{nestedDoc}/{document=**} {
           allow read, write: if isHouseholdMember(householdId) && allowedHouseholdCollection(collection);
         }
       }

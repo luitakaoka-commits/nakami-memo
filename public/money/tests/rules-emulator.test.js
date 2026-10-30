@@ -20,6 +20,9 @@ async function patch(id, body, auth) {
   if (auth) headers.Authorization = `Bearer ${auth}`;
   return fetch(`${root}/importCandidates/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ fields: fields(body) }) });
 }
+async function patchHome(path, body, uid = 'owner-user') {
+  return fetch(`${home}/${path}`, { method: 'PATCH', headers: { Authorization: `Bearer ${token(uid)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fields: fields(body) }) });
+}
 test('旧形式の候補を本人が保存できる', async () => assert.equal((await patch('old', candidate, token('owner-user'))).status, 200));
 test('日本時間と本文の出所がある候補を本人が保存できる', async () => assert.equal((await patch('new', { ...candidate, usedTime: '23:59', usedTimeZone: 'Asia/Tokyo', usedTimeSource: 'mail-body' }, token('owner-user'))).status, 200));
 test('時刻や時間帯が不明な候補も保存できる', async () => assert.equal((await patch('unknown', { ...candidate, usedTime: '', usedTimeZone: '', usedTimeSource: '' }, token('owner-user'))).status, 200));
@@ -42,7 +45,20 @@ test('本人の健康記録を家の同居人は読めない', async () => {
   const path = `http://${host}/v1/projects/demo-kurashi/databases/(default)/documents/users/owner-user/health/test`;
   assert.equal((await fetch(path, { headers: { Authorization: `Bearer ${token('housemate')}` } })).status, 403);
 });
+test('購入金額を含まない共有在庫は追加できる', async () => assert.equal((await patchHome('items/clean', { name: '食品', quantity: 1 })).status, 200));
+test('共有在庫に新たな購入金額を含めて作成できない', async () => assert.equal((await patchHome('items/new-price', { name: '食品', purchasePrice: 100 })).status, 403));
+test('金額がない共有在庫に購入金額を後から追加できない', async () => assert.equal((await patchHome('items/clean', { name: '食品', quantity: 1, purchasePrice: 100 })).status, 403));
+test('旧在庫の金額が変わらない他の編集は可能', async () => assert.equal((await patchHome('items/legacy', { name: '食品', quantity: 2, purchasePrice: 100 })).status, 200));
+test('旧在庫に残る購入金額を別の金額へ変更できない', async () => assert.equal((await patchHome('items/legacy', { name: '食品', quantity: 2, purchasePrice: 200 })).status, 403));
+test('旧在庫から購入金額を削除できる', async () => assert.equal((await patchHome('items/legacy', { name: '食品', quantity: 2 })).status, 200));
+test('共有レシピと下位コレクションの編集は保たれる', async () => {
+  assert.equal((await patchHome('recipes/recipe', { name: '料理', purchasePrice: 100 })).status, 200);
+  assert.equal((await patchHome('items/clean/notes/n1', { name: 'メモ' })).status, 200);
+});
 (async () => {
+  // テスト用のデモDBだけを毎回消し、前回の作成結果が create/update 判定を変えないようにする。
+  const reset = await fetch(`http://${host}/emulator/v1/projects/demo-kurashi/databases/(default)/documents`, { method: 'DELETE' });
+  if (!reset.ok) throw new Error(`エミュレーターの初期化に失敗しました: ${reset.status}`);
   const initial = { fields: { name: value('test'), ownerUid: value('owner-user'), memberUids: { arrayValue: { values: [value('owner-user')] } }, state: { mapValue: { fields: {} } }, createdAt: value('test'), updatedAt: value('test'), updatedBy: value('owner-user') } };
   const seeded = await fetch(root, { method: 'PATCH', headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' }, body: JSON.stringify(initial) });
   if (!seeded.ok) throw new Error(`テストデータの準備に失敗しました: ${seeded.status}`);
@@ -50,7 +66,8 @@ test('本人の健康記録を家の同居人は読めない', async () => {
   const homeSeed = { fields: { ownerUid: value('owner-user'), memberUids: { arrayValue: { values: [value('owner-user'), value('housemate')] } } } };
   const homeResult = await fetch(home, { method: 'PATCH', headers: adminHeaders, body: JSON.stringify(homeSeed) });
   const itemResult = await fetch(`${home}/items/test-item`, { method: 'PATCH', headers: adminHeaders, body: JSON.stringify({ fields: fields({ name: '架空の食品', purchasePrice: 100, purchaseWorkspaceId: 'test-space' }) }) });
-  if (!homeResult.ok || !itemResult.ok) throw new Error('共有在庫テストの準備に失敗しました');
+  const legacyResult = await fetch(`${home}/items/legacy`, { method: 'PATCH', headers: adminHeaders, body: JSON.stringify({ fields: fields({ name: '食品', quantity: 1, purchasePrice: 100 }) }) });
+  if (!homeResult.ok || !itemResult.ok || !legacyResult.ok) throw new Error('共有在庫テストの準備に失敗しました');
   const failures = [];
   for (const item of cases) { try { await item.fn(); } catch (error) { failures.push({ name: item.name, message: error.message }); } }
   const visible = await fetch(`${home}/items/test-item`, { headers: { Authorization: `Bearer ${token('housemate')}` } });
