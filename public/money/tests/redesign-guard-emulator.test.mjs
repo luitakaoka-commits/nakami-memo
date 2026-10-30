@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { initializeApp, deleteApp } from 'firebase/app';
-import { connectFirestoreEmulator, deleteDoc, doc, getDoc, getFirestore, runTransaction, setDoc } from 'firebase/firestore';
+import { connectFirestoreEmulator, deleteDoc, disableNetwork, doc, enableNetwork, getDoc, getFirestore, runTransaction, setDoc } from 'firebase/firestore';
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8488') throw new Error('ローカル模擬環境専用です');
 const app = initializeApp({ projectId: 'demo-kurashi', apiKey: 'demo', appId: 'demo' }, `guard-${randomUUID()}`);
@@ -37,9 +37,21 @@ try {
     const data = (await getDoc(ref)).data();
     assert.equal(data.revision, 2); assert.ok([30000, 35000].includes(data.state.balance));
   });
+  await check('通信不能時はトランザクションを保存済みにしない', async () => {
+    const before = (await getDoc(ref)).data();
+    await disableNetwork(db);
+    try {
+      await assert.rejects(guardedSave(before.revision, { balance: 1 }));
+    } finally {
+      await enableNetwork(db);
+    }
+    const after = (await getDoc(ref)).data();
+    assert.equal(after.revision, before.revision);
+    assert.equal(after.state.balance, before.state.balance);
+  });
 } finally {
   await deleteDoc(ref).catch(() => {});
   await deleteApp(app);
 }
-console.log(JSON.stringify({ suite: 'redesign-guard-emulator', total: 3, passed: 3 - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
+console.log(JSON.stringify({ suite: 'redesign-guard-emulator', total: 4, passed: 4 - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
 if (failures.length) process.exitCode = 1;
