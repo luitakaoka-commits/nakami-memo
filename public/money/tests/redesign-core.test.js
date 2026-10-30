@@ -7,6 +7,7 @@ const { compare: compareMigration } = require('../redesign-migration-check.js');
 const { generateRecurring } = require('../redesign-recurring.js');
 const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
 const { confirmBill, recordDebit } = require('../redesign-bill-lifecycle.js');
+const { planRefund } = require('../redesign-refund.js');
 const assert = require('node:assert/strict');
 
 const cases = [];
@@ -276,6 +277,34 @@ test('確定請求後に新規利用が届いた場合は勝手に加算せず�
 test('取消・返金は対象を確認するまで勝手に減額しない', () => {
   const r = reconcile({ status: 'estimate', amount: 10000 }, [row('1', 3000, { type: 'refund' })]);
   assert.equal(r.amount, 10000); assert.ok(r.issues.some(x => x.type === 'refund_or_cancellation'));
+});
+test('照合済みの返金は指定された購入のみ減額する計画を作る', () => {
+  const purchases = [{ id: 'a', cardId: 'jcb', amount: 1000, refundedAmount: 0, billStatus: 'estimate' }, { id: 'b', cardId: 'jcb', amount: 1000, refundedAmount: 0, billStatus: 'estimate' }];
+  const notice = { id: 'mail1', type: 'refund', cardId: 'jcb', amount: 400, amountConfirmed: true, targetConfirmed: true, targetId: 'b' };
+  const result = planRefund({ notice, purchases });
+  assert.equal(result.status, 'ready'); assert.equal(result.plan.targetId, 'b'); assert.equal(result.plan.remainingAmount, 600);
+  assert.equal(purchases[0].refundedAmount, 0); assert.equal(purchases[1].refundedAmount, 0);
+});
+test('返金通知は対象不明・カード違い・返金超過を自動処理しない', () => {
+  const purchase = { id: 'a', cardId: 'jcb', amount: 1000, refundedAmount: 300, billStatus: 'estimate' };
+  const notice = { id: 'mail1', type: 'refund', cardId: 'jcb', amount: 400, amountConfirmed: true, targetConfirmed: true, targetId: 'a' };
+  for (const changed of [{ targetConfirmed: false }, { cardId: 'other' }, { amount: 701 }, { targetId: 'missing' }]) {
+    assert.equal(planRefund({ notice: { ...notice, ...changed }, purchases: [purchase] }).status, 'review');
+  }
+  assert.equal(planRefund({ notice, purchases: [purchase, purchase] }).reason, 'target_not_unique');
+});
+test('同じ返金通知の再取得は二重に処理せず内容違いは要確認', () => {
+  const notice = { id: 'mail1', type: 'refund', cardId: 'jcb', amount: 400, targetId: 'a' };
+  const processed = [{ noticeId: 'mail1', type: 'refund', cardId: 'jcb', amount: 400, targetId: 'a' }];
+  assert.equal(planRefund({ notice, purchases: [], processed }).status, 'already-applied');
+  assert.equal(planRefund({ notice: { ...notice, targetId: 'b' }, purchases: [], processed }).reason, 'notice_conflict');
+  assert.equal(planRefund({ notice: { ...notice, amount: 500 }, purchases: [], processed }).reason, 'notice_conflict');
+});
+test('取消の部分額や請求確定・引落後の返金は計上先を確認する', () => {
+  const notice = { id: 'm', type: 'cancel', cardId: 'jcb', amount: 500, targetId: 'a', targetConfirmed: true, amountConfirmed: true };
+  const purchase = { id: 'a', cardId: 'jcb', amount: 1000, refundedAmount: 0, billStatus: 'estimate' };
+  assert.equal(planRefund({ notice, purchases: [purchase] }).reason, 'amount_conflict');
+  for (const billStatus of ['confirmed', 'settled', undefined]) assert.equal(planRefund({ notice: { ...notice, type: 'refund' }, purchases: [{ ...purchase, billStatus }] }).reason, 'billing_period_unresolved');
 });
 test('別のカード・請求期間の混入を拒否', () => {
   assert.throws(() => reconcile(null, [row('1', 1000, { cardId: 'other' })]));
