@@ -8,6 +8,7 @@ const { generateRecurring } = require('../redesign-recurring.js');
 const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
 const { confirmBill, recordDebit } = require('../redesign-bill-lifecycle.js');
 const { planRefund } = require('../redesign-refund.js');
+const { planCsv } = require('../redesign-csv-reconciliation.js');
 const assert = require('node:assert/strict');
 
 const cases = [];
@@ -305,6 +306,36 @@ test('取消の部分額や請求確定・引落後の返金は計上先を確�
   const purchase = { id: 'a', cardId: 'jcb', amount: 1000, refundedAmount: 0, billStatus: 'estimate' };
   assert.equal(planRefund({ notice, purchases: [purchase] }).reason, 'amount_conflict');
   for (const billStatus of ['confirmed', 'settled', undefined]) assert.equal(planRefund({ notice: { ...notice, type: 'refund' }, purchases: [{ ...purchase, billStatus }] }).reason, 'billing_period_unresolved');
+});
+const csvRow = (id, extra = {}) => ({ id, cardId: 'jcb', cycle: '2026-11', usedDate: '2026-10-31', amount: 1000, ...extra });
+test('CSVを使わなくても照合案は空のまま作れる', () => {
+  const result = planCsv({ cardId: 'jcb', cycle: '2026-11', existing: [csvRow('manual')], rows: [] });
+  assert.deepEqual(result.decisions, []); assert.equal(result.needsReview, false);
+});
+test('同じ取引の外部ID・日付・金額が一致すれば二重追加しない', () => {
+  const result = planCsv({ cardId: 'jcb', cycle: '2026-11', existing: [csvRow('mail', { externalRef: 'ref1', referenceVerified: true })], rows: [csvRow('csv', { externalRef: 'ref1', referenceVerified: true })] });
+  assert.equal(result.decisions[0].status, 'matched'); assert.deepEqual(result.decisions[0].candidateIds, ['mail']);
+});
+test('外部IDの出所を確認できないときは一致と断定しない', () => {
+  const result = planCsv({ cardId: 'jcb', cycle: '2026-11', existing: [csvRow('mail', { externalRef: 'ref1' })], rows: [csvRow('csv', { externalRef: 'ref1' })] });
+  assert.equal(result.decisions[0].reason, 'reference_unverified');
+});
+test('同日同額だけでは同一取引と決めず両方を保持できる', () => {
+  const result = planCsv({ cardId: 'jcb', cycle: '2026-11', existing: [csvRow('mail')], rows: [csvRow('csv')] });
+  assert.equal(result.decisions[0].status, 'review'); assert.equal(result.decisions[0].reason, 'possible_duplicate');
+  const rows = planCsv({ cardId: 'jcb', cycle: '2026-11', rows: [csvRow('a'), csvRow('b')] });
+  assert.deepEqual(rows.decisions.map(item => item.reason), ['similar_csv_rows', 'similar_csv_rows']);
+});
+test('同じ外部IDに複数のCSV行や金額の不一致があれば確認する', () => {
+  const rows = planCsv({ cardId: 'jcb', cycle: '2026-11', rows: [csvRow('a', { externalRef: 'ref' }), csvRow('b', { externalRef: 'ref', amount: 2000 })] });
+  assert.ok(rows.decisions.every(item => item.reason === 'repeated_reference'));
+  const conflict = planCsv({ cardId: 'jcb', cycle: '2026-11', existing: [csvRow('mail', { externalRef: 'ref' })], rows: [csvRow('csv', { externalRef: 'ref', amount: 2000 })] });
+  assert.equal(conflict.decisions[0].reason, 'reference_conflict');
+});
+test('CSVの別カード・別請求期間・不正日付を混ぜない', () => {
+  for (const change of [{ cardId: 'other' }, { cycle: '2026-12' }, { usedDate: '2026-02-30' }]) {
+    assert.throws(() => planCsv({ cardId: 'jcb', cycle: '2026-11', rows: [csvRow('a', change)] }));
+  }
 });
 test('別のカード・請求期間の混入を拒否', () => {
   assert.throws(() => reconcile(null, [row('1', 1000, { cardId: 'other' })]));
