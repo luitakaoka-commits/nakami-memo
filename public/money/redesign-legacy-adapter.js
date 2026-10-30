@@ -2,7 +2,7 @@
 (function attach(root) {
   'use strict';
   const engine = typeof module !== 'undefined' && module.exports ? require('./finance-engine.js') : root.FinanceEngine;
-  function buildLegacyScenario(state, today, endDate) {
+  function buildLegacyScenario(state, today, endDate, options = {}) {
     if (!state || !Array.isArray(state.accounts) || !Array.isArray(state.transactions) || !Array.isArray(state.cards) || !Array.isArray(state.recurringPlans)) throw new Error('旧データの必要な一覧が不足しています');
     const accountIds = new Set();
     const accounts = state.accounts.map(account => {
@@ -17,6 +17,19 @@
       cards.set(card.id, card);
     }
     const issues = [{ type: 'legacy_evidence_unverified' }];
+    if (options.candidates === undefined) issues.push({ type: 'mail_candidates_unavailable' });
+    else {
+      if (!Array.isArray(options.candidates)) throw new Error('メール候補の一覧が不正です');
+      const seenCandidates = new Set();
+      const transactionIds = new Set(state.transactions.map(item => item?.id));
+      for (const candidate of options.candidates) {
+        if (!candidate || typeof candidate.id !== 'string' || !candidate.id || seenCandidates.has(candidate.id)) throw new Error('メール候補の識別子が不正または重複しています');
+        seenCandidates.add(candidate.id);
+        if (['pending', 'needs_review'].includes(candidate.status)) issues.push({ type: 'mail_candidate_unreviewed', id: candidate.id });
+        else if (candidate.status === 'accepted' && !transactionIds.has(`mail_${candidate.id}`)) issues.push({ type: 'accepted_mail_without_transaction', id: candidate.id });
+        else if (!['accepted', 'ignored'].includes(candidate.status)) issues.push({ type: 'mail_candidate_status_unknown', id: candidate.id });
+      }
+    }
     const planIds = new Set(), mappedPlans = [];
     for (const plan of state.recurringPlans) {
       if (!plan || !plan.id || planIds.has(plan.id)) throw new Error('定期予定の識別子が不正または重複しています');

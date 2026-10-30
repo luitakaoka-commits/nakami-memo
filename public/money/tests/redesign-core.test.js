@@ -501,6 +501,31 @@ test('旧記録の未確認残高・定期予定・除外取引は安全の根�
   assert.ok(converted.issues.some(issue => issue.type === 'recurring_plans_not_mapped'));
   assert.ok(converted.issues.some(issue => issue.type === 'excluded_transaction'));
 });
+test('メール候補一覧を取得していなければ未取得を明示する', () => {
+  const result = buildLegacyScenario(legacyFixture(), '2026-10-30', '2026-12-31');
+  assert.ok(result.issues.some(issue => issue.type === 'mail_candidates_unavailable'));
+  assert.equal(calculateReadiness(result.scenario).nextStatus, 'review');
+});
+test('未確認メールと取引が見つからない取込済みメールを見逃さない', () => {
+  const old = legacyFixture();
+  const candidates = [{ id: 'pending', status: 'pending' }, { id: 'review', status: 'needs_review' }, { id: 'missing', status: 'accepted' }, { id: 'ignored', status: 'ignored' }];
+  const result = buildLegacyScenario(old, '2026-10-30', '2026-12-31', { candidates });
+  assert.equal(result.issues.filter(issue => issue.type === 'mail_candidate_unreviewed').length, 2);
+  assert.ok(result.issues.some(issue => issue.type === 'accepted_mail_without_transaction' && issue.id === 'missing'));
+  assert.equal(result.issues.some(issue => issue.id === 'ignored'), false);
+});
+test('取引が残る取込済みメールは候補から二重に足さない', () => {
+  const old = legacyFixture();
+  old.transactions.push({ id: 'mail_accepted', kind: 'payment', cardId: 'c', entryType: 'itemized', status: 'planned', amount: 500, sourceAccountId: 'a', dueDate: '2026-11-10', transactionDate: '2026-10-01' });
+  const result = buildLegacyScenario(old, '2026-10-30', '2026-12-31', { candidates: [{ id: 'accepted', status: 'accepted' }] });
+  assert.equal(result.issues.some(issue => issue.type === 'accepted_mail_without_transaction'), false);
+  assert.equal(result.scenario.events.find(event => event.cardPayment).additionalPossible, 3500);
+});
+test('不明な状態と重複IDのメール候補を黙って確定扱いしない', () => {
+  const result = buildLegacyScenario(legacyFixture(), '2026-10-30', '2026-12-31', { candidates: [{ id: 'a', status: 'unknown' }] });
+  assert.ok(result.issues.some(issue => issue.type === 'mail_candidate_status_unknown'));
+  assert.throws(() => buildLegacyScenario(legacyFixture(), '2026-10-30', '2026-12-31', { candidates: [{ id: 'a', status: 'pending' }, { id: 'a', status: 'pending' }] }), /重複/);
+});
 test('旧データの不明なカードや複数の請求総額は推測で統合しない', () => {
   const old = legacyFixture(); old.cards[0].accountId = 'missing';
   assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /引落口座/);
