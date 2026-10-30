@@ -19,7 +19,25 @@
     if (writes.length > 450) throw new Error('一括復元の件数を超えています');
     return { rootWrites: writes.slice(0, 1), childWrites: writes.slice(1) };
   }
-  const api = { planRestore };
+  function inspectRestore({ snapshot, target, targetId, uid }) {
+    const plan = planRestore({ snapshot, targetId, uid });
+    if (target?.workspaceId !== targetId || target?.workspace?.name !== plan.rootWrites[0].update.name) throw new Error('復元先を確認してください');
+    // 対象側の取得完了・文書パスも検証する。
+    migration.compareRestored(target, target);
+    const available = new Set(), partial = structuredClone(snapshot);
+    for (const name of names) {
+      const expectedIds = new Set(snapshot.collections[name].documents.map(doc => doc.id));
+      const found = target.collections[name].documents;
+      if (found.some(doc => !expectedIds.has(doc.id))) return { status: 'conflict' };
+      const foundIds = new Set(found.map(doc => doc.id));
+      partial.collections[name].documents = partial.collections[name].documents.filter(doc => foundIds.has(doc.id));
+      for (const doc of found) available.add(doc.data.name);
+    }
+    if (!migration.compareRestored(partial, target).matches) return { status: 'conflict' };
+    const missingWrites = plan.childWrites.filter(write => !available.has(write.update.name));
+    return { status: missingWrites.length ? 'incomplete' : 'matches', missingWrites };
+  }
+  const api = { planRestore, inspectRestore };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.RedesignRestorePlan = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -81,7 +81,19 @@ try {
   } });
   assert.equal(interrupted.status, 'children_uncertain');
   cleanup.push(`workspaces/${interruptedId}`);
-  assert.equal((await request(`workspaces/${interruptedId}`)).fields.ownerUid.stringValue, 'restore-user');
+  const interruptedRoot = await request(`workspaces/${interruptedId}`);
+  assert.equal(interruptedRoot.fields.ownerUid.stringValue, 'restore-user');
+  const partial = await read(interruptedId, interruptedRoot.updateTime);
+  const inspection = planner.inspectRestore({ snapshot, target: partial, targetId: interruptedId, uid: 'restore-user' });
+  assert.equal(inspection.status, 'incomplete'); assert.equal(inspection.missingWrites.length, 4);
+  const resume = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes: inspection.missingWrites }) });
+  assert.equal(resume.ok, true);
+  const resumed = await read(interruptedId, (await resume.json()).commitTime);
+  cleanup.push(...names.map(name => `workspaces/${interruptedId}/${name}/one`));
+  assert.equal(planner.inspectRestore({ snapshot, target: resumed, targetId: interruptedId, uid: 'restore-user' }).status, 'matches');
+  const changedTarget = structuredClone(resumed);
+  changedTarget.collections.receiptItems.documents[0].data.fields.amount.integerValue = '9999';
+  assert.equal(planner.inspectRestore({ snapshot, target: changedTarget, targetId: interruptedId, uid: 'restore-user' }).status, 'conflict');
   const verified = await executor.executeRestore({ snapshot, targetId: verifiedId, uid: 'restore-user', readBack: read, commitWrites: async writes => {
     const response = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes }) });
     if (!response.ok) throw new Error('書き込みに失敗');
