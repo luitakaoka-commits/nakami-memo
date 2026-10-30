@@ -741,6 +741,26 @@ test('旧カード記録の明細種別が未知なら請求総額として扱�
   state.transactions[0].entryType = 'unknown';
   assert.throws(() => buildLegacyScenario(state, '2026-10-30', '2026-12-31'), /明細種別/);
 });
+test('旧データ変換は不正な試算期間を受け付けない', () => {
+  for (const [today, endDate] of [['2026-02-30', '2026-12-31'], ['2026-10-30', '2026-13-01'], ['2026-10-30', '2026-10-29']]) {
+    assert.throws(() => buildLegacyScenario(legacyFixture(), today, endDate), /期間/);
+  }
+});
+test('旧データの実行済み取引の日付が欠けている場合は残高反映を決めつけない', () => {
+  for (const dueDate of ['', '2026-02-30', '2026-11-01']) {
+    const state = legacyFixture();
+    state.transactions.push({ id: 'old-settled', kind: 'income', status: 'settled', amount: 5000, sourceAccountId: 'a', dueDate });
+    assert.throws(() => buildLegacyScenario(state, '2026-10-30', '2026-12-31'), /日付|未来/);
+  }
+});
+test('期限を過ぎた旧支払いは残高から勝手に引き直さず注意する', () => {
+  const state = legacyFixture();
+  state.transactions.push({ id: 'overdue-water', kind: 'payment', status: 'planned', amount: 8000, sourceAccountId: 'a', dueDate: '2026-10-29' });
+  const result = previewLegacy({ state, today: '2026-10-30', endDate: '2026-12-31', selectedCardIds: ['c'] });
+  assert.equal(result.assessment.nextPayments[0].projectedBalance, 40000);
+  assert.equal(result.assessment.nextStatus, 'review');
+  assert.ok(result.assessment.issues.some(issue => issue.type === 'overdue' && issue.eventId === 'legacy:overdue-water'));
+});
 test('旧カード記録の明細種別がない場合は暫定扱いとして注意を残す', () => {
   const state = legacyFixture();
   delete state.transactions[0].entryType;

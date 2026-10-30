@@ -2,7 +2,13 @@
 (function attach(root) {
   'use strict';
   const engine = typeof module !== 'undefined' && module.exports ? require('./finance-engine.js') : root.FinanceEngine;
+  function validDate(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }
   function buildLegacyScenario(state, today, endDate, options = {}) {
+    if (!validDate(today) || !validDate(endDate) || endDate < today) throw new Error('試算期間が不正です');
     if (!state || !Array.isArray(state.accounts) || !Array.isArray(state.transactions) || !Array.isArray(state.cards) || !Array.isArray(state.recurringPlans)) throw new Error('旧データの必要な一覧が不足しています');
     const accountIds = new Set();
     const accounts = state.accounts.map(account => {
@@ -59,6 +65,7 @@
       if (!item || !item.id || ids.has(item.id)) throw new Error('旧取引の識別子が不正または重複しています');
       ids.add(item.id);
       if (!['planned', 'settled', 'cancelled', 'absorbed'].includes(item.status)) throw new Error('旧取引の状態が不明です');
+      if (item.status === 'settled' && !validDate(item.dueDate)) throw new Error('実行済み取引の日付を確認してください');
       if (item.status === 'settled' && item.dueDate > today) throw new Error('未来の取引が実行済みです');
       if (item.status !== 'planned') continue;
       if (item.affectsForecast === false) { issues.push({ type: 'excluded_transaction', id: item.id }); continue; }
