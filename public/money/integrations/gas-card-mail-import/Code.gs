@@ -21,20 +21,22 @@
 
 var DEFAULT_QUERY = 'newer_than:7d (subject:(利用 OR ご利用 OR 速報 OR お知らせ) OR from:(jcb.co.jp OR vpass.ne.jp OR smbc-card.com OR 01epos.jp OR eposcard.co.jp OR rakuten-card.co.jp OR paypay-card.co.jp OR aeon.co.jp OR saisoncard.co.jp OR cr.mufg.jp))';
 var PROCESSED_LABEL = 'CashManege/取込済み';
+var IGNORED_LABEL = 'CashManege/対象外';
 var MAX_MESSAGES = 50;
 
 /** 定期実行のエントリポイント。時間主導型トリガーでこの関数を呼ぶ。 */
 function importCardMails() {
-  var summary = { scanned: 0, created: 0, duplicated: 0, needsReview: 0, failed: 0 };
+  var summary = { scanned: 0, created: 0, duplicated: 0, needsReview: 0, ignored: 0, failed: 0 };
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) { summary.skipped = true; return summary; }
   try {
     var properties = PropertiesService.getScriptProperties();
-    var query = (properties.getProperty('GMAIL_QUERY') || DEFAULT_QUERY) + ' -label:"' + PROCESSED_LABEL + '"';
+    var query = (properties.getProperty('GMAIL_QUERY') || DEFAULT_QUERY) + ' -label:"' + PROCESSED_LABEL + '" -label:"' + IGNORED_LABEL + '"';
     var token = fetchAccessToken();
     var messageIds = searchMessageIds(query, token);
     if (!messageIds.length) { Logger.log(JSON.stringify(summary)); return summary; }
     var labelId = getOrCreateLabelId(PROCESSED_LABEL, token);
+    var ignoredLabelId = '';
     var config = readConfig();
     for (var m = 0; m < messageIds.length; m += 1) {
       summary.scanned += 1;
@@ -42,6 +44,12 @@ function importCardMails() {
         var message = readGmailMessage(messageIds[m], token);
         if (!message) throw new Error('メールを取得できません');
         var candidate = buildCandidate(message);
+        if (!candidate) {
+          if (!ignoredLabelId) ignoredLabelId = getOrCreateLabelId(IGNORED_LABEL, token);
+          markMessageProcessed(messageIds[m], ignoredLabelId, token);
+          summary.ignored += 1;
+          continue;
+        }
         if (candidate) {
           // 旧方式のIDはメールごとのIDではなく、別の利用と衝突することもある。
           // 一致しても自動削除・自動確定せず、新旧を本人が確認できるよう残す。
