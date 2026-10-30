@@ -7,6 +7,7 @@ const { compare: compareMigration } = require('../redesign-migration-check.js');
 const { generateRecurring } = require('../redesign-recurring.js');
 const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
 const { previewLegacy } = require('../redesign-legacy-preview.js');
+const { previewSpendable } = require('../redesign-spendable-preview.js');
 const { confirmBill, recordDebit } = require('../redesign-bill-lifecycle.js');
 const { planRefund } = require('../redesign-refund.js');
 const { planCsv } = require('../redesign-csv-reconciliation.js');
@@ -766,6 +767,27 @@ test('旧データの締め日と引落判定をまとめて確認し入力を�
   assert.equal(result.assessment.nextStatus, 'review');
   assert.ok(result.issues.some(issue => issue.type === 'mail_candidate_unreviewed'));
   assert.equal(JSON.stringify(state), before);
+});
+test('旧式補助額は15日締めを期限とし、請求明細を二重に引かず参考値とする', () => {
+  const state = legacyFixture();
+  state.transactions.push({ id: 'deadline-income', kind: 'income', status: 'planned', amount: 5000, sourceAccountId: 'a', dueDate: '2026-11-15' });
+  const before = JSON.stringify(state);
+  const result = previewSpendable({ state, today: '2026-10-30', selectedCardIds: ['c'] });
+  assert.equal(result.period.deadline, '2026-11-15');
+  assert.equal(result.result.total, 45000);
+  assert.equal(result.result.unpaidCardTotal, 20000);
+  assert.equal(result.status, 'review'); assert.equal(result.referenceOnly, true);
+  assert.ok(result.issues.some(issue => issue.type === 'mail_candidates_unavailable'));
+  assert.equal(JSON.stringify(state), before);
+});
+test('旧式補助額は予備額を明示した場合だけ控除し不足も負数で残す', () => {
+  const state = legacyFixture();
+  const base = previewSpendable({ state, today: '2026-10-30', selectedCardIds: ['c'] });
+  const reserved = previewSpendable({ state, today: '2026-10-30', selectedCardIds: ['c'], reserve: 50000 });
+  assert.equal(base.result.total, 40000);
+  assert.equal(reserved.result.total, -10000);
+  assert.equal(reserved.result.defenseLine, 50000);
+  assert.throws(() => previewSpendable({ state, today: '2026-10-30', selectedCardIds: ['c'], reserve: -1 }), /予備額/);
 });
 test('カード払いの電気代は旧請求に加えて口座から二重に引かない', () => {
   const state = legacyFixture();
