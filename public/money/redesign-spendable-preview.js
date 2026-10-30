@@ -10,10 +10,15 @@
     const period = deadlines.periodForCards({ today, cards: state?.cards, selectedCardIds });
     const checked = legacy.buildLegacyScenario(state, today, period.deadline, { candidates });
     const wage = state.settings?.wage || {};
+    const unsupported = new Set(checked.issues.filter(issue => issue.type === 'recurring_plans_not_mapped').map(issue => issue.id));
+    const eligiblePlans = state.recurringPlans.filter(plan => !unsupported.has(plan.id));
+    const accepted = new Set(checked.scenario.events.map(event => event.id));
+    const virtual = engine.expandScheduledTransactions(eligiblePlans, today, period.deadline, state.transactions)
+      .filter(item => accepted.has(`legacy:${item.id}`));
     const result = engine.calculateSpendableAmount({
       today, deadline: period.deadline, accounts: state.accounts,
       cards: state.cards.map(card => ({ ...card, name: typeof card.name === 'string' && card.name.trim() ? card.name : card.id })),
-      transactions: state.transactions, recurringPlans: state.recurringPlans,
+      transactions: [...state.transactions, ...virtual], recurringPlans: [],
       workEntries: state.workEntries || [], wage,
       defenseLine: reserve, includeSalary: wage.includeForecastInSpendable !== false,
       holidayOptions: { overrides: state.settings?.holidayOverrides || {} }

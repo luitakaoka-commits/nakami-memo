@@ -798,6 +798,20 @@ test('旧式補助額は予備額を明示した場合だけ控除し不足も�
   assert.equal(reserved.result.defenseLine, 50000);
   assert.throws(() => previewSpendable({ state, today: '2026-10-30', selectedCardIds: ['c'], reserve: -1 }), /予備額/);
 });
+test('締め日までの補助額でも日付変更した旧定期支払いを二重控除しない', () => {
+  const state = legacyFixture();
+  state.recurringPlans = [{ id: 'utility', dayOfMonth: 5, kind: 'payment', amount: 4000, sourceAccountId: 'a', isActive: true }];
+  state.transactions.push({ id: 'moved', status: 'planned', kind: 'payment', amount: 4000, sourceAccountId: 'a', dueDate: '2026-11-07', recurringPlanId: 'utility' });
+  const result = previewSpendable({ state, today: '2026-10-30', selectedCardIds: ['c'] });
+  assert.equal(result.result.total, 36000);
+  assert.equal(result.result.cashOutflow, 4000);
+  assert.ok(result.issues.some(issue => issue.type === 'legacy_recurring_date_changed'));
+  assert.equal(result.status, 'review');
+  state.transactions = state.transactions.filter(item => item.id !== 'moved');
+  const generated = previewSpendable({ state, today: '2026-10-30', selectedCardIds: ['c'] });
+  assert.equal(generated.result.cashOutflow, 4000);
+  assert.equal(generated.result.total, 36000);
+});
 test('カード払いの電気代は旧請求に加えて口座から二重に引かない', () => {
   const state = legacyFixture();
   state.recurringPlans.push({ id: 'electricity', name: '電気代', dayOfMonth: 5, amount: 5000, cardId: 'c', sourceAccountId: 'a', isActive: true });
