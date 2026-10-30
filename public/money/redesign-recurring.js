@@ -40,7 +40,7 @@
       const day = Math.min(first.day, lastDay);
       const date = `${String(year).padStart(4, '0')}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       if (date < fromDate || date > toDate || taken.has(date.slice(0, 7))) continue;
-      result.push({ id: `recurring:${plan.id}:${date}`, recurringPlanId: plan.id, date, accountId: plan.accountId, kind: 'expense', amount: plan.amount ?? 0, amountConfirmed: false, status: 'planned' });
+      result.push({ id: `recurring:${plan.id}:${date}`, recurringPlanId: plan.id, date, scheduledDate: date, accountId: plan.accountId, kind: 'expense', amount: plan.amount ?? 0, amountConfirmed: false, status: 'planned' });
     }
     return result;
   }
