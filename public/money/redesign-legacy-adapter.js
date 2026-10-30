@@ -72,7 +72,14 @@
       if (item.amount < 0 && item.kind !== 'adjustment') throw new Error('旧取引の金額を確認してください');
       if (item.cardId) {
         if (item.kind !== 'payment' || !cards.has(item.cardId)) throw new Error('カード取引の種類またはカードを確認してください');
-        cardTransactions.push(item);
+        if (item.entryType == null || item.entryType === '') {
+          issues.push({ type: 'legacy_card_entry_type_missing', id: item.id });
+          // 旧形式の既定値を請求総額と決めつけず、未照合の明細として扱う。
+          cardTransactions.push({ ...item, entryType: 'itemized' });
+        } else {
+          if (!['statement', 'itemized'].includes(item.entryType)) throw new Error('カード取引の明細種別を確認してください');
+          cardTransactions.push(item);
+        }
         continue;
       }
       const base = { id: `legacy:${item.id}`, date: item.dueDate, status: 'planned', amount: Math.abs(item.amount), accountId: item.sourceAccountId };

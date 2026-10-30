@@ -719,6 +719,19 @@ test('旧データの締め日と引落判定をまとめて確認し入力を�
   assert.ok(result.issues.some(issue => issue.type === 'mail_candidate_unreviewed'));
   assert.equal(JSON.stringify(state), before);
 });
+test('旧カード記録の明細種別が未知なら請求総額として扱わない', () => {
+  const state = legacyFixture();
+  state.transactions[0].entryType = 'unknown';
+  assert.throws(() => buildLegacyScenario(state, '2026-10-30', '2026-12-31'), /明細種別/);
+});
+test('旧カード記録の明細種別がない場合は暫定扱いとして注意を残す', () => {
+  const state = legacyFixture();
+  delete state.transactions[0].entryType;
+  const result = buildLegacyScenario(state, '2026-10-30', '2026-12-31');
+  assert.ok(result.issues.some(issue => issue.type === 'legacy_card_entry_type_missing' && issue.id === 'bill'));
+  assert.equal(result.scenario.events.find(event => event.cardPayment).amount, 0);
+  assert.equal(calculateReadiness(result.scenario).nextStatus, 'review');
+});
 test('締め日の基準に選ばないカードも引落口座の不足判定に含める', () => {
   const state = legacyFixture();
   state.accounts.push({ id: 'b', currentBalance: 1000 });
