@@ -2,13 +2,14 @@
 'use strict';
 const { calculateReadiness } = require('../redesign-readiness.js');
 const { reconcileCardCycle } = require('../redesign-card-reconciliation.js');
-const { calculateCardPaymentDate } = require('../finance-engine.js');
+const { calculateCardPaymentDate, calculateSpendableAmount } = require('../finance-engine.js');
 const { compare: compareMigration } = require('../redesign-migration-check.js');
 const { generateRecurring } = require('../redesign-recurring.js');
 const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
 const { confirmBill, recordDebit } = require('../redesign-bill-lifecycle.js');
 const { planRefund } = require('../redesign-refund.js');
 const { planCsv } = require('../redesign-csv-reconciliation.js');
+const { periodForCards } = require('../redesign-deadline.js');
 const assert = require('node:assert/strict');
 
 const cases = [];
@@ -56,6 +57,36 @@ test('締め日と休日による引落日の補正を新判定へ渡す', () =>
   assert.equal(due, '2026-10-13');
   const r = calculateReadiness({ today: '2026-09-01', endDate: '2026-10-20', coverageVerified: true, accounts: [account('a', 10000)], events: [bill('b', due, 'a', 5000)] });
   assert.equal(r.nextDate, '2026-10-13'); assert.equal(r.nextStatus, 'safe');
+});
+test('主要カードが15日締めなら15日を期限に含める', () => {
+  const cards = ['jcb', 'smbc', 'mufg'].map(id => ({ id, closingDay: 15 }));
+  const result = periodForCards({ today: '2026-10-30', cards, selectedCardIds: ['jcb', 'smbc', 'mufg'] });
+  assert.equal(result.deadline, '2026-11-15'); assert.equal(result.daysInclusive, 17); assert.equal(result.differentDeadlines, false);
+  assert.equal(periodForCards({ today: '2026-11-15', cards, selectedCardIds: ['jcb'] }).daysInclusive, 1);
+  assert.equal(periodForCards({ today: '2026-11-16', cards, selectedCardIds: ['jcb'] }).deadline, '2026-12-15');
+});
+test('締め日の違うカードは別々の日付と最初の期限を示す', () => {
+  const result = periodForCards({ today: '2026-10-30', cards: [{ id: 'a', closingDay: 15 }, { id: 'b', closingDay: 5 }], selectedCardIds: ['a', 'b'] });
+  assert.equal(result.deadline, '2026-11-05'); assert.equal(result.differentDeadlines, true);
+  assert.deepEqual(result.deadlines.map(item => item.deadline), ['2026-11-15', '2026-11-05']);
+});
+test('月末締め・うるう年・年末の締め日を正しく計算', () => {
+  const cards = [{ id: 'a', closingDay: 31 }, { id: 'b', closingDay: 0 }, { id: 'c', closingDay: 15 }];
+  assert.equal(periodForCards({ today: '2028-02-01', cards, selectedCardIds: ['a'] }).deadline, '2028-02-29');
+  assert.equal(periodForCards({ today: '2027-02-01', cards, selectedCardIds: ['b'] }).deadline, '2027-02-28');
+  assert.equal(periodForCards({ today: '2026-12-16', cards, selectedCardIds: ['c'] }).deadline, '2027-01-15');
+});
+test('基準カードが不明・重複・締め日不正なら期限を推測しない', () => {
+  const cards = [{ id: 'a', closingDay: 15 }, { id: 'b', closingDay: 32 }];
+  for (const ids of [[], ['missing'], ['a', 'a'], ['b']]) assert.throws(() => periodForCards({ today: '2026-10-30', cards, selectedCardIds: ids }));
+});
+test('15日当日の入出金は期限を15日にすると既存の試算へ含まれる', () => {
+  const deadline = periodForCards({ today: '2026-10-30', cards: [{ id: 'a', closingDay: 15 }], selectedCardIds: ['a'] }).deadline;
+  const input = { today: '2026-10-30', deadline, accounts: [{ id: 'bank', role: 'primary', currentBalance: 10000, includeInSpendable: true }], cards: [], transactions: [{ id: 'salary', kind: 'income', amount: 500, dueDate: '2026-11-15', sourceAccountId: 'bank', status: 'planned', affectsForecast: true }], recurringPlans: [], workEntries: [], wage: {} };
+  const newPeriod = calculateSpendableAmount(input);
+  const previousPeriod = calculateSpendableAmount({ ...input, deadline: '2026-11-14' });
+  assert.equal(newPeriod.deadline, '2026-11-15'); assert.equal(newPeriod.incomeTotal, 500);
+  assert.equal(newPeriod.total - previousPeriod.total, 500);
 });
 test('同日の別口座は別々に判定', () => {
   const r = plan([account('a', 50000), account('b', 1000)], [bill('x', '2026-11-10', 'a', 30000), bill('y', '2026-11-10', 'b', 5000)]);
