@@ -1,0 +1,17 @@
+// 模擬環境専用。現行アプリのルールではない。
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /workspaces/{workspaceId} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.memberUids;
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.memberUids == [request.auth.uid]
+        && request.resource.data.revision == 0;
+      allow update: if request.auth != null && request.auth.uid in resource.data.memberUids
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state', 'revision', 'updatedBy'])
+        && request.resource.data.updatedBy == request.auth.uid
+        && resource.data.revision is int && request.resource.data.revision == resource.data.revision + 1;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.ownerUid;
+    }
+  }
+}
