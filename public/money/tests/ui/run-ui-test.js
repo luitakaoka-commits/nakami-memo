@@ -249,7 +249,7 @@ const closeModals = page => page.evaluate(() => {
 
   await record('candidate_approved_to_transaction', async () => {
     const before = await page.evaluate(() => window.__YORYOKU__.getState().transactions.length);
-    await page.evaluate(() => window.__YORYOKU__.acceptCandidate('cand1'));
+    await page.evaluate(() => window.__YORYOKU__.acceptCandidate('cand1', 'c1'));
     await page.waitForTimeout(300);
     const created = await page.evaluate(() => {
       const list = window.__YORYOKU__.getState().transactions;
@@ -325,7 +325,7 @@ const closeModals = page => page.evaluate(() => {
       { id: 'cand9', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-08-24T10:00:00.000Z', usedDate: '2026-08-24', amount: 7777, cardHint: 'SMBC', merchant: 'テスト店', type: 'purchase', status: 'pending', fingerprint: 'fp-9', note: '' }
     ]));
     await page.waitForTimeout(120);
-    await page.evaluate(() => window.__YORYOKU__.acceptCandidate('cand9'));
+    await page.evaluate(() => window.__YORYOKU__.acceptCandidate('cand9', 'c1'));
     await page.waitForTimeout(350);
     const after = await page.evaluate(() => {
       const list = window.__YORYOKU__.getState().transactions;
@@ -631,8 +631,8 @@ const closeModals = page => page.evaluate(() => {
       { id: 'late-candidate', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-05T02:00:00.000Z', usedDate: '2026-09-05', amount: 321, cardHint: 'SMBC', merchant: '後から届いた店', type: 'purchase', status: 'pending', fingerprint: 'late-fp', note: '' }
     ]));
     await page.evaluate(async () => {
-      await window.__YORYOKU__.acceptCandidate('late-candidate');
-      await window.__YORYOKU__.acceptCandidate('late-candidate');
+      await window.__YORYOKU__.acceptCandidate('late-candidate', 'c1');
+      await window.__YORYOKU__.acceptCandidate('late-candidate', 'c1');
     });
     const after = await page.evaluate(() => {
       const api = window.__YORYOKU__;
@@ -1078,6 +1078,23 @@ const closeModals = page => page.evaluate(() => {
     assert(!dismissed.exists && !dismissed.changed, `消した見込みが作り直された: ${JSON.stringify(dismissed)}`);
     assert(dismissed.months.includes('2026-10'), '消した月を覚えていない');
     assert(dismissed.virtual === 0, '消した月の見込みが裏で足されている');
+  });
+
+  await record('mail_missing_card_or_usage_date_never_falls_back', async () => {
+    const result = await page.evaluate(async () => {
+      const api = window.__YORYOKU__;
+      const base = { sourcePackage: 'unknown', sourceLabel: '不明', detectedAt: '2026-09-02T01:00:00.000Z', amount: 472, type: 'purchase', status: 'pending' };
+      api.setImportCandidates([{ ...base, id: 'no-card', usedDate: '2026-09-02' }]);
+      await api.acceptCandidate('no-card');
+      api.setImportCandidates([{ ...base, id: 'no-date', usedDate: '' }]);
+      await api.acceptCandidate('no-date', 'c1');
+      api.getState().cards.push({ id: 'no-account', name: '未設定', accountId: '' });
+      api.setImportCandidates([{ ...base, id: 'no-account', usedDate: '2026-09-02' }]);
+      await api.acceptCandidate('no-account', 'no-account');
+      api.getState().cards = api.getState().cards.filter(card => card.id !== 'no-account');
+      return api.getState().transactions.filter(item => ['mail_no-card', 'mail_no-date', 'mail_no-account'].includes(item.id)).length;
+    });
+    assert(result === 0, 'カード・引落口座・利用日が不明な候補から取引を作成した');
   });
 
   await record('mail_import_requires_correct_card', async () => {

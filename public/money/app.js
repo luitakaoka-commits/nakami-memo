@@ -641,7 +641,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=45" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=46" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1190,10 +1190,11 @@
     if (!['itemized', 'statement'].includes(entryType)) { showToast('内容の種類を選択してください'); return; }
 
     // 画面からの取込は選択欄の値を必ず使う。一致しないカードへの自動割当を避ける。
-    const cardId = selectedCardId === undefined ? (matchedCardId(candidate) || (state.cards.length === 1 ? state.cards[0].id : '')) : selectedCardId;
+    const cardId = selectedCardId === undefined ? matchedCardId(candidate) : selectedCardId;
     if (!cardId || !state.cards.some(item => item.id === cardId)) { showToast('取り込むカードを選択してください'); return; }
     const card = creditCard(cardId);
-    const transactionDate = edits ? edits.date : candidateDate(candidate);
+    if (!card?.accountId || !state.accounts.some(item => item.id === card.accountId)) { showToast('カードの引落口座を設定してください'); return; }
+    const transactionDate = edits ? edits.date : candidate.usedDate;
     const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(transactionDate || '');
     const checkedDate = dateParts ? new Date(`${transactionDate}T00:00:00Z`) : null;
     if (!dateParts || !checkedDate || !Number.isFinite(checkedDate.getTime()) || checkedDate.toISOString().slice(0, 10) !== transactionDate) { showToast('利用日を確認してください'); return; }
@@ -1217,7 +1218,7 @@
       transactionAt: entryType === 'statement' ? '' : confirmedCandidateInstant(candidate, transactionDate),
       dateEstimated: edits ? false : !candidate.usedDate,
       dueDate,
-      sourceAccountId: card?.accountId || primaryAccount()?.id || '',
+      sourceAccountId: card.accountId,
       cardId,
       entryType,
       origin: 'mail-import',
