@@ -719,6 +719,23 @@ test('旧データの締め日と引落判定をまとめて確認し入力を�
   assert.ok(result.issues.some(issue => issue.type === 'mail_candidate_unreviewed'));
   assert.equal(JSON.stringify(state), before);
 });
+test('カード払いの電気代は旧請求に加えて口座から二重に引かない', () => {
+  const state = legacyFixture();
+  state.recurringPlans.push({ id: 'electricity', name: '電気代', dayOfMonth: 5, amount: 5000, cardId: 'c', sourceAccountId: 'a', isActive: true });
+  const result = previewLegacy({ state, today: '2026-10-30', endDate: '2026-12-31', selectedCardIds: ['c'] });
+  assert.ok(result.issues.some(issue => issue.type === 'recurring_plans_not_mapped' && issue.id === 'electricity'));
+  assert.equal(result.assessment.nextPayments[0].projectedBalance, 40000);
+  assert.equal(result.assessment.nextStatus, 'review');
+});
+test('隔月の水道代は口座から引き、登録済みの同じ支払いを再生成しない', () => {
+  const saved = { id: 'water-saved', recurringPlanId: 'water', date: '2026-12-20', accountId: 'a', kind: 'expense', amount: 6000, amountConfirmed: true, status: 'planned' };
+  const generated = generateRecurring({ id: 'water', accountId: 'a', firstDate: '2026-10-20', intervalMonths: 2, amount: 6000 }, '2026-10-30', '2027-01-28', [saved]);
+  assert.equal(generated.length, 0);
+  const result = evaluateCashflow(composed({ endDate: '2027-01-28', accounts: [account('a', 15000)], cardBills: [composedBill('jcb', 10000)], otherEvents: [saved, ...generated] }));
+  assert.equal(result.nextStatus, 'safe');
+  assert.equal(result.futureStatus, 'shortfall');
+  assert.ok(result.issues.some(issue => issue.type === 'projected_shortfall' && issue.date === '2026-12-20' && issue.amount === 1000));
+});
 test('旧カード記録の明細種別が未知なら請求総額として扱わない', () => {
   const state = legacyFixture();
   state.transactions[0].entryType = 'unknown';
