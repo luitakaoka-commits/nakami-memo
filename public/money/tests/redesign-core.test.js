@@ -5,6 +5,7 @@ const { reconcileCardCycle } = require('../redesign-card-reconciliation.js');
 const { calculateCardPaymentDate } = require('../finance-engine.js');
 const { compare: compareMigration } = require('../redesign-migration-check.js');
 const { generateRecurring } = require('../redesign-recurring.js');
+const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
 const assert = require('node:assert/strict');
 
 const cases = [];
@@ -298,6 +299,41 @@ test('予定日・間隔・金額が不正な定期予定は拒否', () => {
   for (const patch of [{ firstDate: '2026-02-30' }, { intervalMonths: 0 }, { amount: -1 }, { amount: 2.5 }]) {
     assert.throws(() => generateRecurring({ ...recurring, ...patch }, '2026-10-01', '2027-02-28'));
   }
+});
+
+function legacyFixture() {
+  return { accounts: [{ id: 'a', currentBalance: 50000 }], cards: [{ id: 'c', accountId: 'a', closingDay: 15, paymentDay: 10, paymentMonthOffset: 1 }], recurringPlans: [], transactions: [
+    { id: 'bill', kind: 'payment', status: 'planned', amount: 20000, cardId: 'c', entryType: 'statement', dueDate: '2026-11-10', transactionDate: '2026-11-10' },
+    { id: 'mail', kind: 'payment', status: 'planned', amount: 3000, cardId: 'c', entryType: 'itemized', dueDate: '2026-11-10', transactionDate: '2026-10-01' },
+    { id: 'salary', kind: 'income', status: 'planned', amount: 10000, sourceAccountId: 'a', dueDate: '2026-11-09' }
+  ] };
+}
+test('旧請求総額とメール明細は内訳か不明なので二重加算せず可能額に残す', () => {
+  const old = legacyFixture(), before = JSON.stringify(old);
+  const converted = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  const card = converted.scenario.events.find(event => event.cardPayment);
+  assert.equal(card.amount, 20000); assert.equal(card.additionalPossible, 3000);
+  assert.equal(card.amountConfirmed, false); assert.equal(converted.scenario.coverageVerified, false);
+  assert.equal(calculateReadiness(converted.scenario).nextStatus, 'review');
+  assert.equal(JSON.stringify(old), before);
+});
+test('旧記録の未確認残高・定期予定・除外取引は安全の根拠にしない', () => {
+  const old = legacyFixture(); old.recurringPlans = [{ id: 'water' }];
+  old.transactions.push({ id: 'excluded', status: 'planned', affectsForecast: false });
+  const converted = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  assert.equal(converted.scenario.accounts[0].balanceVerified, false);
+  assert.ok(converted.issues.some(issue => issue.type === 'recurring_plans_not_mapped'));
+  assert.ok(converted.issues.some(issue => issue.type === 'excluded_transaction'));
+});
+test('旧データの不明なカードや複数の請求総額は推測で統合しない', () => {
+  const old = legacyFixture(); old.cards[0].accountId = 'missing';
+  assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /引落口座/);
+  const conflict = legacyFixture(); conflict.transactions.push({ ...conflict.transactions[0], id: 'bill2' });
+  assert.throws(() => buildLegacyScenario(conflict, '2026-10-30', '2026-12-31'), /複数の総額/);
+});
+test('旧明細と請求総額の引落日が異なる場合は勝手に同日にしない', () => {
+  const old = legacyFixture(); old.transactions[1].dueDate = '2026-11-11';
+  assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /引落日/);
 });
 
 const failures = [];
