@@ -48,19 +48,28 @@
       if (!plan.amount) issues.push({ type: 'recurring_amount_unknown', id: plan.id });
       mappedPlans.push(plan);
     }
-    const virtual = engine.expandScheduledTransactions(mappedPlans, today, endDate, state.transactions);
     const ids = new Set(), cardTransactions = [], events = [];
     const salaryMonths = new Set(), recurringDates = new Set();
+    const monthlyPlans = new Map(mappedPlans.map(plan => [plan.id, plan]));
     for (const item of state.transactions) {
       if (item?.recurringPlanId && item.status !== 'cancelled') {
-        const key = JSON.stringify([item.recurringPlanId, item.dueDate]);
+        if (!validDate(item.dueDate)) throw new Error('定期支払いの日付を確認してください');
+        const plan = monthlyPlans.get(item.recurringPlanId);
+        const key = JSON.stringify([item.recurringPlanId, plan ? item.dueDate.slice(0, 7) : item.dueDate]);
         if (recurringDates.has(key)) throw new Error('同じ日の定期支払いが重複しています');
         recurringDates.add(key);
+        if (plan) {
+          const [year, month, day] = item.dueDate.split('-').map(Number);
+          const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+          if (day !== Math.min(plan.dayOfMonth, lastDay)) issues.push({ type: 'legacy_recurring_date_changed', id: item.id });
+        }
       }
       if (!item?.salaryPaymentMonth || item.status === 'cancelled') continue;
       if (salaryMonths.has(item.salaryPaymentMonth)) throw new Error('同じ月の給与記録が重複しています');
       salaryMonths.add(item.salaryPaymentMonth);
     }
+    const virtual = engine.expandScheduledTransactions(mappedPlans, today, endDate, state.transactions)
+      .filter(item => !recurringDates.has(JSON.stringify([item.recurringPlanId, item.dueDate.slice(0, 7)])));
     for (const item of [...state.transactions, ...virtual]) {
       if (!item || !item.id || ids.has(item.id)) throw new Error('旧取引の識別子が不正または重複しています');
       ids.add(item.id);
