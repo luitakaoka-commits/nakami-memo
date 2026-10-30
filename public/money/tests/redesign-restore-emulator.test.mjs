@@ -1,4 +1,4 @@
-/* ローカルFirestore模擬環境の架空データ専用。管理者権限で復元の試験をする。 */
+/* ローカルFirestore模擬環境の架空データ専用。利用者権限で復元を試験する。 */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import backup from '../redesign-backup-read.js';
@@ -8,9 +8,20 @@ if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8487') throw new Error('�
 const base = 'http://127.0.0.1:8487/v1/projects/demo-kurashi/databases/(default)/documents';
 const sourceId = `source-${randomUUID()}`, targetId = `restore-${randomUUID()}`;
 const names = ['importCandidates', 'receipts', 'receiptItems', 'itemAliases'];
-const headers = { Authorization: 'Bearer owner', 'Content-Type': 'application/json' };
-const rootFields = { name: { stringValue: '架空家計' }, state: { mapValue: { fields: { balance: { integerValue: '50000' } } } } };
-const fields = name => ({ category: { stringValue: name }, amount: { integerValue: '1234' } });
+const token = uid => {
+  const part = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return `${part({ alg: 'none', typ: 'JWT' })}.${part({ sub: uid, user_id: uid, aud: 'demo-kurashi', iss: 'https://securetoken.google.com/demo-kurashi', iat: 1, exp: 4102444800, firebase: { sign_in_provider: 'custom' } })}.`;
+};
+const headers = { Authorization: `Bearer ${token('restore-user')}`, 'Content-Type': 'application/json' };
+const str = stringValue => ({ stringValue });
+const amount = { integerValue: '1234' };
+const rootFields = { name: str('架空家計'), ownerUid: str('restore-user'), memberUids: { arrayValue: { values: [str('restore-user')] } }, state: { mapValue: { fields: { balance: { integerValue: '50000' } } } }, createdAt: str('test'), updatedAt: str('test'), updatedBy: str('restore-user') };
+const fields = name => ({
+  importCandidates: { sourcePackage: str('test'), detectedAt: str('2026-10-30'), amount, type: str('purchase'), status: str('pending'), fingerprint: str('test') },
+  receipts: { storeName: str('架空店舗'), purchasedAt: str('2026-10-30'), total: amount, paymentMethod: str('card'), source: str('manual'), status: str('pending') },
+  receiptItems: { receiptId: str('one'), name: str('架空商品'), amount, category: str('食品'), outcome: str('in_stock') },
+  itemAliases: { aliasKey: str('one'), canonicalName: str('架空商品'), canonicalKey: str('test') }
+})[name];
 async function request(path, options = {}) {
   const response = await fetch(`${base}/${path}`, { ...options, headers });
   if (!response.ok) throw new Error(`模擬Firestoreの応答 ${response.status}`);
@@ -46,6 +57,10 @@ try {
   }
   const snapshot = await read(sourceId, last.updateTime);
   assert.equal(names.reduce((sum, name) => sum + snapshot.collections[name].documents.length, 0), 4);
+  const outsiderHeaders = { Authorization: `Bearer ${token('other-user')}`, 'Content-Type': 'application/json' };
+  assert.equal((await fetch(`${base}/workspaces/${sourceId}`, { headers: outsiderHeaders })).status, 403);
+  assert.equal((await fetch(`${base}/workspaces/${sourceId}/importCandidates/one`, { headers: outsiderHeaders })).status, 403);
+  assert.equal((await fetch(`${base}/workspaces/${sourceId}/receiptItems/one`, { method: 'PATCH', headers: outsiderHeaders, body: JSON.stringify({ fields: fields('receiptItems') }) })).status, 403);
   await write(`workspaces/${sourceId}/receiptItems/one`, { ...fields('receiptItems'), amount: { integerValue: '9999' } });
   const historical = await read(sourceId, last.updateTime);
   assert.equal(historical.collections.receiptItems.documents[0].data.fields.amount.integerValue, '1234');
