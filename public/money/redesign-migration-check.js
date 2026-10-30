@@ -40,7 +40,28 @@
     const left = validate(source), right = validate(restored);
     return { matches: JSON.stringify(left) === JSON.stringify(right) };
   }
-  const api = { compare };
+  function restoreContent(bundle) {
+    const copy = validate(bundle);
+    const rootName = copy.workspace.name;
+    const prefix = `workspaces/${copy.workspaceId}`;
+    if (typeof copy.workspaceId !== 'string' || !copy.workspaceId || copy.workspaceId.includes('/') || typeof rootName !== 'string' || !rootName.endsWith(`/${prefix}`) || !rootName.startsWith('projects/') || !copy.workspace.createTime || !copy.workspace.updateTime) throw new Error('家計文書の場所が不正です');
+    function fields(document) {
+      if (!document || typeof document !== 'object' || !document.createTime || !document.updateTime || (document.fields !== undefined && (!document.fields || typeof document.fields !== 'object' || Array.isArray(document.fields)))) throw new Error('Firestore文書が不正です');
+      return document.fields || {};
+    }
+    const collections = {};
+    for (const name of requiredCollections) {
+      collections[name] = copy.collections[name].documents.map(doc => {
+        if (doc.id.includes('/') || doc.data.name !== `${rootName}/${name}/${doc.id}`) throw new Error('復元文書の場所が不正です');
+        return { id: doc.id, fields: fields(doc.data) };
+      });
+    }
+    return { workspace: fields(copy.workspace), collections };
+  }
+  function compareRestored(source, restored) {
+    return { matches: JSON.stringify(restoreContent(source)) === JSON.stringify(restoreContent(restored)) };
+  }
+  const api = { compare, compareRestored };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.RedesignMigrationCheck = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

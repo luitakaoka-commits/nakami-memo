@@ -2,7 +2,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { readSnapshot } = require('../redesign-backup-read.js');
-const { compare } = require('../redesign-migration-check.js');
+const { compare, compareRestored } = require('../redesign-migration-check.js');
 const names = ['importCandidates', 'receipts', 'receiptItems', 'itemAliases'];
 const workspace = 'projects/test/databases/(default)/documents/workspaces/example';
 const time = '2026-10-30T12:00:00.123456Z';
@@ -39,6 +39,25 @@ test('空のコレクションも最終ページまで取得したことを記�
   const result = await readSnapshot(args(s.getJson));
   assert.deepEqual(result.collections.receipts.documents, []);
   assert.equal(result.collections.receipts.complete, true);
+});
+test('復元先の場所や作成時刻が変わっても内容を比較し欠落を検出する', async () => {
+  const source = await readSnapshot(args(server().getJson));
+  const restored = JSON.parse(JSON.stringify(source));
+  const target = 'projects/test/databases/(default)/documents/workspaces/restored';
+  restored.workspaceId = 'restored';
+  restored.workspace.name = target;
+  restored.workspace.createTime = '2026-10-31T00:00:00Z';
+  restored.readTime = '2026-10-31T00:00:00Z';
+  for (const name of names) for (const doc of restored.collections[name].documents) {
+    doc.data.name = `${target}/${name}/${doc.id}`;
+    doc.data.createTime = '2026-10-31T00:00:00Z';
+  }
+  assert.equal(compare(source, restored).matches, false);
+  assert.equal(compareRestored(source, restored).matches, true);
+  restored.collections.importCandidates.documents[0].data.fields.amount.integerValue = '1';
+  assert.equal(compareRestored(source, restored).matches, false);
+  restored.collections.importCandidates.documents[0].data.name = `${workspace}/importCandidates/one`;
+  assert.throws(() => compareRestored(source, restored), /場所/);
 });
 test('途中のアクセス拒否やサーバーエラーで部分的なバックアップを返さない', async () => {
   const s = server((name, page) => name === 'receipts' && page ? { error: { code: 403 } } : null);
