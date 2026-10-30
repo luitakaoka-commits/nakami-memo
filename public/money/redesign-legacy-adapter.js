@@ -49,14 +49,22 @@
       if (item.status === 'settled' && item.dueDate > today) throw new Error('未来の取引が実行済みです');
       if (item.status !== 'planned') continue;
       if (item.affectsForecast === false) { issues.push({ type: 'excluded_transaction', id: item.id }); continue; }
-      if (!Number.isSafeInteger(item.amount) || item.amount < 0) throw new Error('旧取引の金額を確認してください');
+      if (!Number.isSafeInteger(item.amount)) throw new Error('旧取引の金額を確認してください');
+      if (item.amount < 0 && item.kind === 'payment') {
+        if (item.cardId && !cards.has(item.cardId)) throw new Error('返金先のカードを確認してください');
+        // 元の購入・請求との対応が分からない返金は請求を勝手に減らさない。
+        issues.push({ type: 'legacy_refund_unverified', id: item.id });
+        continue;
+      }
+      if (item.amount < 0 && item.kind !== 'adjustment') throw new Error('旧取引の金額を確認してください');
       if (item.cardId) {
         if (item.kind !== 'payment' || !cards.has(item.cardId)) throw new Error('カード取引の種類またはカードを確認してください');
         cardTransactions.push(item);
         continue;
       }
-      const base = { id: `legacy:${item.id}`, date: item.dueDate, status: 'planned', amount: item.amount, accountId: item.sourceAccountId };
+      const base = { id: `legacy:${item.id}`, date: item.dueDate, status: 'planned', amount: Math.abs(item.amount), accountId: item.sourceAccountId };
       if (item.kind === 'income' || item.kind === 'reimbursement') events.push({ ...base, kind: 'income' });
+      else if (item.kind === 'adjustment') events.push(item.amount < 0 ? { ...base, kind: 'income' } : { ...base, kind: 'expense', amountConfirmed: false });
       else if (item.kind === 'payment') events.push({ ...base, kind: 'expense', amountConfirmed: false });
       else if (['transfer', 'saving', 'nisa'].includes(item.kind)) {
         if (item.destinationAccountId && item.transferType !== 'external') events.push({ ...base, kind: 'transfer', toAccountId: item.destinationAccountId });

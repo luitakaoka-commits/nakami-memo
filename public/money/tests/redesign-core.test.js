@@ -2,7 +2,7 @@
 'use strict';
 const { calculateReadiness } = require('../redesign-readiness.js');
 const { reconcileCardCycle } = require('../redesign-card-reconciliation.js');
-const { calculateCardPaymentDate, calculateSpendableAmount } = require('../finance-engine.js');
+const { calculateCardPaymentDate, calculateSpendableAmount, accountDeltasFor } = require('../finance-engine.js');
 const { compare: compareMigration } = require('../redesign-migration-check.js');
 const { generateRecurring } = require('../redesign-recurring.js');
 const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
@@ -506,6 +506,26 @@ test('旧データの不明なカードや複数の請求総額は推測で統�
   assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /引落口座/);
   const conflict = legacyFixture(); conflict.transactions.push({ ...conflict.transactions[0], id: 'bill2' });
   assert.throws(() => buildLegacyScenario(conflict, '2026-10-30', '2026-12-31'), /複数の総額/);
+});
+test('旧残高調整の増減方向を既存の残高計算とそろえる', () => {
+  const old = legacyFixture();
+  old.transactions.push({ id: 'add', kind: 'adjustment', status: 'planned', amount: -700, sourceAccountId: 'a', dueDate: '2026-11-08' });
+  old.transactions.push({ id: 'subtract', kind: 'adjustment', status: 'planned', amount: 300, sourceAccountId: 'a', dueDate: '2026-11-08' });
+  const { scenario } = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  for (const id of ['add', 'subtract']) {
+    const original = old.transactions.find(item => item.id === id);
+    const converted = scenario.events.find(item => item.id === `legacy:${id}`);
+    const delta = converted.kind === 'income' ? converted.amount : -converted.amount;
+    assert.equal(delta, accountDeltasFor(original)[0].delta);
+  }
+});
+test('旧カードの返金は確認されるまで勝手に減額せず試算を停止しない', () => {
+  const old = legacyFixture();
+  old.transactions.push({ id: 'refund', kind: 'payment', status: 'planned', cardId: 'c', entryType: 'itemized', amount: -500, dueDate: '2026-11-10', transactionDate: '2026-10-01' });
+  const result = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  assert.ok(result.issues.some(issue => issue.type === 'legacy_refund_unverified' && issue.id === 'refund'));
+  assert.equal(result.scenario.events.find(item => item.cardPayment).amount, 20000);
+  assert.equal(calculateReadiness(result.scenario).nextStatus, 'review');
 });
 test('旧明細と請求総額の引落日が異なる場合は勝手に同日にしない', () => {
   const old = legacyFixture(); old.transactions[1].dueDate = '2026-11-11';
