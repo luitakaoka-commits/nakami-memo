@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocFromServer, getFirestore, runTransaction, setDoc } from 'firebase/firestore';
+import guard from '../redesign-guarded-save.js';
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8488') throw new Error('ローカル模擬環境専用です');
 const app = initializeApp({ projectId: 'demo-kurashi', apiKey: 'demo', appId: 'demo' }, `guard-${randomUUID()}`);
@@ -29,11 +30,7 @@ const ref = doc(db, 'workspaces', workspaceId);
 const verifierRef = doc(verifier, 'workspaces', workspaceId);
 const original = { ownerUid: 'guard-user', memberUids: ['guard-user'], updatedBy: 'guard-user', revision: 0, state: { balance: 50000 } };
 async function guardedSave(expected, state) {
-  return runTransaction(db, async tx => {
-    const snapshot = await tx.get(ref);
-    if (snapshot.data().revision !== expected) throw new Error('他端末で更新されました');
-    tx.update(ref, { state, revision: expected + 1, updatedBy: 'guard-user' });
-  }, { maxAttempts: 1 });
+  return guard.saveGuarded({ db, ref, expectedRevision: expected, state, uid: 'guard-user', runTransaction: (database, action) => runTransaction(database, action, { maxAttempts: 1 }) });
 }
 const failures = [];
 async function check(name, fn) { try { await fn(); } catch (error) { failures.push({ name, message: error.message }); } }
