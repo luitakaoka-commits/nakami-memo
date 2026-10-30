@@ -4,10 +4,11 @@ import { randomUUID } from 'node:crypto';
 import backup from '../redesign-backup-read.js';
 import migration from '../redesign-migration-check.js';
 import planner from '../redesign-restore-plan.js';
+import executor from '../redesign-restore-execute.js';
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8487') throw new Error('ローカル模擬環境専用です');
 const base = 'http://127.0.0.1:8487/v1/projects/demo-kurashi/databases/(default)/documents';
-const sourceId = `source-${randomUUID()}`, targetId = `restore-${randomUUID()}`;
+const sourceId = `source-${randomUUID()}`, targetId = `restore-${randomUUID()}`, interruptedId = `interrupted-${randomUUID()}`, verifiedId = `verified-${randomUUID()}`;
 const names = ['importCandidates', 'receipts', 'receiptItems', 'itemAliases'];
 const token = uid => {
   const part = value => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -70,6 +71,32 @@ try {
   assert.equal(plan.rootWrites.length, 1); assert.equal(plan.childWrites.length, 4);
   assert.throws(() => planner.planRestore({ snapshot, targetId: sourceId, uid: 'restore-user' }), /上書き/);
   assert.throws(() => planner.planRestore({ snapshot, targetId, uid: 'other-user' }), /所有者/);
+  let attempts = 0;
+  const interrupted = await executor.executeRestore({ snapshot, targetId: interruptedId, uid: 'restore-user', readBack: read, commitWrites: async writes => {
+    attempts += 1;
+    if (attempts === 2) throw new Error('模擬通信失敗');
+    const response = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes }) });
+    if (!response.ok) throw new Error('親の作成に失敗');
+    return response.json();
+  } });
+  assert.equal(interrupted.status, 'children_uncertain');
+  cleanup.push(`workspaces/${interruptedId}`);
+  assert.equal((await request(`workspaces/${interruptedId}`)).fields.ownerUid.stringValue, 'restore-user');
+  const verified = await executor.executeRestore({ snapshot, targetId: verifiedId, uid: 'restore-user', readBack: read, commitWrites: async writes => {
+    const response = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes }) });
+    if (!response.ok) throw new Error('書き込みに失敗');
+    cleanup.push(...writes.map(item => item.update.name.split('/documents/')[1]));
+    return response.json();
+  } });
+  assert.equal(verified.status, 'verified');
+  let replayCalls = 0;
+  const replay = await executor.executeRestore({ snapshot, targetId: verifiedId, uid: 'restore-user', readBack: read, commitWrites: async writes => {
+    replayCalls += 1;
+    const response = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes }) });
+    if (!response.ok) throw new Error('既存の復元先');
+    return response.json();
+  } });
+  assert.equal(replay.status, 'root_uncertain'); assert.equal(replayCalls, 1);
   // 現行ルールは親の家計が先に存在することを要求する。
   const createRoot = () => fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes: plan.rootWrites }) });
   const rootResponse = await createRoot();
