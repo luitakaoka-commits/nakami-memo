@@ -10,6 +10,7 @@ const { confirmBill, recordDebit } = require('../redesign-bill-lifecycle.js');
 const { planRefund } = require('../redesign-refund.js');
 const { planCsv } = require('../redesign-csv-reconciliation.js');
 const { periodForCards } = require('../redesign-deadline.js');
+const { evaluateCashflow } = require('../redesign-cashflow-composition.js');
 const assert = require('node:assert/strict');
 
 const cases = [];
@@ -257,6 +258,43 @@ test('未照合の上限は支払い能力の要確認につながる', () => {
   const c = reconcile({ status: 'estimate', amount: 10000 }, [row('1', 3000)]);
   const r = plan([account('a', 12000)], [bill('b', '2026-11-10', 'a', c.amount, { amountConfirmed: c.confirmed, additionalPossible: c.possibleAdditional })]);
   assert.equal(c.upperEstimate, 13000); assert.equal(r.nextStatus, 'review');
+});
+function composedBill(cardId, amount, extra = {}) {
+  return { cardId, cycle: '2026-10', accountId: 'a', dueDate: '2026-11-10', status: 'planned', snapshot: { cardId, cycle: '2026-10', amount, status: 'confirmed', checkedAt: '2026-10-30T10:00:00+09:00' }, entries: [], ...extra };
+}
+function composed(extra = {}) {
+  return { today: '2026-10-30', endDate: '2026-12-31', coverageVerified: true, accounts: [account('a', 80000), account('b', 30000)], cardBills: [], otherEvents: [], ...extra };
+}
+test('3枚のカード・予定給与・水道代をまとめて口座別に試算', () => {
+  const input = composed({ cardBills: [composedBill('jcb', 20000), composedBill('smbc', 30000), composedBill('mufg', 25000, { accountId: 'b' })], otherEvents: [income('salary', '2026-11-09', 'a', 20000), expense('water', '2026-11-20', 'a', 15000)] });
+  const result = evaluateCashflow(input);
+  assert.equal(result.nextPayments.length, 2); assert.equal(result.nextStatus, 'safe');
+  assert.equal(result.nextPayments.find(item => item.accountId === 'a').cardAmount, 50000);
+  assert.equal(result.nextPayments.find(item => item.accountId === 'b').cardAmount, 25000);
+  assert.equal(result.futureStatus, 'safe');
+});
+test('確定請求に含まれるメール明細は二重加算せず、不明な明細は要確認', () => {
+  const entry = { id: 'mail', cardId: 'jcb', cycle: '2026-10', amount: 3000, origin: 'email', messageId: 'm1', usedAt: '2026-10-29T10:00:00+09:00', evidenceComplete: true, duplicateCheck: 'clear', inclusion: 'included' };
+  const verified = evaluateCashflow(composed({ cardBills: [composedBill('jcb', 20000, { entries: [entry] })] }));
+  assert.equal(verified.cards[0].amount, 20000); assert.equal(verified.nextStatus, 'safe');
+  const unresolved = evaluateCashflow(composed({ cardBills: [composedBill('jcb', 20000, { entries: [{ ...entry, inclusion: undefined }] })] }));
+  assert.equal(unresolved.cards[0].amount, 20000); assert.equal(unresolved.nextStatus, 'review');
+});
+test('未確定累計への未照合明細と将来の未確定水道代を安全と断定しない', () => {
+  const entry = { id: 'mail', cardId: 'jcb', cycle: '2026-10', amount: 15000, origin: 'email', messageId: 'm1', usedAt: '2026-10-29T10:00:00+09:00', evidenceComplete: true, duplicateCheck: 'clear' };
+  const card = composedBill('jcb', 70000, { snapshot: { cardId: 'jcb', cycle: '2026-10', amount: 70000, status: 'estimate', checkedAt: '2026-10-30T10:00:00+09:00', latestUsedAt: '2026-10-29T10:00:00+09:00' }, entries: [entry] });
+  const result = evaluateCashflow(composed({ cardBills: [card], otherEvents: [expense('water', '2026-11-20', 'a', 0, { amountConfirmed: false })] }));
+  assert.equal(result.cards[0].possibleAdditional, 15000); assert.equal(result.nextStatus, 'review'); assert.equal(result.futureStatus, 'review');
+});
+test('同一カードの同じ請求期間と同じメールの別カード混入を拒否', () => {
+  assert.throws(() => evaluateCashflow(composed({ cardBills: [composedBill('jcb', 1000), composedBill('jcb', 1000)] })), /重複/);
+  const entry = cardId => ({ id: 'one', cardId, cycle: '2026-10', amount: 1000, origin: 'email', messageId: 'same', usedAt: '2026-10-29T10:00:00+09:00', evidenceComplete: true, duplicateCheck: 'clear', inclusion: 'included' });
+  assert.throws(() => evaluateCashflow(composed({ cardBills: [composedBill('jcb', 1000, { entries: [entry('jcb')] }), composedBill('smbc', 1000, { entries: [entry('smbc')] })] })), /同じメール/);
+});
+test('引落状態が不明・対象情報が不足していると安全にしない', () => {
+  assert.throws(() => evaluateCashflow(composed({ cardBills: [composedBill('jcb', 1000, { status: undefined })] })), /引落状態/);
+  const result = evaluateCashflow(composed({ coverageVerified: false, cardBills: [composedBill('jcb', 1000)] }));
+  assert.equal(result.nextStatus, 'review'); assert.equal(result.futureStatus, 'review');
 });
 test('同じメールの再取得は二重加算しない', () => {
   const r = reconcile(null, [row('1', 1000, { messageId: 'same' }), row('2', 1000, { messageId: 'same' })]);
