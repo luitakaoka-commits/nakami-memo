@@ -335,6 +335,50 @@ test('旧明細と請求総額の引落日が異なる場合は勝手に同日�
   const old = legacyFixture(); old.transactions[1].dueDate = '2026-11-11';
   assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /引落日/);
 });
+test('旧定期予定は登録済みの同月取引と重複させず残りの月を展開', () => {
+  const old = legacyFixture();
+  old.recurringPlans = [{ id: 'utility', dayOfMonth: 5, kind: 'payment', amount: 4000, sourceAccountId: 'a', isActive: true }];
+  old.transactions.push({ id: 'registered', status: 'planned', kind: 'payment', amount: 4000, sourceAccountId: 'a', dueDate: '2026-11-05', recurringPlanId: 'utility' });
+  const { scenario, issues } = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  const utility = scenario.events.filter(event => event.kind === 'expense' && !event.cardPayment);
+  assert.deepEqual(utility.map(event => event.date).sort(), ['2026-11-05', '2026-12-05']);
+  assert.ok(utility.every(event => event.amount === 4000 && event.amountConfirmed === false));
+  assert.equal(issues.some(issue => issue.type === 'recurring_plans_not_mapped'), false);
+});
+test('登録済み給与とシフト見込みを二重に足さず未入金として扱う', () => {
+  const old = legacyFixture();
+  old.settings = { wage: { hourlyRate: 1000, salaryPaymentDay: 15, salaryMonthOffset: 1, depositAccountId: 'a' } };
+  old.workEntries = [{ id: 'shift', date: '2026-10-02', hours: 10, status: 'worked' }];
+  old.transactions.push({ id: 'salary-nov', kind: 'income', status: 'planned', salaryPaymentMonth: '2026-11', amount: 9000, sourceAccountId: 'a', dueDate: '2026-11-13' });
+  const result = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  const salaries = result.scenario.events.filter(event => event.date === '2026-11-13');
+  assert.equal(salaries.length, 1); assert.equal(salaries[0].amount, 9000);
+  assert.equal(salaries[0].status, 'planned');
+});
+test('登録を消した給与はシフトから復活させず、口座不明なら入金を作らない', () => {
+  const old = legacyFixture();
+  old.workEntries = [{ id: 'shift', date: '2026-10-02', hours: 10, status: 'worked' }];
+  old.settings = { wage: { hourlyRate: 1000, salaryPaymentDay: 15, salaryMonthOffset: 1, depositAccountId: 'a', dismissedSalaryMonths: ['2026-11'] } };
+  let result = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  assert.equal(result.scenario.events.some(event => event.id === 'legacy-salary:2026-11'), false);
+  old.settings.wage.dismissedSalaryMonths = []; old.settings.wage.depositAccountId = '';
+  result = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  assert.equal(result.scenario.events.some(event => event.id === 'legacy-salary:2026-11'), false);
+  assert.ok(result.issues.some(issue => issue.type === 'salary_account_unknown'));
+});
+test('重複した給与記録を黙って合算しない', () => {
+  const old = legacyFixture();
+  old.transactions.push({ id: 's1', status: 'planned', salaryPaymentMonth: '2026-11' }, { id: 's2', status: 'planned', salaryPaymentMonth: '2026-11' });
+  assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /給与記録が重複/);
+});
+test('同じ月の定期支払いが二重登録されていれば警告する', () => {
+  const old = legacyFixture();
+  old.transactions.push(
+    { id: 'one', status: 'planned', recurringPlanId: 'utility', dueDate: '2026-11-05' },
+    { id: 'two', status: 'planned', recurringPlanId: 'utility', dueDate: '2026-11-05' }
+  );
+  assert.throws(() => buildLegacyScenario(old, '2026-10-30', '2026-12-31'), /定期支払いが重複/);
+});
 
 const failures = [];
 for (const c of cases) { try { c.fn(); } catch (error) { failures.push({ name: c.name, message: error.message }); } }

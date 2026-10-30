@@ -17,9 +17,32 @@
       cards.set(card.id, card);
     }
     const issues = [{ type: 'legacy_evidence_unverified' }];
-    if (state.recurringPlans.some(plan => plan?.isActive !== false)) issues.push({ type: 'recurring_plans_not_mapped' });
+    const planIds = new Set(), mappedPlans = [];
+    for (const plan of state.recurringPlans) {
+      if (!plan || !plan.id || planIds.has(plan.id)) throw new Error('定期予定の識別子が不正または重複しています');
+      planIds.add(plan.id);
+      if (plan.isActive === false) continue;
+      if (!Number.isInteger(plan.dayOfMonth) || plan.dayOfMonth < 1 || plan.dayOfMonth > 31 || (plan.intervalMonths != null && plan.intervalMonths !== 1) || !Number.isSafeInteger(plan.amount) || plan.amount < 0 || plan.cardId) {
+        issues.push({ type: 'recurring_plans_not_mapped', id: plan.id });
+        continue;
+      }
+      if (!plan.amount) issues.push({ type: 'recurring_amount_unknown', id: plan.id });
+      mappedPlans.push(plan);
+    }
+    const virtual = engine.expandScheduledTransactions(mappedPlans, today, endDate, state.transactions);
     const ids = new Set(), cardTransactions = [], events = [];
+    const salaryMonths = new Set(), recurringDates = new Set();
     for (const item of state.transactions) {
+      if (item?.recurringPlanId && item.status !== 'cancelled') {
+        const key = JSON.stringify([item.recurringPlanId, item.dueDate]);
+        if (recurringDates.has(key)) throw new Error('同じ日の定期支払いが重複しています');
+        recurringDates.add(key);
+      }
+      if (!item?.salaryPaymentMonth || item.status === 'cancelled') continue;
+      if (salaryMonths.has(item.salaryPaymentMonth)) throw new Error('同じ月の給与記録が重複しています');
+      salaryMonths.add(item.salaryPaymentMonth);
+    }
+    for (const item of [...state.transactions, ...virtual]) {
       if (!item || !item.id || ids.has(item.id)) throw new Error('旧取引の識別子が不正または重複しています');
       ids.add(item.id);
       if (!['planned', 'settled', 'cancelled', 'absorbed'].includes(item.status)) throw new Error('旧取引の状態が不明です');
@@ -48,6 +71,14 @@
       if (!Number.isSafeInteger(group.adoptedTotal) || !Number.isSafeInteger(group.suppressedTotal)) throw new Error('カード請求額が不正です');
       events.push({ id: `legacy-card:${group.key}`, date: group.dueDate, status: 'planned', amount: group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed: false, additionalPossible: group.suppressedTotal });
       issues.push({ type: 'card_group_unverified', cardId: group.cardId, cycle: group.billingCycle });
+    }
+    if (!Array.isArray(state.workEntries) || !state.settings?.wage) issues.push({ type: 'salary_data_missing' });
+    else {
+      const wage = state.settings.wage;
+      const recordedMonths = engine.salaryMonthsOutsideForecast(state.transactions, wage);
+      const forecasts = engine.collectSalaryEvents(state.workEntries, wage, today, endDate, { overrides: state.settings.holidayOverrides || {}, recordedMonths });
+      if (forecasts.length && !accountIds.has(wage.depositAccountId)) issues.push({ type: 'salary_account_unknown' });
+      else for (const salary of forecasts) events.push({ id: `legacy-salary:${salary.paymentMonth}`, date: salary.paymentDate, status: 'planned', amount: salary.totalAmount, accountId: wage.depositAccountId, kind: 'income' });
     }
     return { scenario: { today, endDate, coverageVerified: false, accounts, events }, issues };
   }
