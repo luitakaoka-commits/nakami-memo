@@ -13,6 +13,7 @@ const { createSuite } = require(path.join(__dirname, 'finance-engine.tests.js'))
 
 /** JSONを1行だけ出力する独立スクリプト形式のテスト */
 const SUITES = [
+  'redesign-core.test.js',
   'card-netting.test.js',
   'records-view.test.js',
   'gas-parser.test.js',
