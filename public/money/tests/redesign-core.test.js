@@ -151,6 +151,33 @@ test('同じ入出金の入力順を変えても判定と口座別残高は変�
   assert.equal(second.nextPayments[0].projectedBalance, 20000);
   assert.ok(second.issues.some(issue => issue.type === 'projected_shortfall' && issue.amount === 1000));
 });
+test('支払予定を増やすと次の引落後残高が同額減り、安全から改善しない', () => {
+  const rank = { safe: 0, review: 1, shortfall: 2 };
+  for (const startingBalance of [0, 10000, 50000]) {
+    for (const extra of [0, 1, 5000, 30000]) {
+      const initial = plan([account('a', startingBalance)], [bill('b', '2026-11-10', 'a', 10000)]);
+      const changed = plan([account('a', startingBalance)], [bill('b', '2026-11-10', 'a', 10000), expense('extra', '2026-11-09', 'a', extra)]);
+      assert.equal(changed.nextPayments[0].projectedBalance, initial.nextPayments[0].projectedBalance - extra);
+      assert.ok(rank[changed.nextStatus] >= rank[initial.nextStatus]);
+    }
+  }
+});
+test('口座残高に反映済みの入金・支払いはもう一度加減しない', () => {
+  const base = [bill('next', '2026-11-10', 'a', 10000)];
+  const recorded = [{ ...income('paid-salary', '2026-10-29', 'a', 50000), status: 'settled' }, expense('paid-water', '2026-10-29', 'a', 3000, { status: 'settled' })];
+  const without = plan([account('a', 20000)], base);
+  const withRecorded = plan([account('a', 20000)], [...base, ...recorded]);
+  assert.equal(withRecorded.nextPayments[0].projectedBalance, without.nextPayments[0].projectedBalance);
+  assert.equal(withRecorded.nextStatus, without.nextStatus);
+  assert.equal(withRecorded.futureStatus, without.futureStatus);
+});
+test('別口座のお金を無断で引落口座に加算しない', () => {
+  for (const otherBalance of [0, 100000, 1000000]) {
+    const r = plan([account('a', 1000), account('b', otherBalance)], [bill('b', '2026-11-10', 'a', 5000)]);
+    assert.equal(r.nextStatus, 'shortfall');
+    assert.equal(r.nextPayments[0].projectedBalance, -4000);
+  }
+});
 test('カード会社の確定額は見込みを置換し、口座残高を変えない', () => {
   const before = { account: { id: 'a', balance: 50000, revision: 1 }, bill: { id: 'b', accountId: 'a', amount: 23000, amountConfirmed: false, status: 'planned' } };
   const after = confirmBill(before, { issuerConfirmed: true, amount: 25000 });
