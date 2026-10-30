@@ -580,6 +580,21 @@ test('定期予定の重複や実行状態不明は勝手に解消せず拒否',
   assert.throws(() => generateRecurring(recurring, '2026-10-01', '2027-02-28', [entry, entry]), /重複/);
   assert.throws(() => generateRecurring(recurring, '2026-10-01', '2027-02-28', [{ ...entry, status: 'unknown' }]), /実行状態/);
 });
+test('同じ月の定期支払日を変更しても変更前の日に二重生成しない', () => {
+  const recurring = { id: 'water', accountId: 'a', firstDate: '2026-10-20', intervalMonths: 2, amount: 4000 };
+  const changed = { recurringPlanId: 'water', date: '2026-12-22', status: 'planned' };
+  const result = generateRecurring(recurring, '2026-10-01', '2027-02-28', [changed]);
+  assert.deepEqual(result.map(item => item.date), ['2026-10-20', '2027-02-20']);
+});
+test('翌月へ移した定期支払いも元の予定日を指定すれば二重生成しない', () => {
+  const recurring = { id: 'water', accountId: 'a', firstDate: '2026-10-20', intervalMonths: 2, amount: 4000 };
+  const changed = { recurringPlanId: 'water', date: '2027-01-05', scheduledDate: '2026-12-20', status: 'planned' };
+  const result = generateRecurring(recurring, '2026-10-01', '2027-02-28', [changed]);
+  assert.deepEqual(result.map(item => item.date), ['2026-10-20', '2027-02-20']);
+  assert.throws(() => generateRecurring(recurring, '2026-10-01', '2027-02-28', [{ ...changed, scheduledDate: '2026-02-30' }]), /日付/);
+  assert.throws(() => generateRecurring(recurring, '2026-10-01', '2027-02-28', [{ ...changed, scheduledDate: '2026-12-21' }]), /元の予定日/);
+  assert.throws(() => generateRecurring(recurring, '2026-10-01', '2027-02-28', [changed, { ...changed, date: '2027-01-07' }]), /重複/);
+});
 test('予定日・間隔・金額が不正な定期予定は拒否', () => {
   const recurring = { id: 'water', accountId: 'a', firstDate: '2026-10-20', intervalMonths: 2 };
   for (const patch of [{ firstDate: '2026-02-30' }, { intervalMonths: 0 }, { amount: -1 }, { amount: 2.5 }]) {

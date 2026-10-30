@@ -18,8 +18,17 @@
       if (item?.recurringPlanId !== plan.id) continue;
       parseDay(item.date);
       if (!['planned', 'settled'].includes(item.status)) throw new Error('登録済み予定の実行状態が不明です');
-      if (taken.has(item.date)) throw new Error('同じ定期予定が重複しています');
-      taken.add(item.date);
+      const original = item.scheduledDate === undefined ? item.date : item.scheduledDate;
+      const scheduled = parseDay(original);
+      if (item.scheduledDate !== undefined) {
+        const index = scheduled.year * 12 + scheduled.month;
+        const firstIndex = first.year * 12 + first.month;
+        const lastDay = new Date(Date.UTC(scheduled.year, scheduled.month + 1, 0)).getUTCDate();
+        if (index < firstIndex || (index - firstIndex) % plan.intervalMonths !== 0 || scheduled.day !== Math.min(first.day, lastDay)) throw new Error('元の予定日が定期予定と一致しません');
+      }
+      const month = original.slice(0, 7);
+      if (taken.has(month)) throw new Error('同じ定期予定が重複しています');
+      taken.add(month);
     }
     const startIndex = first.year * 12 + first.month;
     const last = parseDay(toDate);
@@ -30,7 +39,7 @@
       const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
       const day = Math.min(first.day, lastDay);
       const date = `${String(year).padStart(4, '0')}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      if (date < fromDate || date > toDate || taken.has(date)) continue;
+      if (date < fromDate || date > toDate || taken.has(date.slice(0, 7))) continue;
       result.push({ id: `recurring:${plan.id}:${date}`, recurringPlanId: plan.id, date, accountId: plan.accountId, kind: 'expense', amount: plan.amount ?? 0, amountConfirmed: false, status: 'planned' });
     }
     return result;
