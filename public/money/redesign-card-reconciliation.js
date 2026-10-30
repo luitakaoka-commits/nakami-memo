@@ -21,7 +21,9 @@
     if (snapshot && (snapshot.cardId !== cardId || snapshot.cycle !== cycle)) throw new Error('別のカードまたは請求期間の累計額です');
     const ids = new Set();
     const mailIds = new Map();
+    const conflictedMailIds = new Set();
     let known = snapshot ? snapshot.amount : 0;
+    let uncertainKnown = 0;
     let possible = 0;
     const issues = [];
     const items = [];
@@ -41,6 +43,11 @@
         // 同じメールでも抽出額が食い違うなら単なる再取得とは断定できない。
         // 確定額には足さず、未確定の上限に残して確認を求める。
         const conflict = previous.amount !== entry.amount || previous.usedAt !== entry.usedAt || previous.type !== entry.type || previous.inclusion !== entry.inclusion;
+        if (conflict && snapshot?.status !== 'confirmed' && !conflictedMailIds.has(entry.messageId)) {
+          const previousItem = items.find(item => item.id === previous.id);
+          if (previousItem?.treatment === 'added') uncertainKnown = add(uncertainKnown, previous.amount);
+          conflictedMailIds.add(entry.messageId);
+        }
         if (conflict && snapshot?.status !== 'confirmed') possible = add(possible, entry.amount);
         issues.push({ type: conflict ? 'duplicate_message_conflict' : 'duplicate_message', id: entry.id });
         items.push({ id: entry.id, treatment: conflict ? 'review' : 'duplicate_message' });
@@ -86,7 +93,7 @@
     }
     if (snapshot && includedTotal > snapshot.amount) issues.push({ type: 'included_exceeds_snapshot' });
     const needsReview = issues.length > 0 || snapshot?.status !== 'confirmed';
-    return { amount: known, possibleAdditional: possible, upperEstimate: add(known, possible), sourceConfirmed: snapshot?.status === 'confirmed', confirmed: snapshot?.status === 'confirmed' && !needsReview, needsReview, issues, items };
+    return { amount: known, minimumAmount: known - uncertainKnown, possibleAdditional: possible, upperEstimate: add(known, possible), sourceConfirmed: snapshot?.status === 'confirmed', confirmed: snapshot?.status === 'confirmed' && !needsReview, needsReview, issues, items };
   }
   const api = { reconcileCardCycle };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

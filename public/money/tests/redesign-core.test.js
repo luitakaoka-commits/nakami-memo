@@ -396,6 +396,34 @@ test('同一メールに異なる金額がある場合は入力順で上限が�
   assert.equal(forward.upperEstimate, 6000); assert.equal(reverse.upperEstimate, 6000);
   assert.equal(forward.needsReview, true); assert.equal(reverse.needsReview, true);
 });
+test('同じメールの金額が食い違う場合は入力順にかかわらず不足を断定しない', () => {
+  const a = { ...row('1', 1000, { messageId: 'same' }), cycle: '2026-10' };
+  const b = { ...row('2', 5000, { messageId: 'same' }), cycle: '2026-10' };
+  const evaluate = entries => evaluateCashflow(composed({ accounts: [account('a', 3000)], cardBills: [composedBill('jcb', 0, { snapshot: null, entries })] }));
+  for (const entries of [[a, b], [b, a]]) {
+    const result = evaluate(entries);
+    assert.equal(result.nextStatus, 'review');
+    assert.equal(result.nextPayments[0].projectedBalance, 3000);
+    assert.equal(result.nextPayments[0].confirmedBalance, -3000);
+  }
+});
+test('重複メールの食い違いは推定累計そのものを減らさず、元の加算分だけ不確実にする', () => {
+  const a = row('1', 1000, { messageId: 'same', inclusion: 'not_included' });
+  const b = row('2', 5000, { messageId: 'same', inclusion: 'not_included' });
+  const c = row('3', 5000, { messageId: 'same', inclusion: 'not_included' });
+  const r = reconcile({ status: 'estimate', amount: 10000 }, [a, b, c]);
+  assert.equal(r.minimumAmount, 10000);
+  assert.equal(r.upperEstimate, 21000);
+  assert.equal(r.needsReview, true);
+});
+test('確定請求に食い違う同じメールがあっても確定請求額そのものは減らさない', () => {
+  const a = { ...row('1', 1000, { messageId: 'same', inclusion: 'included' }), cycle: '2026-10' };
+  const b = { ...row('2', 5000, { messageId: 'same', inclusion: 'included' }), cycle: '2026-10' };
+  const r = evaluateCashflow(composed({ cardBills: [composedBill('jcb', 20000, { entries: [a, b] })] }));
+  assert.equal(r.cards[0].minimumAmount, 20000);
+  assert.equal(r.nextPayments[0].projectedBalance, 60000);
+  assert.equal(r.nextStatus, 'review');
+});
 test('受信時刻だけでは利用時刻の証拠にならない', () => assert.equal(reconcile(null, [row('1', 1000, { usedAt: '', detectedAt: '2026-11-01T12:00:00+09:00' })]).needsReview, true));
 test('確定請求後に新規利用が届いた場合は勝手に加算せず確認', () => {
   const r = reconcile({ status: 'confirmed', amount: 10000 }, [row('1', 3000, { inclusion: 'not_included' })]);

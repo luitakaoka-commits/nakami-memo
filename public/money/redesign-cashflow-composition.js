@@ -19,7 +19,7 @@
       }
       const card = reconcile.reconcileCardCycle({ cardId: bill.cardId, cycle: bill.cycle, snapshot: bill.snapshot, entries: bill.entries || [] });
       cardResults.push({ cardId: bill.cardId, cycle: bill.cycle, accountId: bill.accountId, dueDate: bill.dueDate, ...card });
-      events.push({ id: `card:${key}`, accountId: bill.accountId, date: bill.dueDate, status: bill.status, kind: 'expense', cardPayment: true, amount: card.amount, additionalPossible: card.possibleAdditional, amountConfirmed: card.confirmed });
+      events.push({ id: `card:${key}`, accountId: bill.accountId, date: bill.dueDate, status: bill.status, kind: 'expense', cardPayment: true, amount: card.minimumAmount, additionalPossible: card.upperEstimate - card.minimumAmount, amountConfirmed: card.confirmed });
     }
     const result = readiness.calculateReadiness({ today: input.today, endDate: input.endDate, accounts: input.accounts, events, coverageVerified: input.coverageVerified });
     return { ...result, cards: cardResults };
