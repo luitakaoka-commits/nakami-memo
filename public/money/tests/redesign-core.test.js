@@ -557,6 +557,20 @@ test('同一文書IDの重複やJSONで表せない値を拒否', () => {
   copy.collections.receipts.documents.pop(); copy.workspace.state.transactions[0].amount = NaN;
   assert.throws(() => compareMigration(source, copy), /JSON/);
 });
+test('移行照合はJSON化で値が変わる配列の穴や安全範囲外の整数を拒否', () => {
+  const sparse = migrationFixture();
+  sparse.workspace.state.transactions = Array(1);
+  assert.throws(() => compareMigration(sparse, JSON.parse(JSON.stringify(sparse))), /JSON/);
+  const unsafe = migrationFixture();
+  unsafe.workspace.state.transactions[0].amount = Number.MAX_SAFE_INTEGER + 1;
+  assert.throws(() => compareMigration(unsafe, unsafe), /JSON/);
+  const negativeZero = migrationFixture();
+  negativeZero.workspace.state.transactions[0].amount = -0;
+  assert.throws(() => compareMigration(negativeZero, negativeZero), /JSON/);
+  const annotated = migrationFixture();
+  annotated.workspace.state.accounts.note = 'lost by JSON';
+  assert.throws(() => compareMigration(annotated, annotated), /JSON/);
+});
 
 test('隔月の水道代を指定された月だけ生成し未知の金額は未確定', () => {
   const water = generateRecurring({ id: 'water', accountId: 'a', firstDate: '2026-10-20', intervalMonths: 2 }, '2026-10-30', '2027-04-30');

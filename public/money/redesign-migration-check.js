@@ -4,8 +4,16 @@
   const requiredCollections = ['importCandidates', 'receipts', 'receiptItems', 'itemAliases'];
   function canonical(value) {
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (Array.isArray(value)) return value.map(canonical);
+    if (typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0) && (!Number.isInteger(value) || Number.isSafeInteger(value))) return value;
+    if (Array.isArray(value)) {
+      const result = [];
+      if (Object.keys(value).length !== value.length) throw new Error('JSONで正確に表せない配列が含まれています');
+      for (let index = 0; index < value.length; index += 1) {
+        if (!Object.prototype.hasOwnProperty.call(value, index)) throw new Error('JSONで正確に表せない配列が含まれています');
+        result.push(canonical(value[index]));
+      }
+      return result;
+    }
     if (value && Object.getPrototypeOf(value) === Object.prototype) {
       const result = Object.create(null);
       for (const key of Object.keys(value).sort()) result[key] = canonical(value[key]);

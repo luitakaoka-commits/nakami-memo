@@ -54,6 +54,8 @@ Firestoreルールの候補に関する9項目を、`demo-kurashi` のローカ�
 
 `redesign-migration-check.js` は架空の JSON データによる比較の試作で、家計本体とメール候補・レシート・明細・別名辞書の欠落や内容の変化を検出する。取得完了の印は呼び出し側から与える前提で、その真偽は検証できない。Firestore固有の値、取得漏れ、バックアップの作成、実際の復元や認証は未対応。これを完全なバックアップ機能とみなさない。
 
+JSONにすると欠落や変換が生じる配列の穴・配列への追加プロパティ・安全範囲外の整数・負のゼロは、一致と判定せず比較を停止する。Firestore RESTの整数文字列は文字列として保持する。
+
 `redesign-backup-read.js` はFirestore RESTの応答を受け取る読取専用の試作。親文書と4種類のサブコレクションの全ページへ同じ `readTime` を指定し、文書名、重複、ページの繰り返し、取得失敗を検査する。Firestoreの値はRESTの型付きJSONのまま保持する。[Firestore get](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/get) と [list](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/list) の仕様を参照。サーバーが許す読み取り時刻と認証の取得、実通信、ファイル保存、復元、権限、ネットワーク障害、下位の別アプリのデータはまだ未検証。対応した4種類以外や別のアプリを含む完全バックアップではない。
 
 `redesign-recurring.js` は明示された初回日と間隔から隔月などの予定を生成する試作。月末の調整と同じ定期予定・同じ日付の登録済み取引との重複を検査する。金額が未入力なら0円の未確定として扱い、入力済みでも各回の実際の請求額が確定したとはみなさない。水道代の実際の引落日・祝日調整・金額は自動判定しない。既存の定期予定をこの形式へ移行する処理は未実装。
