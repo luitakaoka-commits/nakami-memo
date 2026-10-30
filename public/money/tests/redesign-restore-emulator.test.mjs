@@ -20,6 +20,14 @@ async function write(path, content) { return request(path, { method: 'PATCH', bo
 async function read(workspaceId, time) {
   return backup.readSnapshot({ projectId: 'demo-kurashi', workspaceId, readTime: time, getJson: async url => {
     const parsed = new URL(url);
+    // エミュレーターのRESTはRFC 3339のreadTimeを誤解析するため、
+    // 同じ時刻を秒・ナノ秒のフィールドに分ける（本番用URLは変更しない）。
+    const stamp = parsed.searchParams.get('readTime');
+    const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z$/.exec(stamp || '');
+    if (!match) throw new Error('試験用の読み取り時刻が不正です');
+    parsed.searchParams.delete('readTime');
+    parsed.searchParams.set('readTime.seconds', String(Date.parse(`${match[1]}Z`) / 1000));
+    parsed.searchParams.set('readTime.nanos', String(Number((match[2] || '').padEnd(9, '0'))));
     const local = `http://127.0.0.1:8487${parsed.pathname}${parsed.search}`;
     const response = await fetch(local, { headers });
     const body = await response.json();
@@ -38,6 +46,10 @@ try {
   }
   const snapshot = await read(sourceId, last.updateTime);
   assert.equal(names.reduce((sum, name) => sum + snapshot.collections[name].documents.length, 0), 4);
+  await write(`workspaces/${sourceId}/receiptItems/one`, { ...fields('receiptItems'), amount: { integerValue: '9999' } });
+  const historical = await read(sourceId, last.updateTime);
+  assert.equal(historical.collections.receiptItems.documents[0].data.fields.amount.integerValue, '1234');
+  assert.equal(migration.compare(snapshot, historical).matches, true);
   await write(`workspaces/${targetId}`, snapshot.workspace.fields); cleanup.push(`workspaces/${targetId}`);
   for (const name of names) for (const item of snapshot.collections[name].documents) {
     const path = `workspaces/${targetId}/${name}/${item.id}`;
