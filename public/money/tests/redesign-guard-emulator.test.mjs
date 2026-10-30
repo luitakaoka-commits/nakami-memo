@@ -5,6 +5,7 @@ import net from 'node:net';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocFromServer, getFirestore, runTransaction, setDoc } from 'firebase/firestore';
 import guard from '../redesign-guarded-save.js';
+import billStore from '../redesign-bill-store.js';
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8488') throw new Error('ローカル模擬環境専用です');
 const app = initializeApp({ projectId: 'demo-kurashi', apiKey: 'demo', appId: 'demo' }, `guard-${randomUUID()}`);
@@ -65,6 +66,19 @@ try {
     assert.equal(after.revision, before.revision);
     assert.equal(after.state.balance, before.state.balance);
   });
+  await check('請求と残高を同時保存し再送で二重に減らさない', async () => {
+    const before = (await getDocFromServer(verifierRef)).data();
+    const newState = { accounts: [{ id: 'a', balance: 50000, revision: 1 }], bills: [{ id: 'b', accountId: 'a', amount: 10000, amountConfirmed: true, status: 'planned' }], note: 'keep' };
+    await guard.saveGuarded({ db: verifier, ref: verifierRef, expectedRevision: before.revision, state: newState, uid: 'guard-user', runTransaction });
+    const expectedRevision = before.revision + 1;
+    const request = { db: verifier, ref: verifierRef, uid: 'guard-user', billId: 'b', expectedRevision, input: { operationId: 'bank-op', amount: 10000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: false, expectedRevision: 1 }, runTransaction };
+    const first = await billStore.recordDebitGuarded(request);
+    const again = await billStore.recordDebitGuarded(request);
+    assert.equal(first.alreadyApplied, false); assert.equal(again.alreadyApplied, true);
+    const state = (await getDocFromServer(verifierRef)).data().state;
+    assert.equal(state.accounts[0].balance, 40000); assert.equal(state.bills[0].status, 'settled'); assert.equal(state.note, 'keep');
+    await assert.rejects(billStore.recordDebitGuarded({ ...request, input: { ...request.input, operationId: 'other' } }), /引落済み/);
+  });
 } finally {
   await deleteDoc(verifierRef).catch(() => {});
   await deleteApp(app);
@@ -72,5 +86,5 @@ try {
   for (const socket of sockets) socket.destroy();
   await new Promise(resolve => proxy.close(resolve));
 }
-console.log(JSON.stringify({ suite: 'redesign-guard-emulator', total: 4, passed: 4 - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
+console.log(JSON.stringify({ suite: 'redesign-guard-emulator', total: 5, passed: 5 - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
 if (failures.length) process.exitCode = 1;
