@@ -1,0 +1,48 @@
+/* Firestore REST の読取リハーサル。通信・保存・復元は呼び出し側に委ねる。 */
+(function attach(root) {
+  'use strict';
+  const collections = ['importCandidates', 'receipts', 'receiptItems', 'itemAliases'];
+  async function readSnapshot({ projectId, databaseId = '(default)', workspaceId, readTime, getJson }) {
+    if (![projectId, databaseId, workspaceId].every(value => typeof value === 'string' && value && !value.includes('/'))) throw new Error('プロジェクトまたは家計IDが不正です');
+    if (typeof getJson !== 'function' || typeof readTime !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(readTime) || !Number.isFinite(Date.parse(readTime)) || new Date(readTime).toISOString().slice(0, 19) !== readTime.slice(0, 19)) throw new Error('読み取り時刻または通信手段が不正です');
+    const rootName = `projects/${projectId}/databases/${databaseId}/documents/workspaces/${workspaceId}`;
+    const base = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/workspaces/${encodeURIComponent(workspaceId)}`;
+    const request = async url => {
+      const result = await getJson(url);
+      if (!result || typeof result !== 'object' || Array.isArray(result) || result.error) throw new Error('取得に失敗しました');
+      return result;
+    };
+    const rootUrl = new URL(base); rootUrl.searchParams.set('readTime', readTime);
+    const workspace = await request(rootUrl.toString());
+    if (workspace.name !== rootName || !workspace.createTime || !workspace.updateTime) throw new Error('家計データを確認できません');
+    const result = { workspaceId, readTime, workspace, collections: {} };
+    for (const collection of collections) {
+      const documents = [], ids = new Set(), tokens = new Set();
+      let pageToken = '';
+      do {
+        const url = new URL(`${base}/${collection}`);
+        url.searchParams.set('readTime', readTime); url.searchParams.set('pageSize', '200');
+        if (pageToken) url.searchParams.set('pageToken', pageToken);
+        const page = await request(url.toString());
+        if (page.documents != null && !Array.isArray(page.documents)) throw new Error('文書一覧が不正です');
+        for (const doc of page.documents || []) {
+          const prefix = `${rootName}/${collection}/`;
+          if (!doc || typeof doc.name !== 'string' || !doc.name.startsWith(prefix) || !doc.createTime || !doc.updateTime) throw new Error('別の場所の文書か、内容が不正です');
+          const id = doc.name.slice(prefix.length);
+          if (!id || id.includes('/') || ids.has(id)) throw new Error('文書IDが不正または重複しています');
+          ids.add(id); documents.push({ id, data: doc });
+        }
+        if (page.nextPageToken != null && typeof page.nextPageToken !== 'string') throw new Error('ページ番号が不正です');
+        pageToken = page.nextPageToken || '';
+        if (pageToken && tokens.has(pageToken)) throw new Error('ページが繰り返されています');
+        if (pageToken) tokens.add(pageToken);
+        if (tokens.size > 10000) throw new Error('ページ数が多すぎます');
+      } while (pageToken);
+      result.collections[collection] = { complete: true, documents };
+    }
+    return result;
+  }
+  const api = { readSnapshot };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  root.RedesignBackupRead = api;
+})(typeof globalThis !== 'undefined' ? globalThis : window);
