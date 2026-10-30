@@ -45,6 +45,12 @@ test('本人の健康記録を家の同居人は読めない', async () => {
   const path = `http://${host}/v1/projects/demo-kurashi/databases/(default)/documents/users/owner-user/health/test`;
   assert.equal((await fetch(path, { headers: { Authorization: `Bearer ${token('housemate')}` } })).status, 403);
 });
+test('退避した購入金額は本人だけが読める', async () => {
+  const path = `http://${host}/v1/projects/demo-kurashi/databases/(default)/documents/users/owner-user/privatePurchasePrices/test-home/items/test-item`;
+  assert.equal((await fetch(path, { headers: { Authorization: `Bearer ${token('owner-user')}` } })).status, 200);
+  assert.equal((await fetch(path, { headers: { Authorization: `Bearer ${token('housemate')}` } })).status, 403);
+  assert.equal((await fetch(path)).status, 403);
+});
 test('購入金額を含まない共有在庫は追加できる', async () => assert.equal((await patchHome('items/clean', { name: '食品', quantity: 1 })).status, 200));
 test('共有在庫に新たな購入金額を含めて作成できない', async () => assert.equal((await patchHome('items/new-price', { name: '食品', purchasePrice: 100 })).status, 403));
 test('金額がない共有在庫に購入金額を後から追加できない', async () => assert.equal((await patchHome('items/clean', { name: '食品', quantity: 1, purchasePrice: 100 })).status, 403));
@@ -67,7 +73,8 @@ test('共有レシピと下位コレクションの編集は保たれる', async
   const homeResult = await fetch(home, { method: 'PATCH', headers: adminHeaders, body: JSON.stringify(homeSeed) });
   const itemResult = await fetch(`${home}/items/test-item`, { method: 'PATCH', headers: adminHeaders, body: JSON.stringify({ fields: fields({ name: '架空の食品', purchasePrice: 100, purchaseWorkspaceId: 'test-space' }) }) });
   const legacyResult = await fetch(`${home}/items/legacy`, { method: 'PATCH', headers: adminHeaders, body: JSON.stringify({ fields: fields({ name: '食品', quantity: 1, purchasePrice: 100 }) }) });
-  if (!homeResult.ok || !itemResult.ok || !legacyResult.ok) throw new Error('共有在庫テストの準備に失敗しました');
+  const backupResult = await fetch(`http://${host}/v1/projects/demo-kurashi/databases/(default)/documents/users/owner-user/privatePurchasePrices/test-home/items/test-item`, { method: 'PATCH', headers: adminHeaders, body: JSON.stringify({ fields: fields({ amount: 100 }) }) });
+  if (!homeResult.ok || !itemResult.ok || !legacyResult.ok || !backupResult.ok) throw new Error('共有在庫テストの準備に失敗しました');
   const failures = [];
   for (const item of cases) { try { await item.fn(); } catch (error) { failures.push({ name: item.name, message: error.message }); } }
   const visible = await fetch(`${home}/items/test-item`, { headers: { Authorization: `Bearer ${token('housemate')}` } });
