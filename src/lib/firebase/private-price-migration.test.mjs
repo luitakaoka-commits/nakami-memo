@@ -1,8 +1,8 @@
 /* 明示したローカルdemoエミュレーターの架空データだけを使う。 */
 import assert from "node:assert/strict";
 import { initializeApp, deleteApp } from "firebase/app";
-import { connectFirestoreEmulator, doc, getDoc, getFirestore } from "firebase/firestore";
-import { migrateSharedPurchasePrice } from "./private-price-migration.ts";
+import { connectFirestoreEmulator, disableNetwork, doc, enableNetwork, getDoc, getFirestore } from "firebase/firestore";
+import { inspectSharedPurchasePrices, migrateSelectedPurchasePrices, migrateSharedPurchasePrice } from "./private-price-migration.ts";
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== "127.0.0.1:8487") throw new Error("ローカルエミュレーター専用です");
 const host = process.env.FIRESTORE_EMULATOR_HOST;
@@ -61,6 +61,32 @@ test("個人領域への保存が権限で拒否されても共有側の金額�
   assert.equal((await getDoc(shared("denied"))).data().purchasePrice, 320);
   const saved = await fetch(`${base}/users/housemate/privatePurchasePrices/home/items/denied`, { headers: { Authorization: "Bearer owner" } });
   assert.equal(saved.status, 404);
+});
+test("一覧は購入元を確かめ、結果に金額を含めない", async () => {
+  await seedItem("list-ready", 500); await seedItem("list-other", 300, "other-ws"); await seedItem("list-invalid", -1);
+  await seedItem("list-conflict", 100);
+  assert.equal((await request("users/owner-user/privatePurchasePrices/home/items/list-conflict", { amount: num(999), householdId: str("home"), itemId: str("list-conflict"), workspaceId: str("ws") })).status, 200);
+  const results = await inspectSharedPurchasePrices(db, "owner-user", "home");
+  const map = new Map(results.map(result => [result.itemId, result.status]));
+  assert.equal(map.get("list-ready"), "ready"); assert.equal(map.get("list-other"), "other-owner");
+  assert.equal(map.get("list-invalid"), "invalid"); assert.equal(map.get("list-conflict"), "backup-conflict");
+  assert.ok(results.every(result => !Object.hasOwn(result, "amount")));
+});
+test("指定した安全な在庫だけ移し、不明・不一致を残す", async () => {
+  await seedItem("unselected", 250);
+  const result = await migrateSelectedPurchasePrices(db, "owner-user", "home", ["list-ready", "list-other", "list-invalid", "list-conflict", "missing"]);
+  assert.deepEqual(result.migrated, ["list-ready"]);
+  assert.deepEqual(result.skipped.map(item => item.reason), ["other-owner", "invalid", "backup-conflict", "not-found"]);
+  assert.equal((await getDoc(backup("list-ready"))).data().amount, 500);
+  assert.equal((await getDoc(shared("list-other"))).data().purchasePrice, 300);
+  assert.equal((await getDoc(shared("unselected"))).data().purchasePrice, 250);
+  await assert.rejects(migrateSelectedPurchasePrices(db, "owner-user", "home", ["unselected", "unselected"]), /識別子/);
+});
+test("通信できない場合はキャッシュから点検完了としない", async () => {
+  await disableNetwork(db);
+  try { await assert.rejects(inspectSharedPurchasePrices(db, "owner-user", "home")); }
+  finally { await enableNetwork(db); }
+  assert.equal((await getDoc(shared("unselected"))).data().purchasePrice, 250);
 });
 
 try {
