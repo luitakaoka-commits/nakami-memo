@@ -262,6 +262,27 @@ test('本文の利用日と解析結果が異なる場合や日付に余分な�
   assert(!sandbox.assessNoticeEvidence(malformed, sandbox.parseCardMail(malformed)).safe, '数字が続く不正な日付を根拠として認めた');
 });
 
+test('外貨の利用金額を円の金額として返さない', () => {
+  for (const currency of ['USD', 'EUR', 'GBP']) {
+    const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】', [
+      'ご利用カード：三井住友カードＶＩＳＡ（ＮＬ）',
+      '◇利用日：2026/10/13 09:31',
+      `◇利用金額：1.00${currency}`,
+      '◇利用先：海外店舗'
+    ].join('\n'));
+    equal(result.amount, null, '外貨を円として返した');
+    equal(result.confident, false, '外貨を確定扱いにした');
+  }
+});
+
+test('JPYの利用通知と本文中の外貨の説明を混同しない', () => {
+  const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】', [
+    '◇利用日：2026/10/13 09:31', '◇利用金額：120JPY',
+    '海外利用はUSDで表示される場合があります。'
+  ].join('\n'));
+  equal(result.amount, 120, 'JPYの金額を失った');
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-parser', total, passed: total, failed: 0 }));
   process.exit(0);

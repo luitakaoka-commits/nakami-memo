@@ -126,6 +126,14 @@ function parseCardMail(mail) {
     note = note || '返金・取消の可能性があります。対象の取引を確認してください。';
   }
 
+  // 外貨通知の数字を円として保存しない。換算額や請求先は別途確認する。
+  var currencyMatch = text.normalize('NFKC').match(/(?:ご利用金額|利用金額|決済金額)[ \t]*】?[ \t]*[:：]?[ \t]*[\d,.]+[ \t]*([A-Z]{3})\b/i);
+  if (currencyMatch && currencyMatch[1].toUpperCase() !== 'JPY') {
+    amount = null;
+    confident = false;
+    note = '外貨の利用通知です。円の請求額を確認してください。';
+  }
+
   return {
     amount: amount,
     usedDate: usedDate,
