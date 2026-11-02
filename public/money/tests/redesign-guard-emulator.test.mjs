@@ -34,7 +34,8 @@ async function guardedSave(expected, state) {
   return guard.saveGuarded({ db, ref, expectedRevision: expected, state, uid: 'guard-user', runTransaction: (database, action) => runTransaction(database, action, { maxAttempts: 1 }) });
 }
 const failures = [];
-async function check(name, fn) { try { await fn(); } catch (error) { failures.push({ name, message: error.message }); } }
+let total = 0;
+async function check(name, fn) { total++; try { await fn(); } catch (error) { failures.push({ name, message: error.message }); } }
 try {
   await setDoc(ref, original);
   await check('最新の版で保存後、古い版の保存を拒否', async () => {
@@ -79,6 +80,53 @@ try {
     assert.equal(state.accounts[0].balance, 40000); assert.equal(state.bills[0].status, 'settled'); assert.equal(state.note, 'keep');
     await assert.rejects(billStore.recordDebitGuarded({ ...request, input: { ...request.input, operationId: 'other' } }), /引落済み/);
   });
+  async function seedBill() {
+    const before = (await getDocFromServer(verifierRef)).data();
+    const state = { accounts: [{ id: 'a', balance: 50000, revision: 1 }], bills: [{ id: 'b', cardId: 'jcb', cycle: '2026-11', accountId: 'a', amount: 10000, amountConfirmed: false, status: 'planned' }], transactions: [{ id: 'keep' }] };
+    await guard.saveGuarded({ db: verifier, ref: verifierRef, expectedRevision: before.revision, state, uid: 'guard-user', runTransaction });
+    return { db: verifier, ref: verifierRef, uid: 'guard-user', billId: 'b', expectedRevision: before.revision + 1, evidence: { issuerConfirmed: true, cardId: 'jcb', cycle: '2026-11', amount: 12000, checkedAt: '2026-11-01T12:00:00+09:00', source: 'issuer-app' }, runTransaction };
+  }
+  await check('請求額確定は残高を変えず根拠と版番号を保存', async () => {
+    const request = await seedBill();
+    const before = (await getDocFromServer(verifierRef)).data();
+    await billStore.confirmBillGuarded(request);
+    const after = (await getDocFromServer(verifierRef)).data();
+    assert.deepEqual(after.state.accounts, before.state.accounts);
+    assert.deepEqual(after.state.transactions, before.state.transactions);
+    assert.equal(after.state.bills[0].amount, 12000);
+    assert.equal(after.state.bills[0].amountConfirmed, true);
+    assert.equal(after.state.bills[0].status, 'planned');
+    assert.equal(after.state.bills[0].confirmationEvidence.checkedAt, request.evidence.checkedAt);
+    assert.equal(after.revision, before.revision + 1);
+    await assert.rejects(billStore.confirmBillGuarded(request), /他端末/);
+  });
+  await check('別カード・別期間・金額のない確定通知は保存しない', async () => {
+    const request = await seedBill();
+    const before = (await getDocFromServer(verifierRef)).data();
+    for (const changes of [{ cardId: 'other' }, { cycle: '2026-12' }, { amount: undefined }, { issuerConfirmed: false }, { source: 'email-notice' }, { checkedAt: '2026-02-30T12:00:00+09:00' }]) {
+      await assert.rejects(billStore.confirmBillGuarded({ ...request, evidence: { ...request.evidence, ...changes } }));
+    }
+    assert.deepEqual((await getDocFromServer(verifierRef)).data(), before);
+  });
+  await check('残高反映済みの実引落は二重控除しない', async () => {
+    const request = await seedBill();
+    const confirmed = await billStore.confirmBillGuarded(request);
+    const debit = { ...request, expectedRevision: confirmed.revision, input: { operationId: 'included-op', amount: 12000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: true, expectedRevision: 1 } };
+    await billStore.recordDebitGuarded(debit);
+    await billStore.recordDebitGuarded(debit);
+    const state = (await getDocFromServer(verifierRef)).data().state;
+    assert.equal(state.accounts[0].balance, 50000);
+    assert.equal(state.accounts[0].revision, 2);
+    assert.equal(state.bills[0].status, 'settled');
+    await assert.rejects(billStore.confirmBillGuarded({ ...request, expectedRevision: confirmed.revision + 1 }), /引落済み/);
+  });
+  await check('請求と異なる実引落額は確認を求め保存しない', async () => {
+    const request = await seedBill();
+    const confirmed = await billStore.confirmBillGuarded(request);
+    const before = (await getDocFromServer(verifierRef)).data();
+    await assert.rejects(billStore.recordDebitGuarded({ ...request, expectedRevision: confirmed.revision, input: { operationId: 'different-op', amount: 10000, date: '2026-11-10', today: '2026-11-10', bankConfirmed: true, balanceAlreadyIncludesDebit: false, expectedRevision: 1 } }), /請求額/);
+    assert.deepEqual((await getDocFromServer(verifierRef)).data(), before);
+  });
 } finally {
   await deleteDoc(verifierRef).catch(() => {});
   await deleteApp(app);
@@ -86,5 +134,5 @@ try {
   for (const socket of sockets) socket.destroy();
   await new Promise(resolve => proxy.close(resolve));
 }
-console.log(JSON.stringify({ suite: 'redesign-guard-emulator', total: 5, passed: 5 - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
+console.log(JSON.stringify({ suite: 'redesign-guard-emulator', total, passed: total - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
 if (failures.length) process.exitCode = 1;
