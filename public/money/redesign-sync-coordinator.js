@@ -90,9 +90,10 @@
       if (!base) throw new Error('サーバーの家計を読み込んでから保存してください');
       const copy = structuredClone(state);
       canonical(copy);
+      const queued = acceptance ? [...acceptances, structuredClone(acceptance)] : acceptances;
       // 退避に失敗したら、未保存内容を安全に保持できないため送信しない。
-      retain(copy);
-      if (acceptance) acceptances.push(structuredClone(acceptance));
+      retain(copy, { baselineRevision: base.revision, acceptances: [...(flight?.acceptances || []), ...queued] });
+      acceptances = queued;
       pending = copy;
       if (blocked) { conflict(); return; }
       onStatus('saving');
@@ -103,15 +104,16 @@
         while (pending && !blocked) {
           const payload = pending; pending = null;
           const batch = acceptances; acceptances = [];
-          flight = { state: payload, text: canonical(payload), revision: base.revision };
+          flight = { state: payload, text: canonical(payload), revision: base.revision, acceptances: batch };
           try {
             const revision = await write({ state: structuredClone(payload), baseline: structuredClone(base.state), expectedRevision: base.revision, acceptances: batch });
             if (revision !== flight.revision + 1) throw new Error('保存後の版番号が一致しません');
-            if (blocked) break;
+            if (blocked) { acceptances = [...batch, ...acceptances]; break; }
             base = { state: payload, text: flight.text, revision };
             if (!pending) { clearRetained(); onStatus('saved'); }
           } catch (error) {
             if (!pending) pending = payload;
+            acceptances = [...batch, ...acceptances];
             blocked = true;
             onStatus('error', error);
           } finally { flight = null; }
@@ -134,7 +136,12 @@
       const raw = storage.getItem(name);
       if (raw === null) continue;
       const kind = name === key ? 'pending' : 'archive';
-      try { snapshots.push({ kind, state: JSON.parse(raw) }); }
+      try {
+        const value = JSON.parse(raw);
+        if (value?.format === 'money-unsaved-entry-v2') {
+          snapshots.push({ kind, state: value.state, baselineRevision: value.baselineRevision, acceptances: value.acceptances });
+        } else snapshots.push({ kind, state: value });
+      }
       catch (_) { snapshots.push({ kind, unreadable: raw }); }
     }
     return { format: 'money-unsaved-recovery-v1', workspaceId, snapshots };

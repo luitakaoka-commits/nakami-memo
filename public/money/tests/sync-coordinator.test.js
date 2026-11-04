@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
-const { createCoordinator, canonical } = require('../redesign-sync-coordinator.js');
+const { createCoordinator, canonical, readRecovery } = require('../redesign-sync-coordinator.js');
 const failures = []; let total = 0;
 const defer = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const check = async (name, fn) => { total++; try { await fn(); } catch (error) { failures.push({ name, message: error.message }); } };
@@ -41,9 +41,18 @@ function setup(write = async request => request.expectedRevision + 1, retain) {
     assert.equal(writes, 1); assert.equal(saver.isBlocked(), true); assert.deepEqual(held.at(-1), { n: 2 });
   });
   await check('通信失敗では保存済みにせず再送を停止する', async () => {
-    const { saver, held, statuses } = setup(async () => { throw Error('offline'); });
-    saver.receive({ n: 0 }, 0); saver.enqueue({ n: 1 }); await saver.flush(); saver.receive({ n: 4 }, 1);
-    assert.equal(saver.isDirty(), true); assert.equal(saver.isBlocked(), true); assert.equal(held.length, 1); assert.equal(statuses.at(-1).status, 'error');
+    const held = [], gate = defer();
+    const { saver, statuses } = setup(async () => { await gate.promise; throw Error('offline'); }, (state, metadata) => held.push({ state, ...metadata }));
+    const first = { id: 'one', patch: { status: 'accepted' } }, second = { id: 'two', patch: { status: 'accepted' } };
+    saver.receive({ n: 0 }, 0); saver.enqueue({ n: 1 }, first); const saving = saver.flush();
+    saver.enqueue({ n: 2 }, second); gate.resolve(); await saving;
+    assert.deepEqual(held.at(-1), { state: { n: 2 }, baselineRevision: 0, acceptances: [first, second] });
+    saver.enqueue({ n: 3 }); saver.receive({ n: 4 }, 1);
+    assert.deepEqual(held.at(-1), { state: { n: 3 }, baselineRevision: 0, acceptances: [first, second] });
+    const storage = { length: 0, getItem: key => key === 'okane-unsaved:user:home'
+      ? JSON.stringify({ format: 'money-unsaved-entry-v2', ...held.at(-1) }) : null };
+    assert.deepEqual(readRecovery(storage, 'user', 'home').snapshots, [{ kind: 'pending', ...held.at(-1) }]);
+    assert.equal(saver.isDirty(), true); assert.equal(saver.isBlocked(), true); assert.equal(statuses.at(-1).status, 'error');
   });
   await check('退避できない場合は送らない', async () => {
     let writes = 0; const { saver } = setup(async () => { writes++; }, () => { throw Error('quota'); });

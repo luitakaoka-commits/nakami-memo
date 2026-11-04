@@ -27,8 +27,8 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=72';
-import './redesign-backup-read.js?v=72';
+import './redesign-sync-coordinator.js?v=73';
+import './redesign-backup-read.js?v=73';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -146,7 +146,7 @@ async function selectWorkspace(workspaceId) {
   }
   const { saveSnapshot, createCoordinator } = globalThis.RedesignSyncCoordinator;
   workspaceSaver = createCoordinator({
-    retain: state => localStorage.setItem(recoveryKey, JSON.stringify(state)),
+    retain: (state, metadata) => localStorage.setItem(recoveryKey, JSON.stringify({ format: 'money-unsaved-entry-v2', state, ...metadata })),
     clearRetained: () => localStorage.removeItem(recoveryKey),
     onStatus: (...args) => {
       if (currentWorkspace?.id === selected.id && currentUser?.uid === uid) statusHandler(...args);
