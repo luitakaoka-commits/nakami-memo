@@ -650,7 +650,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=70" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=71" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1294,6 +1294,15 @@
       && Math.abs(Number(item.amount || 0)) === amount
       && !['cancelled', 'ignored'].includes(item.status));
     if (similar && !window.confirm('同じカード・利用日・金額の取引があります。別の利用として取り込みますか？')) return;
+    const merchantKey = finance.normalizeItemName(merchant);
+    const otherCard = entryType === 'itemized' && merchantKey && state.transactions.find(item =>
+      item.origin === 'mail-import' && item.entryType === 'itemized' && item.kind === 'payment'
+      && item.cardId && item.cardId !== cardId && item.transactionDate === transactionDate
+      && item.amount === amount && ['planned', 'settled', 'absorbed'].includes(item.status)
+      && finance.normalizeItemName(item.memo) === merchantKey);
+    if (otherCard && (selectedCardId === undefined || !window.confirm(
+      `${cardName(otherCard.cardId)}に同じ利用日・金額・店名の記録があります。別の決済だと確認できた場合だけ取り込んでください。`
+    ))) return;
     const dueDate = entryType === 'statement' ? transactionDate : card
       ? finance.calculateCardPaymentDate(transactionDate, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions())
       : transactionDate;

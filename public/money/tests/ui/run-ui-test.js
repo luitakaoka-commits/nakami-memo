@@ -1232,6 +1232,22 @@ const closeModals = page => page.evaluate(() => {
     await page.evaluate(item => window.__YORYOKU__.setImportCandidates([item]), candidate);
     assert(await row.locator('[data-candidate-field="amount"]').inputValue() === '731', '更新で金額が消えた');
     assert(await row.locator('[data-candidate-field="date"]').inputValue() === '2026-09-01', '更新で利用日が消えた');
+    const warned = await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      const existing = api.createTransaction({ id: 'other-card-existing', kind: 'payment', origin: 'mail-import', entryType: 'itemized', cardId: 'candidate-card-2', transactionDate: '2026-09-01', amount: 731, memo: '修正した店' });
+      state.transactions.push(existing);
+      const originalConfirm = window.confirm;
+      let message = '';
+      window.confirm = value => { message = value; return false; };
+      try {
+        document.querySelector('[data-action="accept-candidate"][data-id="editable-candidate"]').click();
+        return message.includes('同じ利用日・金額・店名') && !state.transactions.some(item => item.id === 'mail_editable-candidate');
+      } finally {
+        window.confirm = originalConfirm;
+        state.transactions.splice(state.transactions.indexOf(existing), 1);
+      }
+    });
+    assert(warned, '別カードにある同一候補を確認せず取り込んだ');
     await row.locator('[data-action="accept-candidate"]').click();
     const result = await page.evaluate(() => ({ transaction: window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_editable-candidate'), call: window.__TEST_CALLS__.find(item => item.fn === 'updateImportCandidate' && item.id === 'editable-candidate') }));
     assert(result.transaction?.amount === 731 && result.transaction?.transactionDate === '2026-09-01' && result.transaction?.memo === '修正した店', '修正した内容で取引が作られない');
