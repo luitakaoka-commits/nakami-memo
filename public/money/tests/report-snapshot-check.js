@@ -39,16 +39,27 @@ if (result.timeline.some(row => row.status === 'safe') || result.futureStatus ==
 const transferSection = text.match(/三井住友銀行([\d,]+)円が現在も残っており[^\n]*\r?\n[^\n]*仮に([\d,]+)円を移せば12\/10後の追加支出前はUFJ([\d,]+)円・三井住友([\d,]+)円/);
 if (!transferSection) throw new Error('資料の振替案を読み取れません');
 const [sourceBalance, transferAmount, expectedTarget, expectedSource] = transferSection.slice(1).map(yen);
+const historicalTable = text.split('### 12/10までの基準試算')[1];
+const historicalLast = historicalTable?.match(/^\|\s*12\/10\s*\|[^|\n]+\|\s*−([\d,]+)円\s*\|\s*([\d,]+)円\s*\|/m);
+if (!historicalLast) throw new Error('振替案と同じ時点の基準試算を読み取れません');
+const [historicalDebit, historicalBalance] = historicalLast.slice(1).map(yen);
+const historicalEvents = events.map(event => event.id === '2026-12-10' ? { ...event, amount: historicalDebit } : event);
+const historicalInput = {
+  today: '2026-10-27', endDate: '2026-12-10', coverageVerified: false,
+  accounts: [{ id: 'account', balance: opening, balanceVerified: false }, { id: 'source', balance: sourceBalance, balanceVerified: false }]
+};
+const withoutTransfer = calculateReadiness({ ...historicalInput, events: historicalEvents });
 const withTransfer = calculateReadiness({
-  today: '2026-10-28', endDate: '2026-12-10', coverageVerified: false,
-  accounts: [{ id: 'account', balance: opening, balanceVerified: false }, { id: 'source', balance: sourceBalance, balanceVerified: false }],
-  events: [{ id: 'proposed-transfer', date: '2026-10-28', accountId: 'source', toAccountId: 'account', kind: 'transfer', status: 'planned', amount: transferAmount }, ...events]
+  ...historicalInput,
+  events: [{ id: 'proposed-transfer', date: historicalInput.today, accountId: 'source', toAccountId: 'account', kind: 'transfer', status: 'planned', amount: transferAmount }, ...historicalEvents]
 });
-const originalLast = result.timeline.at(-1), transferLast = withTransfer.timeline.at(-1);
-if (transferLast?.projectedBalance !== originalLast.projectedBalance + transferAmount
+const originalLast = withoutTransfer.timeline.at(-1), transferLast = withTransfer.timeline.at(-1);
+if (originalLast?.projectedBalance !== historicalBalance
+  || transferLast?.projectedBalance !== originalLast.projectedBalance + transferAmount
   || transferLast.projectedBalance + (sourceBalance - transferAmount) !== originalLast.projectedBalance + sourceBalance
   || transferLast.confirmedBalance !== originalLast.confirmedBalance
   || withTransfer.futureStatus === 'safe') failures.push({ check: 'proposed_transfer' });
 const transferSourceMatches = transferLast?.projectedBalance === expectedTarget && sourceBalance - transferAmount === expectedSource;
+if (!transferSourceMatches) failures.push({ check: 'transfer_source' });
 console.log(JSON.stringify({ suite: 'report-snapshot', asOf: '2026-10-28', sourceRows: rows.length, cardChecks: result.timeline.length, transferScenario: !failures.some(failure => failure.check === 'proposed_transfer'), transferSourceStatus: transferSourceMatches ? 'matches' : 'review', passed: failures.length === 0, failures }));
 if (failures.length) process.exitCode = 1;
