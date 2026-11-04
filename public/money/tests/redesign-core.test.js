@@ -502,6 +502,23 @@ test('元の利用に紐付いた返金を未確定の同じ請求期間だけ�
   const { scenario } = buildLegacyScenario(state, '2026-10-30', '2026-12-31');
   assert.equal(scenario.events.find(item => item.cardPayment).additionalPossible, 2000);
 });
+test('確認済みの翌月請求に含まれる返金は総額や残高を変更しない', () => {
+  const state = legacyFixture();
+  const purchase = { ...state.transactions[1], status: 'absorbed', sourceAccountId: 'a' };
+  const destination = { ...state.transactions[0], id: 'next-statement', dueDate: '2026-12-10', sourceAccountId: 'a' };
+  state.transactions = [purchase, destination];
+  const args = { state, candidate: { id: 'later-refund', status: 'pending', type: 'refund' },
+    targetId: purchase.id, amount: 1000, confirmed: true, destinationStatementId: destination.id };
+  assert.equal(preparePendingRefund(args).status, 'review');
+  destination.statementEvidence = { source: 'issuer-manual', cardId: 'c', accountId: 'a', amount: 20000,
+    dueDate: '2026-12-10', cycle: '2026-11', checkedAt: '2026-11-30T00:00:00Z' };
+  const result = preparePendingRefund(args);
+  assert.equal(result.status, 'ready');
+  assert.deepEqual([result.transaction.status, result.transaction.absorbedBy, result.transaction.amount], ['absorbed', destination.id, -1000]);
+  const before = buildLegacyScenario(state, '2026-11-30', '2026-12-31');
+  state.transactions.push(result.transaction);
+  assert.deepEqual(buildLegacyScenario(state, '2026-11-30', '2026-12-31'), before);
+});
 test('返金通知は対象不明・カード違い・返金超過を自動処理しない', () => {
   const purchase = { id: 'a', cardId: 'jcb', amount: 1000, refundedAmount: 300, billStatus: 'estimate' };
   const notice = { id: 'mail1', type: 'refund', cardId: 'jcb', amount: 400, amountConfirmed: true, targetConfirmed: true, targetId: 'a' };

@@ -1384,6 +1384,24 @@ const closeModals = page => page.evaluate(() => {
       await page.locator('[data-action="accept-candidate"][data-id="refund-test"]').click();
       const result = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_refund-test'));
       assert(result?.amount === -1000 && result.refundEvidence.targetId === 'refund-purchase' && result.dueDate === '2026-10-13', '元の利用に返金が紐付いていない');
+      const balance = await page.evaluate(() => {
+        const api = window.__YORYOKU__, state = api.getState(), accountId = state.accounts[0].id;
+        state.transactions.find(item => item.id === 'refund-purchase').status = 'absorbed';
+        state.transactions.push(api.createTransaction({ id: 'refund-statement', kind: 'payment', entryType: 'statement', status: 'planned',
+          amount: 20000, dueDate: '2026-11-10', cardId: 'refund-card', sourceAccountId: accountId,
+          statementEvidence: { source: 'issuer-manual', cardId: 'refund-card', accountId, amount: 20000, dueDate: '2026-11-10', cycle: '2026-10', checkedAt: '2026-09-02T00:00:00Z' } }));
+        api.setImportCandidates([{ id: 'later-refund-test', status: 'pending', type: 'refund', amount: 500, fingerprint: 'later-refund-test' }]);
+        return state.accounts[0].currentBalance;
+      });
+      await page.locator('[data-refund-target]').selectOption('refund-purchase');
+      await page.locator('[data-refund-statement]').selectOption('refund-statement');
+      await page.locator('[data-action="accept-candidate"][data-id="later-refund-test"]').click();
+      const later = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        const item = state.transactions.find(row => row.id === 'mail_later-refund-test');
+        return { status: item?.status, absorbedBy: item?.absorbedBy, amount: state.transactions.find(row => row.id === 'refund-statement').amount, balance: state.accounts[0].currentBalance };
+      });
+      assert(later.status === 'absorbed' && later.absorbedBy === 'refund-statement' && later.amount === 20000 && later.balance === balance, '別月の確認済み請求を二重に減額した');
     } finally {
       await page.evaluate(() => { const api = window.__YORYOKU__; Object.assign(api.getState(), window.__TEST_REFUND_STATE__); api.setImportCandidates([]); });
     }

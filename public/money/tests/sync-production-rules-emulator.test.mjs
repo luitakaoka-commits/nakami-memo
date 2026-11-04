@@ -97,6 +97,24 @@ try {
       await saveRefund(prepared.transaction);
       assert.equal((await getDocFromServer(refundWorkspace)).data().state.transactions[1].amount, -1000);
       assert.equal((await getDocFromServer(candidateRef(id))).data().status, 'accepted');
+      const later = { ...candidateData, amount: 500, fingerprint: 'later-refund' };
+      const laterId = 'later-refund';
+      await setDoc(candidateRef(laterId), later);
+      try {
+        const baseline = (await getDocFromServer(refundWorkspace)).data().state;
+        const statement = { ...purchase, id: 'next-bill', entryType: 'statement', amount: 20000, dueDate: '2027-01-12',
+          statementEvidence: { source: 'issuer-manual', cardId: 'card', accountId: 'a', amount: 20000, dueDate: '2027-01-12', cycle: '2026-12', checkedAt: '2026-12-30T00:00:00Z' } };
+        const amended = { ...baseline, transactions: [...baseline.transactions, statement] };
+        const result = refunds.preparePendingRefund({ state: amended, candidate: { ...later, id: laterId },
+          targetId: purchase.id, amount: 500, confirmed: true, destinationStatementId: statement.id });
+        assert.equal(result.status, 'ready');
+        await sync.saveSnapshot({ db, ref: refundWorkspace, uid: 'sync-user', baseline, expectedRevision: 1, runTransaction,
+          updatedAt: serverTimestamp(), candidateRef, state: { ...amended, transactions: [...amended.transactions, result.transaction] },
+          acceptances: [{ id: laterId, patch: { status: 'accepted', amount: 500 }, refundTarget: purchase.id, destinationStatementId: statement.id }] });
+        const stored = (await getDocFromServer(refundWorkspace)).data().state.transactions;
+        assert.equal(stored.find(item => item.id === statement.id).amount, 20000);
+        assert.equal(stored.find(item => item.id === 'mail_' + laterId).absorbedBy, statement.id);
+      } finally { await deleteDoc(candidateRef(laterId)); }
     } finally {
       await deleteDoc(candidateRef(id));
       await deleteDoc(refundWorkspace);

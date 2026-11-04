@@ -650,7 +650,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=66" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=67" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1211,9 +1211,16 @@
 
   /** 候補を正式なカード取引へ変換する。承認するまで計算には含めない。 */
   function renderRefundTarget() {
-    const options = state.transactions.filter(item => item.cardId && item.entryType === 'itemized' && item.status === 'planned' && item.amount > 0)
+    const options = state.transactions.filter(item => item.cardId && item.entryType === 'itemized' && ['planned', 'settled', 'absorbed'].includes(item.status) && item.amount > 0)
       .map(item => `<option value="${esc(item.id)}">${esc(cardName(item.cardId))}・${esc(item.transactionDate)}・${esc(item.memo)}・${formatAbsoluteYen(item.amount)}</option>`).join('');
-    return `<label>元のカード利用<select data-refund-target><option value="">選択してください</option>${options}</select></label><small>元の利用と同じ未確定の請求期間に反映する返金を取り込めます。</small>`;
+    const statements = state.transactions.filter(item => {
+      const card = item.statementEvidence ? creditCard(item.cardId) : null;
+      return card && ['planned', 'settled'].includes(item.status)
+        && finance.hasConfirmedCardStatement(item, finance.cardBillingCycleOf(item, card, holidayOptions()));
+    }).map(item => `<option value="${esc(item.id)}">${esc(cardName(item.cardId))}・${esc(item.dueDate)}・${formatAbsoluteYen(item.amount)}</option>`).join('');
+    return `<label>元のカード利用<select data-refund-target><option value="">選択してください</option>${options}</select></label>
+      <label>返金が含まれる請求<select data-refund-statement><option value="">元の利用と同じ未確定の請求に反映</option>${statements}</select></label>
+      <small>カード会社の確認済み総額に返金が含まれている場合は、その請求を選びます。</small>`;
   }
 
   async function acceptPendingRefund(candidate, edits) {
@@ -1223,17 +1230,17 @@
       return;
     }
     try {
-      const result = window.RedesignRefund.preparePendingRefund({ state, candidate, targetId: edits.refundTarget, amount, confirmed: true });
+      const result = window.RedesignRefund.preparePendingRefund({ state, candidate, targetId: edits.refundTarget, amount, confirmed: true, destinationStatementId: edits.destinationStatementId });
       if (result.status !== 'ready') {
         showToast('返金額・元の利用・反映先の請求期間を確認してください');
         return;
       }
       const row = result.transaction;
       if (!window.confirm(cardName(row.cardId) + 'の元の利用に ' + formatAbsoluteYen(amount)
-        + ' を返金し、同じ未確定の請求期間に反映することをカード会社の明細で確認しましたか？')) return;
+        + (edits.destinationStatementId ? ' の返金が ' + formatDate(row.dueDate, true) + ' の確認済み請求総額に含まれていることを、カード会社の明細で確認しましたか？' : ' を返金し、同じ未確定の請求期間に反映することをカード会社の明細で確認しましたか？'))) return;
       state.transactions.push(createTransaction({ ...row, memo: edits.merchant || candidate.merchant || 'カード返金' }));
       const patch = { ...stripCandidate(candidate), amount, status: 'accepted' };
-      if (persist({ id: candidate.id, patch, refundTarget: edits.refundTarget }) === false) throw new Error('保存を開始できませんでした');
+      if (persist({ id: candidate.id, patch, refundTarget: edits.refundTarget, destinationStatementId: edits.destinationStatementId || '' }) === false) throw new Error('保存を開始できませんでした');
       await cloud?.flushPendingSave?.();
       showToast('返金を元の利用に紐付けました');
     } catch (error) { showToast(error.message || '返金を同期できませんでした'); }
@@ -3046,7 +3053,7 @@
   function releaseStatementDetails(statementId) {
     let released = 0;
     state.transactions.forEach(item => {
-      if (item.absorbedBy !== statementId) return;
+      if (item.absorbedBy !== statementId || item.refundEvidence?.destinationStatementId === statementId) return;
       if (item.status === 'absorbed') item.status = 'planned';
       item.absorbedBy = '';
       item.updatedAt = nowIso();
@@ -3060,7 +3067,7 @@
     if (!state.accounts.length) { closeModal('event-modal'); showToast('先に口座を追加してください'); return; }
     const id = $('#event-id').value;
     const current = id ? state.transactions.find(item => item.id === id) : null;
-    if (current && hasLinkedRefund(current)) { showToast('返金と紐付いた取引は直接変更できません'); return; }
+    if (current && (hasLinkedRefund(current) || hasRefundDestination(current.id))) { showToast('返金と紐付いた取引は直接変更できません'); return; }
     const next = createTransaction({
       id: id || '', kind: $('#event-kind').value, amount: Number($('#event-amount').value || 0), dueDate: $('#event-date').value,
       transactionDate: eventUsageDateValue(), transactionAt: current?.transactionAt || '', absorbedBy: current?.absorbedBy || '', dateEstimated: false,
@@ -3196,6 +3203,10 @@
     return Boolean(transaction.refundEvidence || state.transactions.some(item => item.refundEvidence?.targetId === transaction.id));
   }
 
+  function hasRefundDestination(id) {
+    return state.transactions.some(item => item.refundEvidence?.destinationStatementId === id);
+  }
+
   function settleEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction || transaction.status !== 'planned') return;
@@ -3224,7 +3235,7 @@
   function deleteEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction) return;
-    if (hasLinkedRefund(transaction)) { showToast('返金と紐付いた取引は直接削除できません'); return; }
+    if (hasLinkedRefund(transaction) || hasRefundDestination(id)) { showToast('返金と紐付いた取引は直接削除できません'); return; }
     const salaryNote = transaction.salaryPaymentMonth ? '\nこの月の給与は、シフトから作り直しません（シフト画面から戻せます）。' : '';
     if (!window.confirm(`${transaction.memo || kindMeta(transaction.kind).label}を削除しますか？${transaction.status === 'settled' ? '\n確定済みのため、残高も元に戻します。' : ''}${salaryNote}`)) return;
     if (transaction.status === 'settled') revertEffect(transaction);
@@ -3565,7 +3576,8 @@
         date: row?.querySelector('[data-candidate-field="date"]')?.value || '',
         merchant: row?.querySelector('[data-candidate-field="merchant"]')?.value || '',
         entryType: row?.querySelector('[data-candidate-field="entryType"]')?.value || '',
-        refundTarget: row?.querySelector('[data-refund-target]')?.value || ''
+        refundTarget: row?.querySelector('[data-refund-target]')?.value || '',
+        destinationStatementId: row?.querySelector('[data-refund-statement]')?.value || ''
       });
       return;
     }
