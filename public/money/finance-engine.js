@@ -732,6 +732,25 @@
    * 旧アプリでは引落予定日だけを登録していたため、これらは既に発生した利用として扱い、
    * 安全側（控除する側）に倒す。利用日はユーザーがあとから修正できる。
    */
+  function capUnsettledCardCredits(entries, cards = [], options = {}) {
+    if (!entries.some(item => item.refundEvidence?.creditDate)) return entries;
+    const cardMap = new Map(cards.map(card => [card.id, card]));
+    const available = new Map();
+    const keyOf = item => JSON.stringify([item.cardId, item.dueDate, cardBillingCycleOf(item, cardMap.get(item.cardId), options)]);
+    for (const item of entries) {
+      if (item.kind !== 'payment' || !item.cardId || item.refundEvidence?.creditDate) continue;
+      const key = keyOf(item);
+      available.set(key, (available.get(key) || 0) + Number(item.amount || 0));
+    }
+    return entries.map(item => {
+      if (!item.refundEvidence?.creditDate) return item;
+      const key = keyOf(item);
+      const credit = Math.min(Math.max(0, available.get(key) || 0), Math.max(0, -item.amount));
+      available.set(key, (available.get(key) || 0) - credit);
+      return { ...item, amount: credit ? -credit : 0 };
+    });
+  }
+
   function calculateUnpaidCardUsage(transactions = [], today, options = {}) {
     const deadline = options.deadline || '';
     const groups = groupCardCharges(transactions, options.cards || [], options);
@@ -739,7 +758,7 @@
     // 請求サイクルごとに採用された取引だけを、未払い債務として集める。
     //  請求総額 : 締め済みで金額が確定しているため、登録時点から引落日まで控除する
     //  明細     : 実際に利用済みのものだけを控除する（未来の利用予定は含めない）
-    const items = [];
+    let items = [];
     groups.forEach(group => {
       group.adopted.forEach(item => {
         if (item.isVirtual === true && item.recurringPlanId) return;
@@ -749,6 +768,7 @@
         if (usedOn && usedOn <= today) items.push(item);
       });
     });
+    items = capUnsettledCardCredits(items, options.cards || [], options);
 
     const sum = list => list.reduce((total, item) => total + Number(item.amount || 0), 0);
     const withinDeadline = deadline ? items.filter(item => item.dueDate && item.dueDate <= deadline) : items;
@@ -947,13 +967,13 @@
     const cardGroups = groupCardCharges([...(input.transactions || []), ...virtualTransactions], input.cards || [], holidayOptions);
     const suppressedIds = new Set(cardGroups.flatMap(group => group.suppressed).map(item => item.id));
 
-    const realTransactions = (input.transactions || []).filter(transaction => transaction
+    const realTransactions = capUnsettledCardCredits((input.transactions || []).filter(transaction => transaction
       && transaction.status === 'planned'
       && transaction.affectsForecast !== false
       && !suppressedIds.has(transaction.id)
       && (includeSalary || !transaction.salaryPaymentMonth)
       && transaction.dueDate >= today
-      && transaction.dueDate <= endDate);
+      && transaction.dueDate <= endDate), input.cards || [], holidayOptions);
 
     // 記録に給与の取引がある月は、その取引（realTransactions）で数える。裏での見込みは足さない
     const salaryEvents = includeSalary
@@ -2071,7 +2091,7 @@
     japaneseHolidayName, isJapaneseHoliday, isJapaneseBusinessDay,
     previousBusinessDay, nextBusinessDay, holidaysForYear,
     // カード
-    calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills,
+    calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills, capUnsettledCardCredits,
     closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement,
     // 記録の集計
     summarizePeriod,

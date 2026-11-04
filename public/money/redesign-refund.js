@@ -24,7 +24,7 @@
     if (target.billStatus !== 'estimate') return { status: 'review', reason: 'billing_period_unresolved' };
     return { status: 'ready', plan: { noticeId: notice.id, targetId: target.id, cardId: notice.cardId, type: notice.type, amount: notice.amount, newRefundedAmount: target.refundedAmount + notice.amount, remainingAmount: remaining - notice.amount } };
   }
-  function preparePendingRefund({ state, candidate, targetId, amount, confirmed, destinationStatementId = '' }) {
+  function preparePendingRefund({ state, candidate, targetId, amount, confirmed, destinationStatementId = '', creditDate = '' }) {
     if (!state || !Array.isArray(state.transactions) || !Array.isArray(state.cards)
       || !candidate?.id || !['pending', 'needs_review'].includes(candidate.status)) {
       return { status: 'review', reason: 'missing_evidence' };
@@ -32,7 +32,7 @@
     const matches = state.transactions.filter(item => item.id === targetId);
     const target = matches[0];
     if (matches.length !== 1 || target.kind !== 'payment' || target.entryType !== 'itemized'
-      || !(destinationStatementId ? ['planned', 'settled', 'absorbed'] : ['planned']).includes(target.status)
+      || !(destinationStatementId || creditDate ? ['planned', 'settled', 'absorbed'] : ['planned']).includes(target.status)
       || target.affectsForecast === false || target.dateEstimated === true) {
       return { status: 'review', reason: 'target_not_unique' };
     }
@@ -41,6 +41,18 @@
     const holidayOptions = { overrides: state.settings?.holidayOverrides || {} };
     const cycle = engine.cardBillingCycleOf(target, card, holidayOptions);
     if (!cycle || !target.dueDate) return { status: 'review', reason: 'billing_period_unresolved' };
+    let creditCycle = cycle;
+    if (creditDate) {
+      const date = new Date(creditDate + 'T00:00:00Z');
+      if (destinationStatementId || !/^\d{4}-\d{2}-\d{2}$/.test(creditDate) || !Number.isFinite(date.getTime())
+        || date.toISOString().slice(0, 10) !== creditDate || creditDate < target.transactionDate) {
+        return { status: 'review', reason: 'billing_period_unresolved' };
+      }
+      creditCycle = engine.cardBillingCycleOf({ ...target, transactionDate: creditDate }, card, holidayOptions);
+      if (!creditCycle || creditCycle < cycle || (creditCycle === cycle && target.status !== 'planned')) {
+        return { status: 'review', reason: 'billing_period_unresolved' };
+      }
+    }
     let destination, destinationCycle;
     if (destinationStatementId) {
       const statements = state.transactions.filter(item => item.id === destinationStatementId);
@@ -54,10 +66,10 @@
     }
     const hasStatement = state.transactions.some(item => item.kind === 'payment' && item.entryType === 'statement'
       && item.cardId === card.id && ['planned', 'settled'].includes(item.status)
-      && engine.cardBillingCycleOf(item, card, holidayOptions) === cycle);
+      && engine.cardBillingCycleOf(item, card, holidayOptions) === creditCycle);
     const hasUnlinkedRefund = state.transactions.some(item => item.kind === 'payment' && item.amount < 0
       && item.cardId === card.id && item.status !== 'cancelled' && !item.refundEvidence
-      && engine.cardBillingCycleOf(item, card, holidayOptions) === cycle);
+      && [cycle, creditCycle].includes(engine.cardBillingCycleOf(item, card, holidayOptions)));
     if (hasUnlinkedRefund) return { status: 'review', reason: 'notice_conflict' };
     const previous = state.transactions.filter(item => item.refundEvidence?.targetId === targetId && item.status !== 'cancelled');
     const conflictingNotice = state.transactions.some(item => item.id === 'mail_' + candidate.id
@@ -74,9 +86,12 @@
     return { ...result, transaction: {
       id: 'mail_' + candidate.id, kind: 'payment', amount: -amount, cardId: card.id, sourceAccountId: card.accountId,
       entryType: 'itemized', status: destination ? 'absorbed' : 'planned', origin: 'mail-import',
-      dueDate: destination?.dueDate || target.dueDate, absorbedBy: destination?.id || '',
-      transactionDate: target.transactionDate, refundEvidence: { targetId, noticeId: candidate.id, type: candidate.type,
-        cycle, fingerprint: candidate.fingerprint || '', ...(destination ? { destinationStatementId, destinationCycle } : {}) }
+      dueDate: destination?.dueDate || (creditDate && creditCycle !== cycle
+        ? engine.calculateCardPaymentDate(creditDate, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions) : target.dueDate),
+      absorbedBy: destination?.id || '', transactionDate: creditDate || target.transactionDate,
+      refundEvidence: { targetId, noticeId: candidate.id, type: candidate.type,
+        cycle, fingerprint: candidate.fingerprint || '', ...(destination ? { destinationStatementId, destinationCycle } : {}),
+        ...(creditDate ? { creditDate, destinationCycle: creditCycle } : {}) }
     } };
   }
   function matchesPreparedRefund(transaction, prepared) {

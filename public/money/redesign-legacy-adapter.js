@@ -92,7 +92,7 @@
           const prepared = refunds().preparePendingRefund({
             state: { ...state, transactions: state.transactions.filter(entry => entry.id !== item.id) },
             candidate: { id: proof.noticeId, type: proof.type, status: 'pending', fingerprint: proof.fingerprint },
-            targetId: proof.targetId, amount: -item.amount, confirmed: true
+            targetId: proof.targetId, amount: -item.amount, confirmed: true, creditDate: proof.creditDate
           });
           if (refunds().matchesPreparedRefund(item, prepared)) {
             cardTransactions.push(item);
@@ -129,7 +129,11 @@
       issues.push({ type: 'card_name_missing', cardId: card.id });
       return { ...card, name: card.id };
     });
-    const groups = engine.groupCardCharges(cardTransactions, namedCards, holidayOptions);
+    const capped = engine.capUnsettledCardCredits(cardTransactions, namedCards, holidayOptions);
+    if (capped.some((item, index) => item.amount !== cardTransactions[index].amount)) {
+      issues.push({ type: 'card_credit_carryover_unverified' });
+    }
+    const groups = engine.groupCardCharges(capped, namedCards, holidayOptions);
     for (const group of groups) {
       if (group.statements.length > 1) throw new Error('同じ請求期間に複数の総額があります');
       const entries = [...group.adopted, ...group.suppressed];

@@ -650,7 +650,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=67" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=68" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1220,7 +1220,8 @@
     }).map(item => `<option value="${esc(item.id)}">${esc(cardName(item.cardId))}・${esc(item.dueDate)}・${formatAbsoluteYen(item.amount)}</option>`).join('');
     return `<label>元のカード利用<select data-refund-target><option value="">選択してください</option>${options}</select></label>
       <label>返金が含まれる請求<select data-refund-statement><option value="">元の利用と同じ未確定の請求に反映</option>${statements}</select></label>
-      <small>カード会社の確認済み総額に返金が含まれている場合は、その請求を選びます。</small>`;
+      <label>カード会社の返金計上日<input type="date" data-refund-credit-date></label>
+      <small>別の請求期間で総額が未登録なら、明細にある計上日を入力します。確認済みの総額に含まれている場合は請求だけを選びます。</small>`;
   }
 
   async function acceptPendingRefund(candidate, edits) {
@@ -1230,17 +1231,17 @@
       return;
     }
     try {
-      const result = window.RedesignRefund.preparePendingRefund({ state, candidate, targetId: edits.refundTarget, amount, confirmed: true, destinationStatementId: edits.destinationStatementId });
+      const result = window.RedesignRefund.preparePendingRefund({ state, candidate, targetId: edits.refundTarget, amount, confirmed: true, destinationStatementId: edits.destinationStatementId, creditDate: edits.creditDate });
       if (result.status !== 'ready') {
         showToast('返金額・元の利用・反映先の請求期間を確認してください');
         return;
       }
       const row = result.transaction;
       if (!window.confirm(cardName(row.cardId) + 'の元の利用に ' + formatAbsoluteYen(amount)
-        + (edits.destinationStatementId ? ' の返金が ' + formatDate(row.dueDate, true) + ' の確認済み請求総額に含まれていることを、カード会社の明細で確認しましたか？' : ' を返金し、同じ未確定の請求期間に反映することをカード会社の明細で確認しましたか？'))) return;
+        + (edits.destinationStatementId ? ' の返金が ' + formatDate(row.dueDate, true) + ' の確認済み請求総額に含まれていることを、カード会社の明細で確認しましたか？' : edits.creditDate ? ' の返金計上日が ' + formatDate(edits.creditDate, true) + ' であることをカード会社の明細で確認しましたか？' : ' を返金し、同じ未確定の請求期間に反映することをカード会社の明細で確認しましたか？'))) return;
       state.transactions.push(createTransaction({ ...row, memo: edits.merchant || candidate.merchant || 'カード返金' }));
       const patch = { ...stripCandidate(candidate), amount, status: 'accepted' };
-      if (persist({ id: candidate.id, patch, refundTarget: edits.refundTarget, destinationStatementId: edits.destinationStatementId || '' }) === false) throw new Error('保存を開始できませんでした');
+      if (persist({ id: candidate.id, patch, refundTarget: edits.refundTarget, destinationStatementId: edits.destinationStatementId || '', creditDate: edits.creditDate || '' }) === false) throw new Error('保存を開始できませんでした');
       await cloud?.flushPendingSave?.();
       showToast('返金を元の利用に紐付けました');
     } catch (error) { showToast(error.message || '返金を同期できませんでした'); }
@@ -3577,7 +3578,8 @@
         merchant: row?.querySelector('[data-candidate-field="merchant"]')?.value || '',
         entryType: row?.querySelector('[data-candidate-field="entryType"]')?.value || '',
         refundTarget: row?.querySelector('[data-refund-target]')?.value || '',
-        destinationStatementId: row?.querySelector('[data-refund-statement]')?.value || ''
+        destinationStatementId: row?.querySelector('[data-refund-statement]')?.value || '',
+        creditDate: row?.querySelector('[data-refund-credit-date]')?.value || ''
       });
       return;
     }

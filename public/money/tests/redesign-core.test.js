@@ -519,6 +519,21 @@ test('確認済みの翌月請求に含まれる返金は総額や残高を変�
   state.transactions.push(result.transaction);
   assert.deepEqual(buildLegacyScenario(state, '2026-11-30', '2026-12-31'), before);
 });
+test('計上日がある翌月の返金は同じ請求だけ減らし、余りを銀行入金にしない', () => {
+  const state = legacyFixture();
+  const original = { ...state.transactions[1], sourceAccountId: 'a', status: 'absorbed' };
+  state.transactions = [original];
+  const prepared = preparePendingRefund({ state, candidate: { id: 'future-credit', status: 'pending', type: 'refund' },
+    targetId: original.id, amount: 1000, confirmed: true, creditDate: '2026-11-20' });
+  assert.equal(prepared.status, 'ready');
+  assert.equal(prepared.transaction.dueDate, '2027-01-12');
+  state.transactions.push(prepared.transaction);
+  const preview = buildLegacyScenario(state, '2026-11-20', '2027-02-17');
+  assert.equal(preview.scenario.events.find(item => item.cardPayment).additionalPossible, 0);
+  assert.ok(preview.issues.some(item => item.type === 'card_credit_carryover_unverified'));
+  state.transactions.push({ ...original, id: 'later-purchase', amount: 1500, status: 'planned', transactionDate: '2026-11-20', dueDate: '2027-01-12' });
+  assert.equal(buildLegacyScenario(state, '2026-11-20', '2027-02-17').scenario.events.find(item => item.cardPayment).additionalPossible, 500);
+});
 test('返金通知は対象不明・カード違い・返金超過を自動処理しない', () => {
   const purchase = { id: 'a', cardId: 'jcb', amount: 1000, refundedAmount: 300, billStatus: 'estimate' };
   const notice = { id: 'mail1', type: 'refund', cardId: 'jcb', amount: 400, amountConfirmed: true, targetConfirmed: true, targetId: 'a' };

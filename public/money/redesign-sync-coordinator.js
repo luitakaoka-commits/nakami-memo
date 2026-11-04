@@ -19,7 +19,7 @@
       const data = snapshot.data(), revision = data.revision === undefined ? 0 : data.revision;
       if (revision !== expectedRevision || canonical(data.state) !== baseText) throw new Error('他の端末で更新されました。未保存の変更はこの端末に保管しています。');
       if (data.state?.modelVersion !== undefined || data.state?.bills !== undefined) throw new Error('新形式の家計です。対応した画面で開いてください。');
-      const candidates = await Promise.all(acceptances.map(async ({ id, patch, refundTarget, destinationStatementId }) => {
+      const candidates = await Promise.all(acceptances.map(async ({ id, patch, refundTarget, destinationStatementId, creditDate }) => {
         const ref = candidateRef(id);
         const candidate = await transaction.get(ref);
         if (!candidate.exists() || !['pending', 'needs_review'].includes(candidate.data().status)) {
@@ -34,7 +34,7 @@
           if (!refundTarget) throw new Error('返金・取消は元の利用と返金先の請求を確認してください');
           const prepared = refunds.preparePendingRefund({
             state: { ...payload, transactions: payload.transactions.filter(item => item.id !== entry.id) },
-            candidate: { ...candidate.data(), id }, targetId: refundTarget, amount: patch.amount, confirmed: true, destinationStatementId
+            candidate: { ...candidate.data(), id }, targetId: refundTarget, amount: patch.amount, confirmed: true, destinationStatementId, creditDate
           });
           if (!refunds.matchesPreparedRefund(entry, prepared)) throw new Error('返金・取消の保存条件が一致しません');
         } else if (entry.refundEvidence) throw new Error('返金・取消の通知が一致しません');

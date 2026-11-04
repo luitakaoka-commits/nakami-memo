@@ -1402,6 +1402,12 @@ const closeModals = page => page.evaluate(() => {
         return { status: item?.status, absorbedBy: item?.absorbedBy, amount: state.transactions.find(row => row.id === 'refund-statement').amount, balance: state.accounts[0].currentBalance };
       });
       assert(later.status === 'absorbed' && later.absorbedBy === 'refund-statement' && later.amount === 20000 && later.balance === balance, '別月の確認済み請求を二重に減額した');
+      await page.evaluate(() => window.__YORYOKU__.setImportCandidates([{ id: 'dated-refund-test', status: 'pending', type: 'refund', amount: 250, fingerprint: 'dated-refund-test' }]));
+      await page.locator('[data-refund-target]').selectOption('refund-purchase');
+      await page.locator('[data-refund-credit-date]').fill('2026-12-01');
+      await page.locator('[data-action="accept-candidate"][data-id="dated-refund-test"]').click();
+      const dated = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_dated-refund-test'));
+      assert(dated?.status === 'planned' && dated.amount === -250 && dated.dueDate === '2027-01-12', '計上日から別月の引落日を求めていない');
     } finally {
       await page.evaluate(() => { const api = window.__YORYOKU__; Object.assign(api.getState(), window.__TEST_REFUND_STATE__); api.setImportCandidates([]); });
     }
