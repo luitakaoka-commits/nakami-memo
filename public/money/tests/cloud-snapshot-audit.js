@@ -24,7 +24,7 @@ function decode(value) {
   throw new Error('正確に比較できないFirestoreの値があります');
 }
 
-function audit(bundle, prior) {
+function audit(bundle, prior, recovery) {
   compareRestored(bundle, bundle);
   const state = decode(bundle.workspace.fields?.state?.mapValue ? bundle.workspace.fields.state : null);
   const groups = ['accounts', 'cards', 'transactions', 'workEntries', 'recurringPlans'];
@@ -76,14 +76,42 @@ function audit(bundle, prior) {
   candidates.transactionsWithoutCandidate = state.transactions.filter(item => item.id.startsWith('mail_') && !candidateIds.has(item.id.slice(5))).length;
   const receiptIds = new Set(bundle.collections.receipts.documents.map(item => item.id));
   const receiptItemsWithoutReceipt = bundle.collections.receiptItems.documents.filter(({ data }) => !receiptIds.has(data.fields?.receiptId?.stringValue)).length;
-  return { counts, differences: prior ? differences : null, candidates, receiptItemsWithoutReceipt, collections: Object.fromEntries(Object.entries(bundle.collections).map(([name, data]) => [name, data.documents.length])) };
+  return { counts, differences: prior ? differences : null, candidates, receiptItemsWithoutReceipt, collections: Object.fromEntries(Object.entries(bundle.collections).map(([name, data]) => [name, data.documents.length])),
+    ...(recovery ? { recovery: auditRecovery(bundle, transactions, recovery) } : {}) };
+}
+
+function auditRecovery(bundle, transactions, recovery) {
+  if (recovery.format !== 'money-unsaved-recovery-v1' || recovery.workspaceId !== bundle.workspaceId
+    || !Array.isArray(recovery.snapshots)) throw new Error('同じ家計の退避ファイルを指定してください');
+  const cloud = new Map(bundle.collections.importCandidates.documents.map(({ id, data }) => [id, data.fields || {}]));
+  const counts = { confirmed: 0, stillPending: 0, conflict: 0, snapshotsWithoutCandidateDetails: 0 };
+  const drafts = new Map();
+  for (const snapshot of recovery.snapshots) {
+    if (!Array.isArray(snapshot.acceptances)) { counts.snapshotsWithoutCandidateDetails++; continue; }
+    for (const action of snapshot.acceptances) {
+      if (typeof action?.id !== 'string' || !action.id || action.patch?.status !== 'accepted') throw new Error('退避した候補が不正です');
+      const id = 'mail_' + action.id;
+      const transaction = snapshot.state?.transactions?.find(item => item.id === id);
+      const previous = drafts.get(action.id);
+      if (!previous) drafts.set(action.id, { action, transaction, conflict: false });
+      else if (!isDeepStrictEqual(previous.action, action) || !isDeepStrictEqual(previous.transaction, transaction)) previous.conflict = true;
+    }
+  }
+  for (const [id, draft] of drafts) {
+    const actual = transactions.get('mail_' + id), fields = cloud.get(id), status = fields?.status?.stringValue;
+    const patchMatches = status === 'accepted' && Object.entries(draft.action.patch).every(([key, value]) => fields[key] && isDeepStrictEqual(decode(fields[key]), value));
+    if (!draft.conflict && draft.transaction && patchMatches && isDeepStrictEqual(draft.transaction, actual)) counts.confirmed++;
+    else if (!draft.conflict && draft.transaction && ['pending', 'needs_review'].includes(status) && !actual) counts.stillPending++;
+    else counts.conflict++;
+  }
+  return counts;
 }
 
 if (require.main === module) {
   try {
     const read = path => JSON.parse(fs.readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
-    const [, , source, earlier] = process.argv;
-    console.log(JSON.stringify({ suite: 'cloud-snapshot-audit', ...audit(read(source), earlier ? read(earlier) : null) }));
+    const [, , source, earlier, recovery] = process.argv;
+    console.log(JSON.stringify({ suite: 'cloud-snapshot-audit', ...audit(read(source), earlier && earlier !== '-' ? read(earlier) : null, recovery ? read(recovery) : null) }));
   } catch (_) {
     console.error(JSON.stringify({ suite: 'cloud-snapshot-audit', status: 'invalid_input' }));
     process.exitCode = 1;
