@@ -1219,7 +1219,7 @@
       - nisaTotal
       - defenseLine;
 
-    const days = daysBetween(today, deadline);
+    const days = daysBetween(today, deadline) + (input.inclusiveDeadline === true ? 1 : 0);
     const dailyDays = Math.max(days, 1);
     const daily = total >= 0 ? Math.floor(total / dailyDays) : Math.ceil(total / dailyDays);
 

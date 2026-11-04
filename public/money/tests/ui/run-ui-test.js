@@ -1299,6 +1299,35 @@ const closeModals = page => page.evaluate(() => {
       await page.evaluate(() => Object.assign(window.__YORYOKU__.getState(), window.__TEST_DEBIT_STATE__));
     }
   });
+  await record('card_closing_deadline_settings', async () => {
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_DEADLINE_CARDS__ = state.cards;
+      state.cards = [
+        { id: 'deadline-early', name: '先に締まるカード', closingDay: 10 },
+        { id: 'deadline-late', name: '後で締まるカード', closingDay: 15 }
+      ];
+      api.setPage('settings');
+    });
+    const form = page.locator('#settings-form');
+    try {
+      await form.locator('#settings-deadline').selectOption('card-closing');
+      await form.locator('[name="deadline-card"]').first().check();
+      await form.locator('[name="deadline-card"]').last().check();
+      await form.locator('[type="submit"]').click();
+      const result = await page.evaluate(() => {
+        const api = window.__YORYOKU__;
+        return { deadline: api.getNextDeadline(), days: api.spendableAmount().dailyDays, ids: api.getState().settings.deadlineCardIds };
+      });
+      assert(result.deadline === '2026-09-10' && result.days === 9 && result.ids.length === 2, '選択カードの最早締め日または日数が不正');
+    } finally {
+      await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        state.cards = window.__TEST_DEADLINE_CARDS__;
+        state.settings.deadlineMode = 'legacy14'; state.settings.deadlineCardIds = [];
+      });
+    }
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

@@ -5,7 +5,7 @@
 //   下の fetch はキャッシュ優先なので、上げないと一度開いた端末には古いファイルが出続ける。
 //   22 のまま finance-engine.js を2回直していて（09-09 名寄せ、09-13 部門コード）、スマホに届いていなかった。
 //   tests/sw-version.test.js が、中身が変わったのに上げ忘れていないかを確かめる。
-const VERSION = '58';
+const VERSION = '59';
 const CACHE = `okane-v${VERSION}`;
 // index.html が読み込むURL（クエリ付き）と完全に一致させる。
 // クエリが1文字でも違うと別URL扱いになり、プリキャッシュがヒットしない。
@@ -22,6 +22,7 @@ const ASSETS = [
   `./redesign-backup-read.js?v=${VERSION}`,
   `./redesign-legacy-adapter.js?v=${VERSION}`,
   `./redesign-readiness.js?v=${VERSION}`,
+  `./redesign-deadline.js?v=${VERSION}`,
   `./icons/app-icon.svg?v=${VERSION}`
 ];
 // addAll は1件でも失敗すると全体が失敗し、Service Worker が入らなくなる。

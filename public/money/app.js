@@ -101,10 +101,8 @@
       recurringPlans: [],
       settings: {
         defenseLine: 150000,
-        // 判定期限のモード。現在は 'legacy14'（毎月14日締め）しか選択肢がなく、
-        // getNextDeadline() は14日を直接使っている。つまり保存はされるが、値を変えても効かない。
-        // 別の締め日を足すときは getNextDeadline() がこの値を読むように直すこと。
         deadlineMode: 'legacy14',
+        deadlineCardIds: [],
         cashflowHorizonDays: 90,
         // ふりかえりを始める曜日（0=日曜）。この曜日以降、対象が残っている間はホームに案内を出す。
         reviewDayOfWeek: 0,
@@ -460,11 +458,17 @@
 
   const daysBetween = (from, to) => finance.daysBetween(from, to);
 
-  /**
-   * 「今使える金額」の判定期限。毎月14日締め。
-   * settings.deadlineMode は現状この関数から読んでいない（選択肢が 'legacy14' の1つだけのため）。
-   */
+  function selectedDeadlinePeriod(baseDate = today()) {
+    if (state.settings.deadlineMode !== 'card-closing') return null;
+    const selected = Array.isArray(state.settings.deadlineCardIds) ? state.settings.deadlineCardIds : [];
+    const selectedCardIds = state.cards.filter(card => selected.includes(card.id)).map(card => card.id);
+    if (!selectedCardIds.length) return null;
+    return window.RedesignDeadline.periodForCards({ today: baseDate, cards: state.cards, selectedCardIds });
+  }
+
   function getNextDeadline(baseDate = today()) {
+    const period = selectedDeadlinePeriod(baseDate);
+    if (period) return period.deadline;
     const date = new Date(`${baseDate}T12:00:00`);
     const year = date.getFullYear();
     const month = date.getMonth();
@@ -642,7 +646,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=58" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=59" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -766,6 +770,7 @@
     return {
       today: today(),
       deadline: getNextDeadline(),
+      inclusiveDeadline: Boolean(selectedDeadlinePeriod()),
       horizonDays: Number(state.settings.cashflowHorizonDays || 90),
       accounts: state.accounts,
       cards: state.cards,
@@ -2608,7 +2613,7 @@
       <div class="page-heading"><div><span class="eyebrow">設定</span><h1>設定</h1></div></div>
       <div class="settings-grid"><div class="stack">
         <section class="settings-card"><h2>メールからの取込候補</h2><p>カード利用のお知らせメールから作られた候補です。取り込むまで計算には反映されません。</p><div class="settings-inline"><strong>${pendingCandidates().length}件が未確認</strong><button class="button button-quiet button-small" data-page="imports">確認する</button></div></section>
-        <section class="settings-card"><h2>計算設定</h2><p>今使える金額の計算に使う基準です。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>毎月14日締め</option></select></label><label><span>支払い能力チェックの期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日先まで</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日先まで</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日先まで</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日先まで</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
+        <section class="settings-card"><h2>計算設定</h2><p>今使える金額の計算に使う基準です。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>選んだカードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<small>複数選んだ場合は一番早い締め日を使います。対象カードがなくなった場合は毎月14日が期限になります。</small><label><span>支払い能力チェックの期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日先まで</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日先まで</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日先まで</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日先まで</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
         <section class="settings-card"><h2>給与設定</h2><p>勤務月は1日から末日までの暦月、支給は翌月の給料日です。給料日が土日祝のときは前営業日へ繰り上げます。</p><form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><p class="form-note">同じ給与を通常の「収入」にも登録すると二重計算になるため、どちらか一方を使ってください。</p><button class="button button-primary" type="submit">給与設定を保存</button></form></section>
         ${renderRecurringSettings()}
         ${renderAliasSettings()}
@@ -3430,7 +3435,15 @@
       if (event.target.id === 'workspace-name-form') { renameCloudWorkspace(event); return; }
       if (event.target.id === 'wage-settings-form') { saveWageSettings(event); return; }
       if (event.target.id !== 'settings-form') return;
-      event.preventDefault(); state.settings.defenseLine = Number($('#settings-defense').value || 0); state.settings.deadlineMode = $('#settings-deadline').value; state.settings.cashflowHorizonDays = Number($('#settings-horizon').value || 90); state.settings.reviewDayOfWeek = Math.min(Math.max(Number($('#settings-review-day').value || 0), 0), 6); persist(); renderPage(); showToast('設定を保存しました');
+      event.preventDefault();
+      const deadlineMode = $('#settings-deadline').value;
+      const deadlineCardIds = new FormData(event.target).getAll('deadline-card');
+      if (deadlineMode === 'card-closing' && !deadlineCardIds.length) {
+        showToast('期限の基準にするカードを選んでください');
+        return;
+      }
+      state.settings.deadlineCardIds = deadlineCardIds;
+      state.settings.defenseLine = Number($('#settings-defense').value || 0); state.settings.deadlineMode = $('#settings-deadline').value; state.settings.cashflowHorizonDays = Number($('#settings-horizon').value || 90); state.settings.reviewDayOfWeek = Math.min(Math.max(Number($('#settings-review-day').value || 0), 0), 6); persist(); renderPage(); showToast('設定を保存しました');
     });
     $('#import-file').addEventListener('change', event => importData(event.target.files[0]));
     document.addEventListener('change', event => {
