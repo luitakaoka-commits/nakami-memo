@@ -98,9 +98,19 @@ try {
   const partial = await read(interruptedId, interruptedRoot.updateTime);
   const inspection = planner.inspectRestore({ snapshot, target: partial, targetId: interruptedId, uid: 'restore-user' });
   assert.equal(inspection.status, 'incomplete'); assert.equal(inspection.missingWrites.length, 4);
-  const resume = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes: inspection.missingWrites }) });
-  assert.equal(resume.ok, true);
-  const resumed = await read(interruptedId, (await resume.json()).commitTime);
+  const resume = receipt => executor.resumeRestore({
+    snapshot, receipt, uid: 'restore-user', readBack: read,
+    readCurrent: async id => read(id, new Date().toISOString()),
+    commitWrites: async writes => {
+      const response = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes }) });
+      if (!response.ok) throw new Error('再開できません');
+      return response.json();
+    }
+  });
+  assert.equal((await resume({ ...interrupted, rootVersion: snapshot.readTime })).status, 'conflict');
+  assert.equal((await resume(interrupted)).status, 'verified');
+  assert.equal((await resume(interrupted)).status, 'verified');
+  const resumed = await read(interruptedId, new Date().toISOString());
   cleanup.push(...names.map(name => `workspaces/${interruptedId}/${name}/one`));
   assert.equal(planner.inspectRestore({ snapshot, target: resumed, targetId: interruptedId, uid: 'restore-user' }).status, 'matches');
   const changedTarget = structuredClone(resumed);

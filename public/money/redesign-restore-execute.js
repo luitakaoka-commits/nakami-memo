@@ -15,12 +15,13 @@
       // 応答が失われた場合、親が作られたかどうか断定できない。
       return { status: 'root_uncertain', targetId };
     }
+    const rootVersion = commitTime;
     if (plan.childWrites.length) {
       try {
         const result = await commitWrites(plan.childWrites);
         commitTime = result?.commitTime;
       } catch (_) {
-        return { status: 'children_uncertain', targetId };
+        return { status: 'children_uncertain', targetId, rootVersion, sourceName: snapshot.workspace.name, sourceReadTime: snapshot.readTime };
       }
     }
     if (typeof commitTime !== 'string' || !commitTime) return { status: 'verification_required', targetId };
@@ -32,7 +33,35 @@
       return { status: 'verification_required', targetId };
     }
   }
-  const api = { executeRestore };
+  async function resumeRestore({ snapshot, receipt, uid, readCurrent, readBack, commitWrites }) {
+    if (receipt?.status !== 'children_uncertain' || typeof receipt.rootVersion !== 'string' || !receipt.rootVersion
+      || receipt.sourceName !== snapshot?.workspace?.name || receipt.sourceReadTime !== snapshot?.readTime
+      || ![readCurrent, readBack, commitWrites].every(fn => typeof fn === 'function')) throw new Error('復元の再開条件を確認してください');
+    const { targetId, rootVersion } = receipt;
+    const plan = planner.planRestore({ snapshot, targetId, uid });
+    let target;
+    try { target = await readCurrent(targetId); } catch (_) { return { status: 'verification_required', targetId }; }
+    if (target?.workspace?.createTime !== rootVersion) return { status: 'conflict', targetId };
+    const inspection = planner.inspectRestore({ snapshot, target, targetId, uid });
+    if (inspection.status === 'matches') return { status: 'verified', targetId };
+    // 明細は元の処理でも一括コミット。中途半端な件数なら別の更新を疑い停止する。
+    if (inspection.status !== 'incomplete' || inspection.missingWrites.length !== plan.childWrites.length
+      || target.workspace.updateTime !== rootVersion) return { status: 'conflict', targetId };
+    const guard = {
+      update: { name: target.workspace.name, fields: { updatedAt: target.workspace.fields.updatedAt } },
+      updateMask: { fieldPaths: ['updatedAt'] },
+      currentDocument: { updateTime: rootVersion }
+    };
+    try {
+      const result = await commitWrites([guard, ...inspection.missingWrites]);
+      const restored = await readBack(targetId, result.commitTime);
+      if (migration.compareRestored(snapshot, restored).matches) return { status: 'verified', targetId };
+    } catch (_) {
+      return receipt;
+    }
+    return { status: 'verification_required', targetId };
+  }
+  const api = { executeRestore, resumeRestore };
   if (node) module.exports = api;
   root.RedesignRestoreExecute = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);
