@@ -151,7 +151,9 @@
       const statement = group.statements[0];
       const amountConfirmed = !detailsOnly && statement.sourceAccountId === group.accountId
         && engine.hasConfirmedCardStatement(statement, group.billingCycle);
-      events.push({ id: `legacy-card:${group.key}`, date: dates.values().next().value, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed, additionalPossible: detailsOnly ? group.adoptedTotal : suppressedActual });
+      // 発行会社の確定総額を照合できた期間は、同じ期間の利用通知を追加請求にしない。
+      const additionalPossible = amountConfirmed ? 0 : detailsOnly ? group.adoptedTotal : suppressedActual;
+      events.push({ id: `legacy-card:${group.key}`, date: dates.values().next().value, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed, additionalPossible });
       if (detailsOnly) issues.push({ type: 'legacy_card_details_unverified', cardId: group.cardId, cycle: group.billingCycle });
       if (!amountConfirmed) issues.push({ type: 'card_group_unverified', cardId: group.cardId, cycle: group.billingCycle });
     }

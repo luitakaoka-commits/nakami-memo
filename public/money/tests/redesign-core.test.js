@@ -716,8 +716,10 @@ test('請求額の確認は元のカード・口座・金額にだけ有効', ()
   statement.statementEvidence = { source: 'issuer-manual', cardId: 'c', accountId: 'a', dueDate: '2026-11-10', amount: 20000, cycle: '2026-10', checkedAt: '2026-10-30T00:00:00Z' };
   const read = () => buildLegacyScenario(state, '2026-10-30', '2026-12-31').scenario.events.find(event => event.cardPayment);
   assert.equal(read().amountConfirmed, true);
+  assert.equal(read().additionalPossible, 0);
   statement.amount = 21000;
   assert.equal(read().amountConfirmed, false);
+  assert.equal(read().additionalPossible, 3000);
   assert.equal(state.accounts[0].currentBalance, 50000);
 });
 test('新形式の移行は確認済みの残高と請求の判定を保持する', () => {
