@@ -75,8 +75,9 @@
       if (!item || !item.id || ids.has(item.id)) throw new Error('旧取引の識別子が不正または重複しています');
       ids.add(item.id);
       if (!['planned', 'settled', 'cancelled', 'absorbed'].includes(item.status)) throw new Error('旧取引の状態が不明です');
-      if (item.status === 'settled' && !validDate(item.dueDate)) throw new Error('実行済み取引の日付を確認してください');
-      if (item.status === 'settled' && item.dueDate > today) throw new Error('未来の取引が実行済みです');
+      const settlementDate = item.debitEvidence?.date || item.dueDate;
+      if (item.status === 'settled' && !validDate(settlementDate)) throw new Error('実行済み取引の日付を確認してください');
+      if (item.status === 'settled' && settlementDate > today) throw new Error('未来の取引が実行済みです');
       if (item.status !== 'planned') continue;
       if (item.affectsForecast === false) { issues.push({ type: 'excluded_transaction', id: item.id }); continue; }
       if (!Number.isSafeInteger(item.amount)) throw new Error('旧取引の金額を確認してください');

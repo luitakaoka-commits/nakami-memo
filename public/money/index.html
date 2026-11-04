@@ -7,12 +7,12 @@
   <meta name="description" content="支払い・貯金・NISAを引いたあとに、今使える金額を確認するアプリ">
   <!-- 3アプリは「くらしノート」1つとしてインストールする。manifest は3アプリ共通のものを指す。 -->
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="icons/app-icon.svg?v=61" type="image/svg+xml">
+  <link rel="icon" href="icons/app-icon.svg?v=62" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icons/kurashi-note-apple-180.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="くらしノート">
-  <link rel="stylesheet" href="styles.css?v=61">
-  <link rel="stylesheet" href="tokens.css?v=61">
+  <link rel="stylesheet" href="styles.css?v=62">
+  <link rel="stylesheet" href="tokens.css?v=62">
   <title>お金管理</title>
 <link rel="stylesheet" href="../shared/app-switcher.css">
 </head>
@@ -21,7 +21,7 @@
 
   <div id="auth-screen" class="auth-screen" hidden>
     <div class="auth-panel">
-      <div class="auth-brand"><img src="icons/app-icon.svg?v=61" alt=""><strong>お金管理</strong></div>
+      <div class="auth-brand"><img src="icons/app-icon.svg?v=62" alt=""><strong>お金管理</strong></div>
       <div class="auth-lock" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></div>
       <h1>ログイン</h1>
       <div class="form-stack">
@@ -37,7 +37,7 @@
   <div id="app-shell" class="app-shell" hidden>
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="brand-mark"><img src="icons/app-icon.svg?v=61" alt=""></div>
+        <div class="brand-mark"><img src="icons/app-icon.svg?v=62" alt=""></div>
         <div>
           <strong>お金管理</strong>
           <span>家計と予定</span>
@@ -64,7 +64,7 @@
     <main class="main" id="main-content">
       <header class="topbar">
         <div class="topbar-start">
-          <div class="topbar-brand"><div class="brand-mark"><img src="icons/app-icon.svg?v=61" alt=""></div><strong>お金管理</strong></div>
+          <div class="topbar-brand"><div class="brand-mark"><img src="icons/app-icon.svg?v=62" alt=""></div><strong>お金管理</strong></div>
           <button class="icon-button menu-button" id="menu-button" aria-label="メニューを開く"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
           <div class="topbar-context">
             <div class="topbar-date" id="today-label"></div>
@@ -274,14 +274,29 @@
     </section>
   </div>
 
+  <div id="debit-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="debit-modal-title">
+      <div class="modal-header"><h2 id="debit-modal-title">銀行の引落を記録</h2></div>
+      <form id="debit-form" class="form-stack">
+        <input type="hidden" name="transactionId">
+        <p id="debit-summary"></p>
+        <label><span>実際の引落日</span><input type="date" name="date" required></label>
+        <label><span>銀行明細の引落額（円）</span><input type="number" name="amount" min="1" step="1" inputmode="numeric" required></label>
+        <label><span>このアプリの口座残高</span><select name="included" required><option value="">選択してください</option><option value="no">引落がまだ反映されていない</option><option value="yes">引落がすでに反映されている</option></select></label>
+        <div class="modal-actions"><button type="button" class="button button-quiet" data-close-modal="debit-modal">キャンセル</button><button type="submit" class="button button-primary">銀行明細を確認して保存</button></div>
+      </form>
+    </section>
+  </div>
+
   <input id="import-file" type="file" accept="application/json" hidden>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="finance-engine.js?v=61"></script>
-  <script>window.firebaseSyncReady = import('./firebase-sync.js?v=61').then(module => module.firebaseSync);</script>
-  <script src="redesign-legacy-adapter.js?v=61"></script>
-  <script src="redesign-readiness.js?v=61"></script>
-  <script src="redesign-deadline.js?v=61"></script>
-  <script src="app.js?v=61"></script>
+  <script src="finance-engine.js?v=62"></script>
+  <script>window.firebaseSyncReady = import('./firebase-sync.js?v=62').then(module => module.firebaseSync);</script>
+  <script src="redesign-legacy-adapter.js?v=62"></script>
+  <script src="redesign-readiness.js?v=62"></script>
+  <script src="redesign-deadline.js?v=62"></script>
+  <script src="redesign-bill-lifecycle.js?v=62"></script>
+  <script src="app.js?v=62"></script>
   <script type="module">
     /* 3アプリ共通の切り替えバー。app.js（IIFE）には手を入れず、ここだけで完結させる。 */
     import { mountAppSwitcher } from "../shared/app-switcher.js";

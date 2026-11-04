@@ -190,6 +190,7 @@
       recurringPlanId: source.recurringPlanId || '',
       ...(source.scheduledDate ? { scheduledDate: source.scheduledDate } : {}),
       ...(source.statementEvidence ? { statementEvidence: source.statementEvidence } : {}),
+      ...(source.debitEvidence ? { debitEvidence: source.debitEvidence } : {}),
       // シフトから作った給与の取引だけが持つ。どの支給月か（'YYYY-MM'）と、手で直したか（2026-09-15）
       salaryPaymentMonth: source.salaryPaymentMonth || '',
       salaryManual: source.salaryManual === true,
@@ -647,7 +648,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=61" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=62" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2969,6 +2970,7 @@
    * （「今使える金額」の集計も同じ関数を使うので、符号が食い違うことがない）
    */
   function applyEffect(transaction, sign = 1) {
+    if (transaction.debitEvidence?.balanceAlreadyIncludesDebit === true) return;
     finance.accountDeltasFor(transaction)
       .forEach(({ accountId, delta }) => adjustAccount(accountId, delta * sign));
   }
@@ -3056,6 +3058,17 @@
       const settleError = validateSettlement(next);
       if (settleError) { showToast(settleError); return; }
     }
+    if (next.status === 'settled' && current?.debitEvidence) {
+      if (!['kind', 'amount', 'dueDate', 'cardId', 'sourceAccountId', 'entryType'].every(key => next[key] === current[key])) {
+        showToast('引落記録の金額や口座を変更するには、先に未確定に戻してください');
+        return;
+      }
+      next.debitEvidence = current.debitEvidence;
+    }
+    if (next.status === 'settled' && current?.status === 'planned' && current.statementEvidence) {
+      showToast('引落を記録する操作から銀行明細を入力してください');
+      return;
+    }
     const wasSettled = current?.status === 'settled';
     const willSettle = next.status === 'settled';
     let absorbedCount = 0;
@@ -3100,9 +3113,54 @@
     renderPage();
   }
 
+  function openDebitForm(transaction) {
+    const form = $('#debit-form');
+    form.reset();
+    form.elements.namedItem('transactionId').value = transaction.id;
+    form.elements.namedItem('date').value = today();
+    $('#debit-summary').textContent = cardName(transaction.cardId) + '・確認済み請求額 ' + formatAbsoluteYen(transaction.amount);
+    $('#debit-modal').hidden = false;
+    form.elements.namedItem('amount').focus();
+  }
+
+  async function saveDebit(event) {
+    event.preventDefault();
+    const fields = new FormData(event.target);
+    const transaction = state.transactions.find(item => item.id === fields.get('transactionId'));
+    if (transaction?.status !== 'planned') { closeModal('debit-modal'); return; }
+    const card = creditCard(transaction.cardId);
+    const bank = account(transaction.sourceAccountId);
+    const included = fields.get('included');
+    try {
+      if (!card || !bank || card.accountId !== bank.id || !['yes', 'no'].includes(included)) throw new Error('引落口座と残高の反映状況を確認してください');
+      const overlap = validateSettlement(transaction);
+      if (overlap) throw new Error(overlap);
+      const result = window.RedesignBillLifecycle.recordDebit({
+        account: { id: bank.id, balance: bank.currentBalance, revision: 0 },
+        bill: { id: transaction.id, accountId: bank.id, amount: transaction.amount, status: transaction.status,
+          amountConfirmed: finance.hasConfirmedCardStatement(transaction, finance.cardBillingCycleOf(transaction, card, holidayOptions())) }
+      }, {
+        operationId: 'bank-debit:' + transaction.id, amount: Number(fields.get('amount')), date: fields.get('date'), today: today(),
+        bankConfirmed: true, balanceAlreadyIncludesDebit: included === 'yes', expectedRevision: 0
+      });
+      bank.currentBalance = result.account.balance;
+      transaction.status = result.bill.status;
+      transaction.debitEvidence = result.bill.settlement;
+      transaction.settledAt = result.bill.settlement.date;
+      transaction.updatedAt = nowIso();
+      absorbStatementDetails(transaction);
+      closeModal('debit-modal');
+      if (persist() === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast('引落を記録しました');
+    } catch (error) { showToast(error.message); }
+    renderPage();
+  }
+
   function settleEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction || transaction.status !== 'planned') return;
+    if (transaction.statementEvidence) { openDebitForm(transaction); return; }
     // 給与の見込みはシフトからの計算なので、実際の支給額と違うことが多い。
     // そのまま確定させず、確定済みにした編集画面を開いて額を直してもらう（2026-09-15）
     if (transaction.salaryPaymentMonth) { openEventModal(id, transaction.kind, 'settled'); return; }
@@ -3489,6 +3547,7 @@
     $('#card-form').addEventListener('submit', saveCard);
     $('#work-form').addEventListener('submit', saveWork);
     document.addEventListener('submit', event => {
+      if (event.target.id === 'debit-form') { void saveDebit(event); return; }
       if (event.target.id === 'recurring-plan-form') { void saveRecurringPlan(event); return; }
       if (event.target.id === 'receipt-form') { saveReceiptForm(event); return; }
       if (event.target.id === 'share-member-form') { addCloudMember(event); return; }

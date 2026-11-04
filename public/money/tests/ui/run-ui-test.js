@@ -595,6 +595,15 @@ const closeModals = page => page.evaluate(() => {
     });
     assert(confirmed.balance === before && confirmed.status === 'planned' && confirmed.evidence.amount === 20000, '請求額の確認だけで残高または引落状態が変わった');
     await page.click('[data-action="settle-event"][data-id="dx-st"]');
+    const debit = page.locator('#debit-form');
+    await debit.locator('[name=amount]').fill('19999');
+    await debit.locator('[name=included]').selectOption('no');
+    await debit.locator('[type=submit]').click();
+    await page.getByText('請求額と実際の引落額を確認してください', { exact: true }).waitFor();
+    const rejected = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(item => item.id === 'a1').currentBalance);
+    assert(rejected === before, '請求額と不一致の引落で残高が変わった');
+    await debit.locator('[name=amount]').fill('20000');
+    await debit.locator('[type=submit]').click();
     await page.waitForTimeout(400);
 
     const after = await page.evaluate(() => {
