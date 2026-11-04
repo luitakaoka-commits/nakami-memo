@@ -30,7 +30,7 @@ async function request(path, options = {}) {
   return response.status === 204 ? {} : response.json();
 }
 async function write(path, content) { return request(path, { method: 'PATCH', body: JSON.stringify({ fields: content }) }); }
-async function read(workspaceId, time) {
+async function read(workspaceId, time, afterRootRead) {
   return backup.readSnapshot({ projectId: 'demo-kurashi', workspaceId, readTime: time, getJson: async url => {
     const parsed = new URL(url);
     // エミュレーターのRESTはRFC 3339のreadTimeを誤解析するため、
@@ -45,6 +45,7 @@ async function read(workspaceId, time) {
     const response = await fetch(local, { headers });
     const body = await response.json();
     if (!response.ok) throw new Error(`模擬Firestoreの読み取り ${response.status}: ${body.error?.message || '不明'}`);
+    if (afterRootRead && parsed.pathname.endsWith(`/workspaces/${workspaceId}`)) await afterRootRead();
     return body;
   } });
 }
@@ -63,10 +64,18 @@ try {
   assert.equal((await fetch(`${base}/workspaces/${sourceId}`, { headers: outsiderHeaders })).status, 403);
   assert.equal((await fetch(`${base}/workspaces/${sourceId}/importCandidates/one`, { headers: outsiderHeaders })).status, 403);
   assert.equal((await fetch(`${base}/workspaces/${sourceId}/receiptItems/one`, { method: 'PATCH', headers: outsiderHeaders, body: JSON.stringify({ fields: fields('receiptItems') }) })).status, 403);
-  await write(`workspaces/${sourceId}/receiptItems/one`, { ...fields('receiptItems'), amount: { integerValue: '9999' } });
-  const historical = await read(sourceId, last.updateTime);
+  const receiptPath = `workspaces/${sourceId}/receiptItems`;
+  let concurrentUpdate;
+  const historical = await read(sourceId, last.updateTime, async () => {
+    await write(`${receiptPath}/one`, { ...fields('receiptItems'), amount: { integerValue: '9999' } });
+    concurrentUpdate = await write(`${receiptPath}/two`, fields('receiptItems'));
+    cleanup.push(`${receiptPath}/two`);
+  });
   assert.equal(historical.collections.receiptItems.documents[0].data.fields.amount.integerValue, '1234');
   assert.equal(migration.compare(snapshot, historical).matches, true);
+  const latest = await read(sourceId, concurrentUpdate.updateTime);
+  assert.deepEqual(latest.collections.receiptItems.documents.map(row => row.id).sort(), ['one', 'two']);
+  assert.equal(latest.collections.receiptItems.documents.find(row => row.id === 'one').data.fields.amount.integerValue, '9999');
   const plan = planner.planRestore({ snapshot, targetId, uid: 'restore-user' });
   assert.equal(plan.rootWrites.length, 1); assert.equal(plan.childWrites.length, 4);
   assert.throws(() => planner.planRestore({ snapshot, targetId: sourceId, uid: 'restore-user' }), /上書き/);
