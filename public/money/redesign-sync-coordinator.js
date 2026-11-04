@@ -19,7 +19,7 @@
       const data = snapshot.data(), revision = data.revision === undefined ? 0 : data.revision;
       if (revision !== expectedRevision || canonical(data.state) !== baseText) throw new Error('他の端末で更新されました。未保存の変更はこの端末に保管しています。');
       if (data.state?.modelVersion !== undefined || data.state?.bills !== undefined) throw new Error('新形式の家計です。対応した画面で開いてください。');
-      const candidates = await Promise.all(acceptances.map(async ({ id, patch, refundTarget, destinationStatementId, creditDate }) => {
+      const candidates = await Promise.all(acceptances.map(async ({ id, patch, refundTarget, destinationStatementId, creditDate, bankCredit, today }) => {
         const ref = candidateRef(id);
         const candidate = await transaction.get(ref);
         if (!candidate.exists() || !['pending', 'needs_review'].includes(candidate.data().status)) {
@@ -34,12 +34,25 @@
           if (!refundTarget) throw new Error('返金・取消は元の利用と返金先の請求を確認してください');
           const prepared = refunds.preparePendingRefund({
             state: { ...payload, transactions: payload.transactions.filter(item => item.id !== entry.id) },
-            candidate: { ...candidate.data(), id }, targetId: refundTarget, amount: patch.amount, confirmed: true, destinationStatementId, creditDate
+            candidate: { ...candidate.data(), id }, targetId: refundTarget, amount: patch.amount, confirmed: true, destinationStatementId, creditDate, bankCredit, today
           });
           if (!refunds.matchesPreparedRefund(entry, prepared)) throw new Error('返金・取消の保存条件が一致しません');
         } else if (entry.refundEvidence) throw new Error('返金・取消の通知が一致しません');
-        return { ref, patch };
+        return { ref, patch, bankCredit };
       }));
+      const bankDeltas = new Map();
+      for (const { bankCredit, patch } of candidates) {
+        if (!bankCredit) continue;
+        const { accountId, balanceAlreadyIncludesCredit } = bankCredit;
+        bankDeltas.set(accountId, (bankDeltas.get(accountId) ?? 0) + (balanceAlreadyIncludesCredit ? 0 : patch.amount));
+      }
+      for (const [accountId, delta] of bankDeltas) {
+        const before = data.state.accounts?.find(item => item.id === accountId)?.currentBalance;
+        const after = payload.accounts?.find(item => item.id === accountId)?.currentBalance;
+        if (!Number.isSafeInteger(before) || !Number.isSafeInteger(before + delta) || after !== before + delta) {
+          throw new Error('入金先の残高が一致しません。口座の変更を先に同期してください。');
+        }
+      }
       for (const candidate of candidates) transaction.update(candidate.ref, { ...candidate.patch, updatedAt });
       transaction.update(ref, { state: payload, revision: expectedRevision + 1, updatedBy: uid, ...(updatedAt === undefined ? {} : { updatedAt }) });
       return expectedRevision + 1;

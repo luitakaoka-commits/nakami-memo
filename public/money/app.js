@@ -650,7 +650,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=68" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=69" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1221,7 +1221,13 @@
     return `<label>元のカード利用<select data-refund-target><option value="">選択してください</option>${options}</select></label>
       <label>返金が含まれる請求<select data-refund-statement><option value="">元の利用と同じ未確定の請求に反映</option>${statements}</select></label>
       <label>カード会社の返金計上日<input type="date" data-refund-credit-date></label>
-      <small>別の請求期間で総額が未登録なら、明細にある計上日を入力します。確認済みの総額に含まれている場合は請求だけを選びます。</small>`;
+      <small>別の請求期間で総額が未登録なら、明細にある計上日を入力します。確認済みの総額に含まれている場合は請求だけを選びます。</small>
+      <details><summary>銀行口座に直接入金された場合</summary>
+        <label>入金先口座<select data-refund-bank-account><option value="">選択してください</option>${state.accounts.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select></label>
+        <label>実際の入金日<input type="date" data-refund-bank-date></label>
+        <label>アプリの口座残高への反映<select data-refund-bank-reflected><option value="">選択してください</option><option value="yes">反映済み</option><option value="no">未反映</option></select></label>
+        <small>銀行明細で入金を確認し、上の請求先とカード会社の計上日は空欄にしてください。</small>
+      </details>`;
   }
 
   async function acceptPendingRefund(candidate, edits) {
@@ -1231,17 +1237,27 @@
       return;
     }
     try {
-      const result = window.RedesignRefund.preparePendingRefund({ state, candidate, targetId: edits.refundTarget, amount, confirmed: true, destinationStatementId: edits.destinationStatementId, creditDate: edits.creditDate });
+      const { bankCredit } = edits;
+      if (bankCredit) await cloud?.flushPendingSave?.();
+      const todayDate = today();
+      const result = window.RedesignRefund.preparePendingRefund({ state, candidate, targetId: edits.refundTarget, amount, confirmed: true, destinationStatementId: edits.destinationStatementId, creditDate: edits.creditDate, bankCredit, today: todayDate });
       if (result.status !== 'ready') {
-        showToast('返金額・元の利用・反映先の請求期間を確認してください');
+        showToast(bankCredit ? '返金額・入金先・入金日・残高への反映を確認してください' : '返金額・元の利用・反映先の請求期間を確認してください');
         return;
       }
       const row = result.transaction;
-      if (!window.confirm(cardName(row.cardId) + 'の元の利用に ' + formatAbsoluteYen(amount)
-        + (edits.destinationStatementId ? ' の返金が ' + formatDate(row.dueDate, true) + ' の確認済み請求総額に含まれていることを、カード会社の明細で確認しましたか？' : edits.creditDate ? ' の返金計上日が ' + formatDate(edits.creditDate, true) + ' であることをカード会社の明細で確認しましたか？' : ' を返金し、同じ未確定の請求期間に反映することをカード会社の明細で確認しましたか？'))) return;
+      const bankAccount = bankCredit && account(bankCredit.accountId);
+      const delta = bankCredit && !bankCredit.balanceAlreadyIncludesCredit ? amount : 0;
+      if (bankAccount && (!Number.isSafeInteger(bankAccount.currentBalance) || !Number.isSafeInteger(bankAccount.currentBalance + delta))) throw new Error('入金先の残高を確認してください');
+      const confirmation = bankAccount
+        ? `${bankAccount.name}の銀行明細で、${formatDate(row.dueDate, true)}に${formatAbsoluteYen(amount)}の入金を確認しましたか？ ${delta ? 'アプリの口座残高に加えます。' : '入金記録だけを保存します。'}`
+        : cardName(row.cardId) + 'の元の利用に ' + formatAbsoluteYen(amount)
+        + (edits.destinationStatementId ? ' の返金が ' + formatDate(row.dueDate, true) + ' の確認済み請求総額に含まれていることを、カード会社の明細で確認しましたか？' : edits.creditDate ? ' の返金計上日が ' + formatDate(edits.creditDate, true) + ' であることをカード会社の明細で確認しましたか？' : ' を返金し、同じ未確定の請求期間に反映することをカード会社の明細で確認しましたか？');
+      if (!window.confirm(confirmation)) return;
+      if (delta) adjustAccount(bankCredit.accountId, delta);
       state.transactions.push(createTransaction({ ...row, memo: edits.merchant || candidate.merchant || 'カード返金' }));
       const patch = { ...stripCandidate(candidate), amount, status: 'accepted' };
-      if (persist({ id: candidate.id, patch, refundTarget: edits.refundTarget, destinationStatementId: edits.destinationStatementId || '', creditDate: edits.creditDate || '' }) === false) throw new Error('保存を開始できませんでした');
+      if (persist({ id: candidate.id, patch, refundTarget: edits.refundTarget, destinationStatementId: edits.destinationStatementId || '', creditDate: edits.creditDate || '', ...(bankCredit ? { bankCredit, today: todayDate } : {}) }) === false) throw new Error('保存を開始できませんでした');
       await cloud?.flushPendingSave?.();
       showToast('返金を元の利用に紐付けました');
     } catch (error) { showToast(error.message || '返金を同期できませんでした'); }
@@ -3572,6 +3588,9 @@
     if (name === 'review-cancel-reason') { reviewReasonFor = ''; renderReviewCard(); return; }
     if (name === 'accept-candidate') {
       const row = action.closest('.candidate-row');
+      const bankAccountId = row?.querySelector('[data-refund-bank-account]')?.value || '';
+      const bankDate = row?.querySelector('[data-refund-bank-date]')?.value || '';
+      const bankReflected = row?.querySelector('[data-refund-bank-reflected]')?.value || '';
       acceptCandidate(action.dataset.id, row?.querySelector('[data-candidate-card]')?.value || '', {
         amount: row?.querySelector('[data-candidate-field="amount"]')?.value || '',
         date: row?.querySelector('[data-candidate-field="date"]')?.value || '',
@@ -3579,7 +3598,10 @@
         entryType: row?.querySelector('[data-candidate-field="entryType"]')?.value || '',
         refundTarget: row?.querySelector('[data-refund-target]')?.value || '',
         destinationStatementId: row?.querySelector('[data-refund-statement]')?.value || '',
-        creditDate: row?.querySelector('[data-refund-credit-date]')?.value || ''
+        creditDate: row?.querySelector('[data-refund-credit-date]')?.value || '',
+        bankCredit: bankAccountId || bankDate || bankReflected ? {
+          accountId: bankAccountId, date: bankDate, balanceAlreadyIncludesCredit: bankReflected ? bankReflected === 'yes' : null
+        } : undefined
       });
       return;
     }

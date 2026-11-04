@@ -1408,6 +1408,24 @@ const closeModals = page => page.evaluate(() => {
       await page.locator('[data-action="accept-candidate"][data-id="dated-refund-test"]').click();
       const dated = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_dated-refund-test'));
       assert(dated?.status === 'planned' && dated.amount === -250 && dated.dueDate === '2027-01-12', '計上日から別月の引落日を求めていない');
+      const bankAccountId = await page.evaluate(() => {
+        const api = window.__YORYOKU__;
+        api.setImportCandidates([{ id: 'bank-refund-test', status: 'pending', type: 'refund', amount: 250, fingerprint: 'bank-refund-test' }]);
+        return api.getState().accounts[0].id;
+      });
+      await page.locator('[data-refund-target]').selectOption('refund-purchase');
+      await page.getByText('銀行口座に直接入金された場合', { exact: true }).click();
+      await page.locator('[data-refund-bank-account]').selectOption(bankAccountId);
+      await page.locator('[data-refund-bank-date]').fill('2026-09-02');
+      await page.locator('[data-refund-bank-reflected]').selectOption('yes');
+      await page.locator('[data-action="accept-candidate"][data-id="bank-refund-test"]').click();
+      await page.waitForFunction(() => window.__YORYOKU__.getState().transactions.some(item => item.id === 'mail_bank-refund-test'));
+      const bank = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        return { entry: state.transactions.find(item => item.id === 'mail_bank-refund-test'), balance: state.accounts[0].currentBalance };
+      });
+      assert(bank.entry.status === 'settled' && bank.entry.amount === 250 && bank.entry.sourceAccountId === bankAccountId
+        && bank.entry.refundEvidence.targetId === 'refund-purchase' && bank.balance === balance, '入金記録の紐付けまたは残高の二重反映防止に失敗した');
     } finally {
       await page.evaluate(() => { const api = window.__YORYOKU__; Object.assign(api.getState(), window.__TEST_REFUND_STATE__); api.setImportCandidates([]); });
     }

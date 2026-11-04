@@ -80,7 +80,7 @@ try {
     const candidate = { id: 'refund', sourcePackage: 'test.example', detectedAt: '2026-11-04T00:00:00Z', amount: 1000, type: 'refund', status: 'pending', fingerprint: 'refund-fingerprint' };
     const { id, ...candidateData } = candidate;
     const purchase = { id: 'purchase', kind: 'payment', entryType: 'itemized', status: 'planned', amount: 3000, cardId: 'card', sourceAccountId: 'a', transactionDate: '2026-11-01', dueDate: '2026-12-10' };
-    const state = { cards: [{ id: 'card', accountId: 'a', closingDay: 15, paymentDay: 10 }], transactions: [purchase] };
+    const state = { accounts: [{ id: 'b', currentBalance: 20000 }], cards: [{ id: 'card', accountId: 'a', closingDay: 15, paymentDay: 10 }], transactions: [purchase] };
     await setDoc(refundWorkspace, { ...original, state });
     await setDoc(candidateRef(id), candidateData);
     try {
@@ -115,6 +115,33 @@ try {
         assert.equal(stored.find(item => item.id === statement.id).amount, 20000);
         assert.equal(stored.find(item => item.id === 'mail_' + laterId).absorbedBy, statement.id);
       } finally { await deleteDoc(candidateRef(laterId)); }
+      for (const [index, alreadyIncluded] of [false, true].entries()) {
+        const bankId = 'bank-credit-' + index;
+        const bankCandidate = { ...candidateData, amount: 500, fingerprint: bankId };
+        await setDoc(candidateRef(bankId), bankCandidate);
+        try {
+          const { state: baseline, revision } = (await getDocFromServer(refundWorkspace)).data();
+          const bankCredit = { accountId: 'b', date: '2026-11-04', balanceAlreadyIncludesCredit: alreadyIncluded };
+          const args = { state: baseline, candidate: { ...bankCandidate, id: bankId }, targetId: purchase.id, amount: 500, confirmed: true, bankCredit, today: '2026-11-04' };
+          assert.equal(refunds.preparePendingRefund({ ...args, today: '2026-11-03' }).status, 'review');
+          const result = refunds.preparePendingRefund(args);
+          assert.equal(result.status, 'ready');
+          const before = baseline.accounts[0].currentBalance;
+          const saveBank = currentBalance => sync.saveSnapshot({
+            db, ref: refundWorkspace, uid: 'sync-user', baseline, expectedRevision: revision, runTransaction, candidateRef,
+            updatedAt: serverTimestamp(), state: { ...baseline, accounts: [{ id: 'b', currentBalance }], transactions: [...baseline.transactions, result.transaction] },
+            acceptances: [{ id: bankId, patch: { status: 'accepted', amount: 500 }, refundTarget: purchase.id, bankCredit, today: args.today }]
+          });
+          await assert.rejects(saveBank(before + (alreadyIncluded ? 500 : 0)), /残高/);
+          assert.equal((await getDocFromServer(candidateRef(bankId))).data().status, 'pending');
+          const after = before + (alreadyIncluded ? 0 : 500);
+          await saveBank(after);
+          const stored = (await getDocFromServer(refundWorkspace)).data().state;
+          assert.equal(stored.accounts[0].currentBalance, after);
+          assert.deepEqual(stored.transactions.at(-1), result.transaction);
+          assert.equal((await getDocFromServer(candidateRef(bankId))).data().status, 'accepted');
+        } finally { await deleteDoc(candidateRef(bankId)); }
+      }
     } finally {
       await deleteDoc(candidateRef(id));
       await deleteDoc(refundWorkspace);

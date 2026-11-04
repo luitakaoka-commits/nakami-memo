@@ -24,7 +24,7 @@
     if (target.billStatus !== 'estimate') return { status: 'review', reason: 'billing_period_unresolved' };
     return { status: 'ready', plan: { noticeId: notice.id, targetId: target.id, cardId: notice.cardId, type: notice.type, amount: notice.amount, newRefundedAmount: target.refundedAmount + notice.amount, remainingAmount: remaining - notice.amount } };
   }
-  function preparePendingRefund({ state, candidate, targetId, amount, confirmed, destinationStatementId = '', creditDate = '' }) {
+  function preparePendingRefund({ state, candidate, targetId, amount, confirmed, destinationStatementId = '', creditDate = '', bankCredit, today }) {
     if (!state || !Array.isArray(state.transactions) || !Array.isArray(state.cards)
       || !candidate?.id || !['pending', 'needs_review'].includes(candidate.status)) {
       return { status: 'review', reason: 'missing_evidence' };
@@ -32,7 +32,7 @@
     const matches = state.transactions.filter(item => item.id === targetId);
     const target = matches[0];
     if (matches.length !== 1 || target.kind !== 'payment' || target.entryType !== 'itemized'
-      || !(destinationStatementId || creditDate ? ['planned', 'settled', 'absorbed'] : ['planned']).includes(target.status)
+      || !(destinationStatementId || creditDate || bankCredit ? ['planned', 'settled', 'absorbed'] : ['planned']).includes(target.status)
       || target.affectsForecast === false || target.dateEstimated === true) {
       return { status: 'review', reason: 'target_not_unique' };
     }
@@ -41,6 +41,17 @@
     const holidayOptions = { overrides: state.settings?.holidayOverrides || {} };
     const cycle = engine.cardBillingCycleOf(target, card, holidayOptions);
     if (!cycle || !target.dueDate) return { status: 'review', reason: 'billing_period_unresolved' };
+    if (bankCredit) {
+      const date = new Date(bankCredit.date + 'T00:00:00Z');
+      if (candidate.type !== 'refund' || destinationStatementId || creditDate
+        || !state.accounts?.some(item => item.id === bankCredit.accountId)
+        || typeof bankCredit.balanceAlreadyIncludesCredit !== 'boolean'
+        || !/^\d{4}-\d{2}-\d{2}$/.test(bankCredit.date) || !Number.isFinite(date.getTime())
+        || date.toISOString().slice(0, 10) !== bankCredit.date || bankCredit.date < target.transactionDate
+        || typeof today !== 'string' || bankCredit.date > today) {
+        return { status: 'review', reason: 'bank_credit_unverified' };
+      }
+    }
     let creditCycle = cycle;
     if (creditDate) {
       const date = new Date(creditDate + 'T00:00:00Z');
@@ -80,9 +91,16 @@
         amountConfirmed: confirmed === true, targetConfirmed: confirmed === true },
       purchases: [{ id: targetId, cardId: card.id, amount: target.amount,
         refundedAmount: previous.reduce((sum, item) => sum + Math.abs(item.amount), 0),
-        billStatus: !destination && hasStatement ? 'confirmed' : 'estimate' }]
+        billStatus: !destination && !bankCredit && hasStatement ? 'confirmed' : 'estimate' }]
     });
     if (result.status !== 'ready') return result;
+    if (bankCredit) return { ...result, transaction: {
+      id: 'mail_' + candidate.id, kind: 'reimbursement', amount, cardId: '', sourceAccountId: bankCredit.accountId,
+      entryType: '', status: 'settled', origin: 'mail-import', dueDate: bankCredit.date, absorbedBy: '',
+      transactionDate: bankCredit.date, settledAt: bankCredit.date,
+      refundEvidence: { targetId, noticeId: candidate.id, type: candidate.type, cycle, fingerprint: candidate.fingerprint || '',
+        bankCreditDate: bankCredit.date, balanceAlreadyIncludesCredit: bankCredit.balanceAlreadyIncludesCredit }
+    } };
     return { ...result, transaction: {
       id: 'mail_' + candidate.id, kind: 'payment', amount: -amount, cardId: card.id, sourceAccountId: card.accountId,
       entryType: 'itemized', status: destination ? 'absorbed' : 'planned', origin: 'mail-import',
@@ -99,6 +117,7 @@
     const expected = prepared.transaction;
     return ['id', 'kind', 'amount', 'cardId', 'sourceAccountId', 'entryType', 'status', 'origin', 'dueDate', 'transactionDate', 'absorbedBy']
       .every(key => transaction[key] === expected[key])
+      && (!expected.settledAt || transaction.settledAt === expected.settledAt)
       && Object.keys(expected.refundEvidence).every(key => transaction.refundEvidence?.[key] === expected.refundEvidence[key]);
   }
   const api = { planRefund, preparePendingRefund, matchesPreparedRefund };
