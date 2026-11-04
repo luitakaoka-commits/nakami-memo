@@ -101,7 +101,25 @@
     }
     return { receive, enqueue, flush, isDirty: () => Boolean(pending || flight), isBlocked: () => blocked };
   }
-  const api = { canonical, createCoordinator, saveSnapshot };
+  function readRecovery(storage, uid, workspaceId) {
+    const key = 'okane-unsaved:' + uid + ':' + workspaceId;
+    const archives = [];
+    for (let index = 0; index < storage.length; index++) {
+      const name = storage.key(index);
+      const prefix = key + ':archive:';
+      if (name?.startsWith(prefix) && /^[0-9a-f-]{36}$/i.test(name.slice(prefix.length))) archives.push(name);
+    }
+    const snapshots = [];
+    for (const name of [key, ...archives]) {
+      const raw = storage.getItem(name);
+      if (raw === null) continue;
+      const kind = name === key ? 'pending' : 'archive';
+      try { snapshots.push({ kind, state: JSON.parse(raw) }); }
+      catch (_) { snapshots.push({ kind, unreadable: raw }); }
+    }
+    return { format: 'money-unsaved-recovery-v1', workspaceId, snapshots };
+  }
+  const api = { canonical, createCoordinator, saveSnapshot, readRecovery };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.RedesignSyncCoordinator = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

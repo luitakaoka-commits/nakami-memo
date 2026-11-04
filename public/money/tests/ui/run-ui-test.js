@@ -1267,6 +1267,20 @@ const closeModals = page => page.evaluate(() => {
     assert(water.intervalMonths === 2 && water.startDate === '2026-11-20' && water.sourceAccountId === methods.account && !water.cardId, '隔月口座払いの保存内容が不正');
     assert(electricity.cardId === methods.card && electricity.sourceAccountId === methods.debit, 'カード払いの保存内容が不正');
   });
+  await record('unsaved_recovery_export', async () => {
+    await page.evaluate(() => {
+      localStorage.setItem('okane-unsaved:test-user:test-workspace', '{"marker":"pending"}');
+      localStorage.setItem('okane-unsaved:test-user:test-workspace:archive:aaaa1111-bbbb-2222-cccc-3333dddd4444', '{"marker":"archive"}');
+      localStorage.setItem('okane-unsaved:other-user:test-workspace', '{"marker":"other-user"}');
+      localStorage.setItem('okane-unsaved:test-user:other-workspace', '{"marker":"other-workspace"}');
+      window.__YORYOKU__.setPage('settings');
+    });
+    const [file] = await Promise.all([page.waitForEvent('download'), page.locator('[data-action="export-recovery"]').click()]);
+    const payload = JSON.parse(fs.readFileSync(await file.path(), 'utf8'));
+    assert(payload.format === 'money-unsaved-recovery-v1', '退避ファイルの形式が不正');
+    assert(payload.snapshots.map(item => item.state.marker).join(',') === 'pending,archive', '退避データの対象が不正');
+    assert(await page.evaluate(() => localStorage.getItem('okane-unsaved:test-user:test-workspace')), '書き出しで退避データが消えた');
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

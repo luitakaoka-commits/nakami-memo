@@ -1,5 +1,7 @@
 // テスト用のFirebaseスタブ。ネットワークへ接続せずにアプリを起動する。
+import './redesign-sync-coordinator.js?v=57';
 export const firebaseSync = {
+  readUnsavedRecovery: () => globalThis.RedesignSyncCoordinator.readRecovery(localStorage, 'test-user', 'test-workspace'),
   waitForAuth: async () => ({ uid: 'test-user', email: 'test@example.com' }),
   signIn: async () => ({ user: { uid: 'test-user' } }),
   signOut: async () => {},
