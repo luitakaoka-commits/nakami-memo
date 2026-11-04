@@ -28,6 +28,15 @@ const row = (id, amount, extra = {}) => ({ id, cardId: 'jcb', cycle: '2026-11', 
 const reconcile = (snapshot, entries) => reconcileCardCycle({ cardId: 'jcb', cycle: '2026-11', snapshot: snapshot && { cardId: 'jcb', cycle: '2026-11', checkedAt: '2026-11-02T12:00:00+09:00', latestUsedAt: '2026-11-01T12:00:00+09:00', ...snapshot }, entries });
 
 test('確定請求を実残高で支払える', () => assert.equal(plan([account('a', 50000)], [bill('b', '2026-11-10', 'a', 30000)]).nextStatus, 'safe'));
+test('開始時点の不足は予定なし・同日入金ありの両方で表示する', () => {
+  for (const events of [[], [income('salary', '2026-10-30', 'a', 5000)]]) {
+    const result = plan([account('a', -1000)], events);
+    assert.equal(result.futureStatus, 'shortfall');
+    assert.deepEqual(result.issues.find(issue => issue.phase === 'opening'), {
+      type: 'projected_shortfall', accountId: 'a', date: '2026-10-30', amount: 1000, phase: 'opening'
+    });
+  }
+});
 test('対象情報の網羅を確認できない場合は安全にしない', () => {
   for (const coverageVerified of [false, undefined]) {
     const r = plan([account('a', 50000)], [bill('b', '2026-11-10', 'a', 30000)], { coverageVerified });

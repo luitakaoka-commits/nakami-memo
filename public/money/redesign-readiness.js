@@ -48,6 +48,10 @@
     const projected = new Map(confirmed);
     const issues = [];
     const timeline = [];
+    // 開始残高の不足は、予定がない日や同日入金がある日でも残す。
+    for (const [accountId, balance] of projected) {
+      if (balance < 0) issues.push({ type: 'projected_shortfall', accountId, date: today, amount: -balance, phase: 'opening' });
+    }
     // 対象期間の請求・口座・未照合候補が揃っている根拠がなければ安全とは判定しない。
     const coverageVerified = input.coverageVerified === true;
     if (!coverageVerified) issues.push({ type: 'incomplete_source_data' });
