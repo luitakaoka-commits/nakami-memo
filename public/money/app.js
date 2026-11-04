@@ -646,7 +646,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=59" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=60" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1003,6 +1003,26 @@
     }).join('');
   }
 
+  function renderSpendingAllowance(deadline) {
+    if (!selectedDeadlinePeriod()) return '';
+    const funding = primaryAccount();
+    try {
+      const { scenario } = savedPaymentScenario();
+      const result = window.RedesignReadiness.spendingAllowance(scenario, {
+        deadline, accountId: funding.id, reserve: Number(state.settings.defenseLine || 0)
+      });
+      return `<section class="card info-card" data-spending-allowance>
+        <h2>締め日後の支払いも残す試算</h2>
+        <p>${esc(funding.name)}の参考額 <strong>${formatDisplayedAmount(result.amount)}</strong></p>
+        <p>締め日までの支払い ${formatAbsoluteYen(result.throughDeadline)}・締め日後から${formatDate(result.endDate, true)}まで ${formatAbsoluteYen(result.afterDeadline)}</p>
+        <p>予備額 ${formatAbsoluteYen(result.reserve)}・予定入金は含めません。</p>
+        <p class="check-detail">口座残高・請求額・未確認の候補を照合してください。</p>
+      </section>`;
+    } catch (_) {
+      return '<section class="card info-card" data-spending-allowance><h2>締め日後の支払いも残す試算</h2><p>要確認。口座や支払いの記録を確認してください。</p></section>';
+    }
+  }
+
   function renderSpendable() {
     const result = spendableAmount();
     if (!result) return '<div class="page-heading"><div><span class="eyebrow">今使える金額</span><h1>今使える金額</h1></div></div><section class="card empty"><div><strong>口座がありません</strong>口座を追加すると計算できます。</div></section>';
@@ -1027,6 +1047,7 @@
         <div class="hero-actions"><button class="button button-quiet button-small" data-action="open-future">将来の期間で試算</button></div>
       </section>
 
+      ${renderSpendingAllowance(result.deadline)}
       <section class="card breakdown-card">
         <div class="section-title"><h2>計算内訳</h2><small>${formatDate(result.deadline)}まで</small></div>
         <div class="breakdown-list">${breakdownRows}</div>
@@ -2122,13 +2143,17 @@
 
   /* ================= 機能A｜支払い能力チェック（詳細） ================= */
 
-  function renderDebitAssessment() {
+  function savedPaymentScenario() {
     const start = today();
+    return window.RedesignLegacyAdapter.buildLegacyScenario(state, start, dateAdd(start, 89), {
+      candidates: candidatesLoaded ? importCandidates : undefined
+    });
+  }
+
+  function renderDebitAssessment() {
     const labels = { safe: '支払い可能', review: '要確認', shortfall: '不足の見込み' };
     try {
-      const { scenario } = window.RedesignLegacyAdapter.buildLegacyScenario(state, start, dateAdd(start, 89), {
-        candidates: candidatesLoaded ? importCandidates : undefined
-      });
+      const { scenario } = savedPaymentScenario();
       const result = window.RedesignReadiness.calculateReadiness(scenario);
       const rows = result.nextPayments.map(payment => {
         const possible = payment.cardAdditionalPossible

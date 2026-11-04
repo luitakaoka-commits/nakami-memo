@@ -126,7 +126,23 @@
     return { nextDate, nextStatus, nextPayments, futureStatus, timeline, issues };
   }
 
-  const api = { calculateReadiness };
+  function spendingAllowance(input, { deadline, accountId, reserve = 0 } = {}) {
+    if (!isDate(deadline) || deadline < input.today || deadline > input.endDate || !Number.isSafeInteger(reserve) || reserve < 0) throw new Error('締め日と予備額を確認してください');
+    const assessment = calculateReadiness(input);
+    const account = input.accounts.find(item => item.id === accountId);
+    if (!account) throw new Error('支出に使う口座を確認してください');
+    let throughDeadline = 0, afterDeadline = 0;
+    for (const event of input.events) {
+      if (event.accountId !== accountId || event.status !== 'planned' || event.kind === 'income' || event.date < input.today || event.date > input.endDate) continue;
+      const cost = add(event.amount, event.additionalPossible || 0);
+      if (event.date <= deadline) throughDeadline = add(throughDeadline, cost);
+      else afterDeadline = add(afterDeadline, cost);
+    }
+    const amount = add(add(add(account.balance, -throughDeadline), -afterDeadline), -reserve);
+    const status = amount < 0 || assessment.futureStatus === 'shortfall' ? 'shortfall' : assessment.futureStatus;
+    return { amount, status, referenceOnly: status !== 'safe', openingBalance: account.balance, throughDeadline, afterDeadline, reserve, deadline, endDate: input.endDate };
+  }
+  const api = { calculateReadiness, spendingAllowance };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.RedesignReadiness = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

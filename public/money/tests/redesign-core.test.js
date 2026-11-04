@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-const { calculateReadiness } = require('../redesign-readiness.js');
+const { calculateReadiness, spendingAllowance } = require('../redesign-readiness.js');
 const { reconcileCardCycle } = require('../redesign-card-reconciliation.js');
 const { calculateCardPaymentDate, calculateSpendableAmount, accountDeltasFor } = require('../finance-engine.js');
 const { compare: compareMigration } = require('../redesign-migration-check.js');
@@ -27,6 +27,17 @@ const plan = (accounts, events, extra = {}) => calculateReadiness({ today: '2026
 const row = (id, amount, extra = {}) => ({ id, cardId: 'jcb', cycle: '2026-11', amount, origin: 'email', messageId: `mail-${id}`, usedAt: '2026-11-01T12:00:00+09:00', evidenceComplete: true, duplicateCheck: 'clear', ...extra });
 const reconcile = (snapshot, entries) => reconcileCardCycle({ cardId: 'jcb', cycle: '2026-11', snapshot: snapshot && { cardId: 'jcb', cycle: '2026-11', checkedAt: '2026-11-02T12:00:00+09:00', latestUsedAt: '2026-11-01T12:00:00+09:00', ...snapshot }, entries });
 
+test('締め日後の請求を口座ごとに取り置き、予定給与を使える額に足さない', () => {
+  const input = { today: '2026-10-30', endDate: '2027-01-27', coverageVerified: false,
+    accounts: [account('a', 50000), account('b', 100000)],
+    events: [expense('water', '2026-11-15', 'a', 3000), bill('card', '2026-12-10', 'a', 20000, { additionalPossible: 2000 }),
+      bill('other-card', '2026-12-10', 'b', 30000), income('salary', '2026-11-11', 'a', 50000)]
+  };
+  const result = spendingAllowance(input, { deadline: '2026-11-15', accountId: 'a', reserve: 5000 });
+  assert.deepEqual([result.throughDeadline, result.afterDeadline, result.amount], [3000, 22000, 20000]);
+  assert.equal(result.referenceOnly, true);
+  assert.equal(spendingAllowance(input, { deadline: '2026-11-15', accountId: 'a', reserve: 30000 }).amount, -5000);
+});
 test('確定請求を実残高で支払える', () => assert.equal(plan([account('a', 50000)], [bill('b', '2026-11-10', 'a', 30000)]).nextStatus, 'safe'));
 test('開始時点の不足は予定なし・同日入金ありの両方で表示する', () => {
   for (const events of [[], [income('salary', '2026-10-30', 'a', 5000)]]) {

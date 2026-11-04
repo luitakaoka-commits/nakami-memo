@@ -1295,6 +1295,16 @@ const closeModals = page => page.evaluate(() => {
       const result = await page.locator('[data-debit-assessment]').innerText();
       assert(result.includes('不足の見込み') && result.includes('引落口座A') && result.includes('55,000'), '同日同口座を合算して不足判定できていない');
       assert(result.includes('引落口座B') && result.includes('10,000'), '別口座の請求を分離していない');
+      await page.evaluate(() => {
+        const api = window.__YORYOKU__, state = api.getState();
+        window.__TEST_DEBIT_STATE__.settings = { ...state.settings };
+        state.settings.deadlineMode = 'card-closing';
+        state.settings.deadlineCardIds = [state.cards[0].id];
+        state.cards[0].closingDay = 5;
+        api.setPage('spendable');
+      });
+      const allowance = await page.locator('[data-spending-allowance]').innerText();
+      assert(allowance.includes('引落口座Aの参考額') && allowance.includes('55,000') && allowance.includes('予定入金は含めません'), '締め日後の支払いを引落口座別に表示できていない');
     } finally {
       await page.evaluate(() => Object.assign(window.__YORYOKU__.getState(), window.__TEST_DEBIT_STATE__));
     }
