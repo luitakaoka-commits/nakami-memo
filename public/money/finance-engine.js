@@ -792,6 +792,17 @@
     return transaction.dueDate;
   }
 
+  function recurringInterval(plan) {
+    const interval = plan.intervalMonths ?? 1;
+    if (!Number.isInteger(interval) || interval < 1 || interval > 12) return null;
+    if (interval > 1) {
+      const date = plan.startDate;
+      if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+          || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) return null;
+    }
+    return interval;
+  }
+
   function expandScheduledTransactions(recurringPlans = [], fromDate, toDate, existingTransactions = []) {
     if (!fromDate || !toDate || fromDate > toDate) return [];
     const taken = new Set(existingTransactions
@@ -804,6 +815,9 @@
 
     recurringPlans.forEach(plan => {
       if (!plan || plan.isActive === false) return;
+      const interval = recurringInterval(plan);
+      if (interval === null) return;
+      const anchorMonth = interval > 1 ? Number(plan.startDate.slice(0, 4)) * 12 + Number(plan.startDate.slice(5, 7)) - 1 : null;
       const amount = Number(plan.amount || 0);
       if (!amount) return;
       const dayOfMonth = Math.min(Math.max(Number(plan.dayOfMonth) || 1, 1), 31);
@@ -812,7 +826,8 @@
       while (cursor <= end && guard < 120) {
         const occurrence = dateAt(cursor.getFullYear(), cursor.getMonth(), dayOfMonth);
         const key = toDateString(occurrence);
-        if (occurrence >= start && occurrence <= end
+        const monthOffset = anchorMonth === null ? 0 : cursor.getFullYear() * 12 + cursor.getMonth() - anchorMonth;
+        if (monthOffset >= 0 && monthOffset % interval === 0 && occurrence >= start && occurrence <= end
           && (!plan.startDate || key >= plan.startDate)
           && (!plan.endDate || key <= plan.endDate)
           && !taken.has(`${plan.id}:${key.slice(0, 7)}`)) {
@@ -2047,6 +2062,7 @@
     // 予定
     expandScheduledTransactions,
     recurringOccurrenceDate,
+    recurringInterval,
     // 2つの主計算（必ず別関数・別結果）
     calculateCashflowCheck, calculateSpendableAmount,
     // 「今使える金額」の派生

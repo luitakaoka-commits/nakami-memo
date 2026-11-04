@@ -41,7 +41,7 @@
       if (!plan || !plan.id || planIds.has(plan.id)) throw new Error('定期予定の識別子が不正または重複しています');
       planIds.add(plan.id);
       if (plan.isActive === false) continue;
-      if (!Number.isInteger(plan.dayOfMonth) || plan.dayOfMonth < 1 || plan.dayOfMonth > 31 || (plan.intervalMonths != null && plan.intervalMonths !== 1) || !Number.isSafeInteger(plan.amount) || plan.amount < 0 || plan.cardId) {
+      if (!Number.isInteger(plan.dayOfMonth) || plan.dayOfMonth < 1 || plan.dayOfMonth > 31 || engine.recurringInterval(plan) === null || !Number.isSafeInteger(plan.amount) || plan.amount < 0 || plan.cardId) {
         issues.push({ type: 'recurring_plans_not_mapped', id: plan.id });
         continue;
       }

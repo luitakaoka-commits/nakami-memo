@@ -742,6 +742,17 @@ test('旧定期支払いの日付を同月に変更しても変更前の予定�
   assert.deepEqual(dates, ['2026-11-07', '2026-12-05']);
   assert.ok(result.issues.some(issue => issue.type === 'legacy_recurring_date_changed' && issue.id === 'moved'));
 });
+test('開始月が確認できる隔月予定だけを90日間に展開する', () => {
+  const old = legacyFixture();
+  old.recurringPlans = [
+    { id: 'water', dayOfMonth: 20, kind: 'payment', amount: 4000, sourceAccountId: 'a', intervalMonths: 2, startDate: '2026-10-20' },
+    { id: 'unknown', dayOfMonth: 20, kind: 'payment', amount: 1000, sourceAccountId: 'a', intervalMonths: 2 }
+  ];
+  const result = buildLegacyScenario(old, '2026-10-30', '2027-01-27');
+  const expenses = result.scenario.events.filter(event => event.kind === 'expense' && !event.cardPayment);
+  assert.deepEqual(expenses.map(event => [event.date, event.amount, event.amountConfirmed]), [['2026-12-20', 4000, false]]);
+  assert.ok(result.issues.some(issue => issue.type === 'recurring_plans_not_mapped' && issue.id === 'unknown'));
+});
 test('旧定期支払いを翌月へ移しても元の月を再生成しない', () => {
   const old = legacyFixture();
   old.recurringPlans = [{ id: 'utility', dayOfMonth: 5, kind: 'payment', amount: 4000, sourceAccountId: 'a' }];
