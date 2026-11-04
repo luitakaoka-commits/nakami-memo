@@ -158,6 +158,38 @@ try {
   const changed = await request(`workspaces/${targetId}/receiptItems/one`);
   const modified = await read(targetId, changed.updateTime);
   assert.equal(migration.compareRestored(snapshot, modified).matches, false);
+  const raceId = `restore-race-${randomUUID()}`, racePath = `workspaces/${raceId}`;
+  async function commitRace(writes) {
+    const response = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes }) });
+    if (!response.ok) throw new Error('復元の書き込みが拒否されました');
+    return response.json();
+  }
+  const raceReceipt = await executor.executeRestore({
+    snapshot, targetId: raceId, uid: 'restore-user', readBack: read,
+    commitWrites: async writes => {
+      if (writes.length !== 1) throw new Error('明細を送信する前に通信が切れた');
+      const committed = await commitRace(writes);
+      cleanup.push(racePath);
+      return committed;
+    }
+  });
+  assert.equal(raceReceipt.status, 'children_uncertain');
+  let raceWrites = 0;
+  const tryRaceResume = () => executor.resumeRestore({
+    snapshot, receipt: raceReceipt, uid: 'restore-user', readBack: read,
+    readCurrent: id => read(id, new Date().toISOString()),
+    commitWrites: async writes => {
+      raceWrites++;
+      await write(racePath, { ...rootFields, name: str('別端末からの更新'), revision: { integerValue: '0' } });
+      return commitRace(writes);
+    }
+  });
+  assert.equal((await tryRaceResume()).status, 'children_uncertain');
+  assert.equal((await tryRaceResume()).status, 'conflict');
+  assert.equal(raceWrites, 1);
+  const raceTarget = await read(raceId, new Date().toISOString());
+  assert.equal(raceTarget.workspace.fields.name.stringValue, '別端末からの更新');
+  assert.ok(names.every(name => raceTarget.collections[name].documents.length === 0));
 } catch (error) {
   failures.push({ name: '架空家計の読み取り・復元・内容照合', message: error.message });
 } finally {
