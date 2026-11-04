@@ -20,12 +20,14 @@ import {
   getFirestore,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
+import './redesign-sync-coordinator.js?v=49';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -61,6 +63,7 @@ let householdId = null;
 let stopOutcomeQueue = null;
 const outcomeQueueInFlight = new Set();
 let saveTimer = null;
+let workspaceSaver = null;
 let remoteHandler = () => {};
 let statusHandler = () => {};
 
@@ -122,12 +125,35 @@ async function createWorkspace(initialState) {
 
 async function selectWorkspace(workspaceId) {
   if (!currentUser) throw new Error('ログインが必要です');
+  if (workspaceSaver?.isDirty()) throw new Error('未保存の変更があります。同期の状態を確認してください。');
   const available = await refreshWorkspaces();
   const selected = available.find(item => item.id === workspaceId);
   if (!selected) throw new Error('共有スペースを開けません');
 
   if (stopWorkspace) stopWorkspace();
+  clearTimeout(saveTimer);
+  workspaceSaver = null;
   currentWorkspace = selected;
+  const uid = currentUser.uid;
+  const workspaceRef = doc(db, 'workspaces', selected.id);
+  const recoveryKey = `okane-unsaved:${uid}:${selected.id}`;
+  const previousRecovery = localStorage.getItem(recoveryKey);
+  if (previousRecovery) {
+    localStorage.setItem(`${recoveryKey}:archive:${crypto.randomUUID()}`, previousRecovery);
+    localStorage.removeItem(recoveryKey);
+    statusHandler('error', new Error('前回の未保存の変更をこの端末に保管しています。サーバーの内容を読み込みます。'));
+  }
+  const { saveSnapshot, createCoordinator } = globalThis.RedesignSyncCoordinator;
+  workspaceSaver = createCoordinator({
+    retain: state => localStorage.setItem(recoveryKey, JSON.stringify(state)),
+    clearRetained: () => localStorage.removeItem(recoveryKey),
+    onStatus: (...args) => {
+      if (currentWorkspace?.id === selected.id && currentUser?.uid === uid) statusHandler(...args);
+    },
+    applyRemote: (state, meta) => remoteHandler(state, meta),
+    write: request => saveSnapshot({ ...request, db, ref: workspaceRef, uid, runTransaction, updatedAt: serverTimestamp() })
+  });
+  const saver = workspaceSaver;
   localStorage.setItem(ACTIVE_WORKSPACE_KEY, selected.id);
   startCandidateWatch();
   startReceiptWatch();
@@ -143,7 +169,16 @@ async function selectWorkspace(workspaceId) {
       const data = snapshot.data();
       currentWorkspace = { ...workspaceView(snapshot) };
       const meta = { initial: first, updatedBy: data.updatedBy || '', pending: snapshot.metadata.hasPendingWrites };
-      if (data.state && !snapshot.metadata.hasPendingWrites) remoteHandler(clone(data.state), meta);
+      if (data.state && !snapshot.metadata.hasPendingWrites) {
+        try {
+          if (data.state.modelVersion !== undefined || data.state.bills !== undefined) throw new Error('新形式の家計です。対応した画面で開いてください。');
+          saver.receive(clone(data.state), data.revision === undefined ? 0 : data.revision, meta);
+        } catch (error) {
+          statusHandler('error', error);
+          if (first) { first = false; reject(error); }
+          return;
+        }
+      }
       if (first) {
         first = false;
         resolve(data.state ? clone(data.state) : null);
@@ -175,23 +210,22 @@ async function connect(initialState, onRemote, onStatus, onCandidates, onReceipt
 }
 
 function queueSave(nextState) {
-  if (!currentUser || !currentWorkspace) return;
-  const workspaceId = currentWorkspace.id;
-  const payload = clone(nextState);
+  if (!currentUser || !currentWorkspace || !workspaceSaver) return false;
   clearTimeout(saveTimer);
-  statusHandler('saving');
-  saveTimer = setTimeout(async () => {
-    try {
-      await setDoc(doc(db, 'workspaces', workspaceId), {
-        state: payload,
-        updatedAt: serverTimestamp(),
-        updatedBy: currentUser.uid
-      }, { merge: true });
-      statusHandler('saved');
-    } catch (error) {
-      statusHandler('error', error);
-    }
-  }, 450);
+  try {
+    workspaceSaver.enqueue(clone(nextState));
+    const saver = workspaceSaver;
+    saveTimer = setTimeout(() => saver.flush(), 450);
+    return true;
+  } catch (error) { statusHandler('error', error); return false; }
+}
+
+async function flushPendingSave() {
+  const saver = workspaceSaver;
+  if (!saver) throw new Error('クラウド保存が開始されていません');
+  clearTimeout(saveTimer);
+  await saver.flush();
+  if (saver.isDirty() || saver.isBlocked()) throw new Error('変更をクラウドに保存できませんでした');
 }
 
 async function addMember(memberUid) {
@@ -638,6 +672,7 @@ function getSession() {
 
 async function signOutCurrentUser() {
   clearTimeout(saveTimer);
+  workspaceSaver = null;
   if (stopWorkspace) stopWorkspace();
   if (stopCandidates) stopCandidates();
   if (stopReceipts) stopReceipts();
@@ -680,6 +715,7 @@ export const firebaseSync = {
   selectWorkspace,
   refreshWorkspaces,
   queueSave,
+  flushPendingSave,
   addMember,
   removeMember,
   renameWorkspace,

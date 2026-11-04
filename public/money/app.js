@@ -396,7 +396,7 @@
   function persist() {
     state.meta.updatedAt = nowIso();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    if (cloud) cloud.queueSave(state);
+    return cloud?.queueSave(state);
   }
 
   /** 空状態の共通マークアップ。title / body は既にエスケープ済みの文字列を渡すこと。 */
@@ -589,7 +589,6 @@
     if (!remoteState || typeof remoteState !== 'object') return;
     const normalized = normalizeState(remoteState);
     normalized.mode = 'cloud';
-    if (!meta.initial && normalized.meta.updatedAt === state?.meta?.updatedAt) return;
     state = normalized;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     $('#auth-screen').hidden = true;
@@ -641,7 +640,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=48" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=49" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1230,7 +1229,16 @@
     if (statementError) { showToast(statementError); return; }
     state.transactions.push(transaction);
     absorbSettledStatementDetails(state);
-    persist();
+    const queued = persist();
+    try {
+      if (queued === false) throw new Error('クラウド保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+    }
+    catch (_) {
+      renderPage();
+      showToast('取引を同期できなかったため、メール候補は未確認のままです。');
+      return;
+    }
     let candidateUpdated = true;
     const sameDate = candidate.usedDate === transactionDate;
     const timePatch = Object.prototype.hasOwnProperty.call(candidate, 'usedTime')

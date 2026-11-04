@@ -6,16 +6,26 @@ service cloud.firestore {
     }
 
     match /workspaces/{workspaceId} {
+      // stateを書き換えるすべての経路に適用し、所有者の旧クライアントも例外にしない。
+      function validStateRevision() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['state', 'revision'])
+          || (request.resource.data.keys().hasAll(['revision'])
+            && request.resource.data.revision is int
+            && request.resource.data.revision > 0
+            && request.resource.data.revision <= 9007199254740991
+            && request.resource.data.revision == (('revision' in resource.data) ? resource.data.revision + 1 : 1));
+      }
       allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
 
       allow create: if signedIn()
         && request.resource.data.keys().hasAll(['name', 'ownerUid', 'memberUids', 'state', 'createdAt', 'updatedAt', 'updatedBy'])
-        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'memberUids', 'state', 'createdAt', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'memberUids', 'state', 'revision', 'createdAt', 'updatedAt', 'updatedBy'])
+        && (!('revision' in request.resource.data) || request.resource.data.revision == 0)
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.memberUids.size() == 1
         && request.resource.data.memberUids[0] == request.auth.uid;
 
-      allow update: if signedIn() && (
+      allow update: if signedIn() && validStateRevision() && (
         (
           request.auth.uid == resource.data.ownerUid
           && request.resource.data.ownerUid == resource.data.ownerUid
@@ -24,7 +34,7 @@ service cloud.firestore {
         ||
         (
           request.auth.uid in resource.data.memberUids
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state', 'updatedAt', 'updatedBy'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state', 'revision', 'updatedAt', 'updatedBy'])
           && request.resource.data.updatedBy == request.auth.uid
         )
       );
