@@ -61,5 +61,21 @@ if (originalLast?.projectedBalance !== historicalBalance
   || withTransfer.futureStatus === 'safe') failures.push({ check: 'proposed_transfer' });
 const transferSourceMatches = transferLast?.projectedBalance === expectedTarget && sourceBalance - transferAmount === expectedSource;
 if (!transferSourceMatches) failures.push({ check: 'transfer_source' });
-console.log(JSON.stringify({ suite: 'report-snapshot', asOf: '2026-10-28', sourceRows: rows.length, cardChecks: result.timeline.length, transferScenario: !failures.some(failure => failure.check === 'proposed_transfer'), transferSourceStatus: transferSourceMatches ? 'matches' : 'review', passed: failures.length === 0, failures }));
+const incomeDelay = historicalTable.match(/(\d{1,2}\/\d{1,2})仕送りが来ない・遅れると、(\d{1,2}\/\d{1,2})時点でUFJは([\d,]+)円不足/);
+if (!incomeDelay) throw new Error('仕送りが遅れた場合の記載を読み取れません');
+const iso = value => '2026-' + value.split('/').map(part => part.padStart(2, '0')).join('-');
+const incomeDate = iso(incomeDelay[1]), debitDate = iso(incomeDelay[2]), shortage = yen(incomeDelay[3]);
+const income = historicalEvents.find(event => event.kind === 'income' && event.date === incomeDate);
+if (!income) throw new Error('対象の仕送りを確認できません');
+const withoutIncome = historicalEvents.filter(event => event !== income);
+const delayed = calculateReadiness({ ...historicalInput, events: withoutIncome });
+const sameDay = calculateReadiness({ ...historicalInput, events: [...withoutIncome, { ...income, date: debitDate }] });
+const shortfall = delayed.timeline.find(row => row.date === debitDate && row.accountId === 'account');
+const uncertainOrder = sameDay.timeline.find(row => row.date === debitDate && row.accountId === 'account');
+const incomeDelayMatches = shortfall?.projectedBalance === -shortage && shortfall.status === 'shortfall'
+  && delayed.issues.some(issue => issue.type === 'projected_shortfall' && issue.date === debitDate && issue.accountId === 'account' && issue.amount === shortage)
+  && uncertainOrder?.projectedBalance === -shortage && uncertainOrder.status === 'review'
+  && sameDay.issues.some(issue => issue.type === 'same_day_income_unconfirmed' && issue.date === debitDate && issue.accountId === 'account');
+if (!incomeDelayMatches) failures.push({ check: 'income_delay' });
+console.log(JSON.stringify({ suite: 'report-snapshot', asOf: '2026-10-28', sourceRows: rows.length, cardChecks: result.timeline.length, transferScenario: !failures.some(failure => failure.check === 'proposed_transfer'), transferSourceStatus: transferSourceMatches ? 'matches' : 'review', incomeDelayMatches, passed: failures.length === 0, failures }));
 if (failures.length) process.exitCode = 1;
