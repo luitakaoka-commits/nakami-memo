@@ -1244,6 +1244,29 @@ const closeModals = page => page.evaluate(() => {
       assert(await button.isEnabled(), '再実行できない');
     } finally { page.off('download', onDownload); }
   });
+  await record('recurring_plan_settings', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+    const form = page.locator('#recurring-plan-form');
+    const methods = await page.evaluate(() => {
+      const state = window.__YORYOKU__.getState();
+      const card = state.cards.find(item => state.accounts.some(account => account.id === item.accountId));
+      return { account: state.accounts[0].id, card: card.id, debit: card.accountId };
+    });
+    for (const [name, method] of [['水道テスト', 'account:' + methods.account], ['電気テスト', 'card:' + methods.card]]) {
+      await form.locator('[name=name]').fill(name);
+      await form.locator('[name=amount]').fill('4200');
+      await form.locator('[name=method]').selectOption(method);
+      await form.locator('[name=start]').fill('2026-11-20');
+      await form.locator('[name=interval]').selectOption('2');
+      await form.locator('[type=submit]').click();
+      await page.getByText(name, { exact: true }).waitFor();
+    }
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('yoryoku-finance-v2')).recurringPlans);
+    const water = saved.find(item => item.name === '水道テスト');
+    const electricity = saved.find(item => item.name === '電気テスト');
+    assert(water.intervalMonths === 2 && water.startDate === '2026-11-20' && water.sourceAccountId === methods.account && !water.cardId, '隔月口座払いの保存内容が不正');
+    assert(electricity.cardId === methods.card && electricity.sourceAccountId === methods.debit, 'カード払いの保存内容が不正');
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

@@ -641,7 +641,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=55" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=56" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2507,6 +2507,68 @@
       </section>`;
   }
 
+  let recurringEditId = '';
+  function renderRecurringSettings() {
+    const plan = state.recurringPlans.find(item => item.id === recurringEditId);
+    const method = plan?.cardId ? 'card:' + plan.cardId : plan?.sourceAccountId ? 'account:' + plan.sourceAccountId : '';
+    const options = [
+      ...state.accounts.map(account => ['account:' + account.id, account.name + '（口座）']),
+      ...state.cards.map(card => ['card:' + card.id, card.name + '（カード）'])
+    ];
+    const rows = state.recurringPlans.filter(item => !item.kind || item.kind === 'payment').map(item =>
+      `<div class="settings-inline"><span>${esc(item.name || '定期予定')}${item.isActive === false ? '（停止中）' : ''}</span><button class="button button-quiet button-small" data-action="edit-recurring" data-id="${esc(item.id)}">編集</button></div>`
+    ).join('');
+    return `<section class="settings-card"><h2>定期支払い</h2>${rows}
+      <form id="recurring-plan-form" class="form-stack">
+        <label><span>名前</span><input name="name" required maxlength="40" value="${esc(plan?.name || '')}"></label>
+        <label><span>見込み金額（円）</span><input name="amount" type="number" min="1" step="1" required value="${esc(plan?.amount ?? '')}"></label>
+        <label><span>支払い方法</span><select name="method" required><option value="">選択してください</option>${options.map(([value, name]) => `<option value="${esc(value)}" ${method === value ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
+        <label><span>開始日</span><input name="start" type="date" required value="${esc(plan?.startDate || '')}"><small>カード払いは利用日を指定します。月末に同じ日がない月は末日に計上します。</small></label>
+        <label><span>間隔</span><select name="interval">${Array.from({ length: 12 }, (_, index) => index + 1).map(interval => `<option value="${interval}" ${(plan?.intervalMonths ?? 1) === interval ? 'selected' : ''}>${interval === 1 ? '毎月' : interval === 2 ? '隔月' : interval + 'か月ごと'}</option>`).join('')}</select></label>
+        ${plan ? `<label class="check-row"><input name="active" type="checkbox" ${plan.isActive === false ? '' : 'checked'}><span>計算に含める</span></label>` : ''}
+        <button class="button button-primary" type="submit">${plan ? '変更を保存' : '定期支払いを追加'}</button>
+        ${plan ? '<button class="button button-quiet" type="button" data-action="cancel-recurring-edit">編集を閉じる</button>' : ''}
+      </form>
+    </section>`;
+  }
+
+  async function saveRecurringPlan(event) {
+    event.preventDefault();
+    const form = event.target;
+    const fields = new FormData(form);
+    const name = String(fields.get('name') || '').trim();
+    const amount = Number(fields.get('amount'));
+    const startDate = String(fields.get('start') || '');
+    const intervalMonths = Number(fields.get('interval'));
+    const method = String(fields.get('method') || '');
+    const card = method.startsWith('card:') ? creditCard(method.slice(5)) : null;
+    const accountId = card ? card.accountId : method.startsWith('account:') ? method.slice(8) : '';
+    const date = new Date(startDate);
+    if (!name || !Number.isSafeInteger(amount) || amount < 1 || (!Number.isInteger(intervalMonths) || intervalMonths < 1 || intervalMonths > 12)
+        || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !Number.isFinite(date.getTime())
+        || date.toISOString().slice(0, 10) !== startDate || !state.accounts.some(account => account.id === accountId)) {
+      showToast('名前、金額、支払い方法、開始日を確認してください');
+      return;
+    }
+    const previous = state.recurringPlans.find(plan => plan.id === recurringEditId);
+    if (recurringEditId && !previous) { showToast('編集する定期支払いが見つかりません'); return; }
+    form.querySelector('[type=submit]').disabled = true;
+    const next = { ...previous, id: previous?.id || uid('recurring'), name, amount, kind: 'payment',
+      startDate, dayOfMonth: previous && previous.startDate === startDate ? previous.dayOfMonth : Number(startDate.slice(8)),
+      intervalMonths, sourceAccountId: accountId, cardId: card?.id || '', isActive: !previous || fields.has('active') };
+    if (previous) state.recurringPlans = state.recurringPlans.map(plan => plan.id === next.id ? next : plan);
+    else state.recurringPlans.push(next);
+    recurringEditId = '';
+    try {
+      if (persist() === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast('定期支払いを保存しました');
+    } catch (_) {
+      showToast('定期支払いを同期できませんでした');
+    }
+    renderPage();
+  }
+
   function renderSettings() {
     const wage = state.settings.wage;
     return `
@@ -2515,6 +2577,7 @@
         <section class="settings-card"><h2>メールからの取込候補</h2><p>カード利用のお知らせメールから作られた候補です。取り込むまで計算には反映されません。</p><div class="settings-inline"><strong>${pendingCandidates().length}件が未確認</strong><button class="button button-quiet button-small" data-page="imports">確認する</button></div></section>
         <section class="settings-card"><h2>計算設定</h2><p>今使える金額の計算に使う基準です。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>毎月14日締め</option></select></label><label><span>支払い能力チェックの期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日先まで</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日先まで</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日先まで</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日先まで</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
         <section class="settings-card"><h2>給与設定</h2><p>勤務月は1日から末日までの暦月、支給は翌月の給料日です。給料日が土日祝のときは前営業日へ繰り上げます。</p><form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><p class="form-note">同じ給与を通常の「収入」にも登録すると二重計算になるため、どちらか一方を使ってください。</p><button class="button button-primary" type="submit">給与設定を保存</button></form></section>
+        ${renderRecurringSettings()}
         ${renderAliasSettings()}
         <section class="settings-card"><h2>バックアップ</h2><p>Firestoreへ自動保存します。手元にも残したい場合はJSONを書き出せます。</p><div class="field-grid field-grid-2"><button class="button button-quiet" data-action="export">JSONを書き出す</button><button class="button button-quiet" data-action="import">JSONを読み込む</button></div><button class="button button-quiet" data-action="export-cloud" ${cloud?.readCloudBackup ? '' : 'disabled'}>クラウドの原本を書き出す</button></section>
       </div><div class="stack">${renderCloudSettings()}<section class="settings-card"><h2>データ</h2><p>端末内にもキャッシュを残し、通信復帰後に同期します。</p><div class="formula-box"><div class="formula-row"><span>保存場所</span><strong>Cloud Firestore</strong></div><div class="formula-row"><span>最終更新</span><strong>${new Date(state.meta.updatedAt).toLocaleString('ja-JP')}</strong></div></div></section><section class="settings-card danger-zone"><h2>データをリセット</h2><p>この共有スペースの口座・予定・記録を削除して、初期設定に戻します。</p><button class="button button-danger button-full" data-action="reset">すべて削除</button></section></div></div>`;
@@ -3283,6 +3346,7 @@
     if (name === 'edit-work') openWorkModal(action.dataset.id);
     if (name === 'delete-work') deleteWork(action.dataset.id);
     if (name === 'reset-what-if') updateWhatIf(0);
+    if (name === 'edit-recurring' || name === 'cancel-recurring-edit') { recurringEditId = name === 'edit-recurring' ? action.dataset.id : ''; renderPage(); }
     if (name === 'export') exportData();
     if (name === 'export-cloud') void exportCloudData(action);
     if (name === 'import') $('#import-file').click();
@@ -3308,6 +3372,7 @@
     $('#card-form').addEventListener('submit', saveCard);
     $('#work-form').addEventListener('submit', saveWork);
     document.addEventListener('submit', event => {
+      if (event.target.id === 'recurring-plan-form') { void saveRecurringPlan(event); return; }
       if (event.target.id === 'receipt-form') { saveReceiptForm(event); return; }
       if (event.target.id === 'share-member-form') { addCloudMember(event); return; }
       if (event.target.id === 'workspace-name-form') { renameCloudWorkspace(event); return; }
