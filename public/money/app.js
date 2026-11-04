@@ -66,6 +66,7 @@
   let searchQuery = '';
   let whatIfAmount = 0;
   let importCandidates = [];
+  let candidatesLoaded = false;
   const candidateCardSelections = new Map();
   const candidateEdits = new Map();
   // レシートは state に入れない（1ドキュメント方式の上限に当たるため）。Firestoreの購読結果をここに置く。
@@ -641,7 +642,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=57" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=58" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1273,11 +1274,12 @@
   }
 
   function handleImportCandidates(items) {
-    importCandidates = Array.isArray(items) ? items : [];
+    candidatesLoaded = Array.isArray(items);
+    importCandidates = candidatesLoaded ? items : [];
     const visibleIds = new Set(importCandidates.map(item => item.id));
     for (const id of candidateCardSelections.keys()) if (!visibleIds.has(id)) candidateCardSelections.delete(id);
     for (const id of candidateEdits.keys()) if (!visibleIds.has(id)) candidateEdits.delete(id);
-    if (['imports', 'settings', 'home'].includes(currentPage)) renderPage();
+    if (['imports', 'settings', 'home', 'cashflow'].includes(currentPage)) renderPage();
   }
 
   /* ================= レシート明細（買ったものと、その結末） =================
@@ -2115,6 +2117,36 @@
 
   /* ================= 機能A｜支払い能力チェック（詳細） ================= */
 
+  function renderDebitAssessment() {
+    const start = today();
+    const labels = { safe: '支払い可能', review: '要確認', shortfall: '不足の見込み' };
+    try {
+      const { scenario } = window.RedesignLegacyAdapter.buildLegacyScenario(state, start, dateAdd(start, 89), {
+        candidates: candidatesLoaded ? importCandidates : undefined
+      });
+      const result = window.RedesignReadiness.calculateReadiness(scenario);
+      const rows = result.nextPayments.map(payment => {
+        const possible = payment.cardAdditionalPossible
+          ? '・追加の可能性 ' + formatAbsoluteYen(payment.cardAdditionalPossible) : '';
+        return miniRow({
+          title: esc(accountName(payment.accountId)),
+          sub: esc(labels[payment.status] + possible),
+          amount: payment.cardAmount,
+          direction: 'out'
+        });
+      }).join('');
+      return `<section class="card info-card" data-debit-assessment>
+        <h2>次回カード引落の確認</h2>
+        <p>${result.nextDate ? formatDate(result.nextDate, true) + '・' : ''}<strong>${labels[result.nextStatus]}</strong></p>
+        ${rows || '<p>次回引落の記録を確認してください。</p>'}
+        <p>今後90日間の支払い <strong>${labels[result.futureStatus]}</strong></p>
+        <p class="check-detail">保存済みの記録から試算しています。口座残高、請求額、未確認の取込候補を照合してください。</p>
+      </section>`;
+    } catch (_) {
+      return '<section class="card info-card" data-debit-assessment><h2>次回カード引落の確認</h2><p>要確認。口座・請求・振替の記録を確認してください。</p></section>';
+    }
+  }
+
   function renderCashflow() {
     const check = cashflowCheck();
     if (!check) return '<div class="page-heading"><div><span class="eyebrow">支払い能力チェック</span><h1>支払い能力チェック</h1></div></div><section class="card empty"><div><strong>口座がありません</strong>口座を追加すると計算できます。</div></section>';
@@ -2141,8 +2173,9 @@
     return `
       <div class="page-heading"><div><span class="eyebrow">支払い能力チェック</span><h1>支払い能力チェック</h1></div><button class="button button-quiet button-small" data-page="home">ホームへ戻る</button></div>
 
+      ${renderDebitAssessment()}
       <section class="card check-hero ${status.className}">
-        <span class="eyebrow">${formatDate(check.startDate)}〜${formatDate(check.endDate)}・${check.days}日間／判定は${esc(check.primaryAccountName || '生活費口座')}</span>
+        <span class="eyebrow">${formatDate(check.startDate)}〜${formatDate(check.endDate)}・${check.days}日間／基準口座の試算 ${esc(check.primaryAccountName || '生活費口座')}</span>
         <h1>${status.label}</h1>
         <p class="hero-subtitle">${status.detail}</p>
         <div class="summary-strip">

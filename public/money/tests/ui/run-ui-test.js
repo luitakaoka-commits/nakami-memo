@@ -1281,6 +1281,24 @@ const closeModals = page => page.evaluate(() => {
     assert(payload.snapshots.map(item => item.state.marker).join(',') === 'pending,archive', '退避データの対象が不正');
     assert(await page.evaluate(() => localStorage.getItem('okane-unsaved:test-user:test-workspace')), '書き出しで退避データが消えた');
   });
+  await record('next_debit_by_account', async () => {
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_DEBIT_STATE__ = { accounts: state.accounts, cards: state.cards, transactions: state.transactions, recurringPlans: state.recurringPlans, workEntries: state.workEntries };
+      state.accounts = [{ id: 'debit-a', name: '引落口座A', currentBalance: 50000, role: 'primary', isPrimary: true }, { id: 'debit-b', name: '引落口座B', currentBalance: 100000 }];
+      state.cards = [1, 2, 3].map(number => ({ id: 'debit-card-' + number, name: 'カード' + number, accountId: number === 3 ? 'debit-b' : 'debit-a', closingDay: 15, paymentDay: 10 }));
+      state.transactions = [30000, 25000, 10000].map((amount, index) => ({ id: 'debit-bill-' + index, kind: 'payment', status: 'planned', entryType: 'statement', cardId: state.cards[index].id, sourceAccountId: state.cards[index].accountId, amount, transactionDate: '2026-09-10', dueDate: '2026-09-10' }));
+      state.recurringPlans = []; state.workEntries = [];
+      api.setPage('cashflow');
+    });
+    try {
+      const result = await page.locator('[data-debit-assessment]').innerText();
+      assert(result.includes('不足の見込み') && result.includes('引落口座A') && result.includes('55,000'), '同日同口座を合算して不足判定できていない');
+      assert(result.includes('引落口座B') && result.includes('10,000'), '別口座の請求を分離していない');
+    } finally {
+      await page.evaluate(() => Object.assign(window.__YORYOKU__.getState(), window.__TEST_DEBIT_STATE__));
+    }
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];
