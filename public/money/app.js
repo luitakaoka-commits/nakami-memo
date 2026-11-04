@@ -268,6 +268,7 @@
           name: account.name || '名称未設定',
           role: account.role || 'other',
           currentBalance: Number(account.currentBalance || 0),
+          ...(account.balanceEvidence ? { balanceEvidence: account.balanceEvidence } : {}),
           includeInSpendable: account.includeInSpendable !== false && !['savings', 'investment'].includes(account.role),
           reserveAmount: Number(account.reserveAmount || 0),
           isPrimary: Boolean(account.isPrimary)
@@ -648,7 +649,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=64" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=65" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2445,7 +2446,7 @@
       <section class="accounts-grid">${accounts.map(item => {
         const protectedAccount = ['savings', 'investment'].includes(item.role);
         const pending = pendingExp(item.id);
-        return `<article class="account-card ${protectedAccount ? 'account-protected' : ''}"><div class="account-top"><div><div class="account-role">${roleLabel(item.role)}</div><div class="account-name">${esc(item.name)}${item.isPrimary ? ' <span class="badge badge-settled">基準</span>' : ''}</div></div><div class="list-actions"><button class="mini-button" data-action="edit-account" data-id="${item.id}" aria-label="${esc(item.name)}を編集">編集</button><button class="mini-button danger" data-action="delete-account" data-id="${item.id}" aria-label="${esc(item.name)}を削除">削除</button></div></div><div class="account-balance">${formatDisplayedAmount(item.currentBalance)}</div><div class="account-bottom"><span>${protectedAccount ? '計算に含めない' : item.includeInSpendable ? '計算に含める' : '計算から除外'}</span><span>${pending ? `予定 ${formatFlowAmount(pending, 'out')}` : '予定なし'}</span></div></article>`;
+        return `<article class="account-card ${protectedAccount ? 'account-protected' : ''}"><div class="account-top"><div><div class="account-role">${roleLabel(item.role)}</div><div class="account-name">${esc(item.name)}${item.isPrimary ? ' <span class="badge badge-settled">基準</span>' : ''}</div></div><div class="list-actions"><button class="mini-button" data-action="edit-account" data-id="${item.id}" aria-label="${esc(item.name)}を編集">編集</button><button class="mini-button danger" data-action="delete-account" data-id="${item.id}" aria-label="${esc(item.name)}を削除">削除</button></div></div><div class="account-balance">${formatDisplayedAmount(item.currentBalance)}</div><div class="account-bottom"><span>${item.balanceEvidence?.source === 'bank-manual' && item.balanceEvidence.amount === item.currentBalance ? '銀行残高確認 ' + esc(item.balanceEvidence.date) : '銀行残高は要確認'}</span></div><div class="account-bottom"><span>${protectedAccount ? '計算に含めない' : item.includeInSpendable ? '計算に含める' : '計算から除外'}</span><span>${pending ? `予定 ${formatFlowAmount(pending, 'out')}` : '予定なし'}</span></div></article>`;
       }).join('') || '<div class="card empty" style="grid-column:1/-1"><div><strong>口座を追加してください</strong>口座を登録すると計算できます。</div></div>'}</section>
       <section class="card cards-section"><div class="list-card-header"><div><span class="eyebrow">支払い方法</span><h2>クレジットカード</h2></div><button class="button button-quiet button-small" data-action="add-card">カードを追加</button></div><div class="credit-card-grid">${cards.map(item => `<article class="credit-card-item"><div class="credit-card-mark">${icon('card')}</div><div class="credit-card-main"><strong>${esc(item.name)}</strong><small>${esc(accountName(item.accountId))}から引落し</small><span>${item.closingDay ? `${item.closingDay}日締め` : '月末締め'} ・ ${item.paymentDay ? `${item.paymentDay}日払い` : '支払日未設定'}</span></div><div class="list-actions"><button class="mini-button" data-action="edit-card" data-id="${item.id}">編集</button><button class="mini-button danger" data-action="delete-card" data-id="${item.id}">削除</button></div></article>`).join('') || emptyBlock('カードは未登録です', '追加すると、支払いをカード別に記録できます。')}</div></section>`;
   }
@@ -2909,7 +2910,9 @@
 
   function adjustAccount(accountId, delta) {
     const target = account(accountId);
-    if (target) target.currentBalance = Number(target.currentBalance || 0) + Number(delta || 0);
+    if (!target || !Number(delta)) return;
+    target.currentBalance = Number(target.currentBalance || 0) + Number(delta);
+    delete target.balanceEvidence;
   }
 
   /** 個別明細の確定額と同じ請求期間の総額を、残高から二度引かないための入力チェック。 */
@@ -3143,6 +3146,7 @@
         operationId: 'bank-debit:' + transaction.id, amount: Number(fields.get('amount')), date: fields.get('date'), today: today(),
         bankConfirmed: true, balanceAlreadyIncludesDebit: included === 'yes', expectedRevision: 0
       });
+      if (bank.currentBalance !== result.account.balance) delete bank.balanceEvidence;
       bank.currentBalance = result.account.balance;
       transaction.status = result.bill.status;
       transaction.debitEvidence = result.bill.settlement;
@@ -3205,6 +3209,7 @@
     $('#account-name').value = current?.name || '';
     $('#account-role').value = current?.role || 'spending';
     $('#account-balance').value = current?.currentBalance ?? 0;
+    $('#account-balance-verified').checked = false;
     $('#account-spendable').checked = current ? current.includeInSpendable : true;
     $('#account-modal').hidden = false;
     $('#account-name').focus();
@@ -3216,7 +3221,12 @@
     const role = $('#account-role').value;
     const current = id ? account(id) : null;
     const next = { id: id || uid('account'), name: $('#account-name').value.trim(), role, currentBalance: Number($('#account-balance').value || 0), includeInSpendable: $('#account-spendable').checked && !['savings', 'investment'].includes(role), reserveAmount: current?.reserveAmount || 0, isPrimary: role === 'primary' };
-    if (!next.name) { showToast('口座名を入力してください'); return; }
+    if (!next.name || !Number.isSafeInteger(next.currentBalance)) { showToast('口座名と残高を確認してください'); return; }
+    if ($('#account-balance-verified').checked) {
+      next.balanceEvidence = { source: 'bank-manual', amount: next.currentBalance, date: today() };
+    } else if (current?.balanceEvidence && current.currentBalance === next.currentBalance) {
+      next.balanceEvidence = current.balanceEvidence;
+    }
     if (next.isPrimary) state.accounts.forEach(item => { item.isPrimary = false; });
     if (current) state.accounts = state.accounts.map(item => item.id === id ? next : item);
     else state.accounts.push(next);

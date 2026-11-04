@@ -583,6 +583,11 @@ const closeModals = page => page.evaluate(() => {
 
   await record('statement_absorbs_details', async () => {
     await closeModals(page);
+    await page.evaluate(() => window.__YORYOKU__.setPage('accounts'));
+    await page.locator('[data-action="edit-account"][data-id="a1"]').click();
+    await page.locator('#account-balance-verified').check();
+    await page.locator('#account-form [type=submit]').click();
+    assert(await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').balanceEvidence?.source === 'bank-manual'), '銀行残高の確認が保存されていない');
     const before = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').currentBalance);
     await page.evaluate(() => window.__YORYOKU__.setPage('plans'));
     await page.waitForTimeout(150);
@@ -628,6 +633,8 @@ const closeModals = page => page.evaluate(() => {
     assert(after.oldItem.status === 'absorbed' && after.oldItem.absorbedBy === 'dx-st', `明細が吸収されていない: ${JSON.stringify(after.oldItem)}`);
     assert(after.newItem.status === 'absorbed', `明細が吸収されていない: ${JSON.stringify(after.newItem)}`);
     assert(after.balance === before - 20000, `残高が総額の分だけ減っていない: ${before} → ${after.balance}`);
+
+    assert(await page.evaluate(() => !window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').balanceEvidence), '引落後も以前の残高が確認済みのままになっている');
 
     // 記録画面でも、確定した総額から明細を展開できる
     await page.evaluate(() => window.__YORYOKU__.setPage('records'));

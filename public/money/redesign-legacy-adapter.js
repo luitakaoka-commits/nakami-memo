@@ -14,7 +14,10 @@
     const accounts = state.accounts.map(account => {
       if (!account.id || accountIds.has(account.id) || !Number.isSafeInteger(account.currentBalance)) throw new Error('旧口座の識別子または残高が不正です');
       accountIds.add(account.id);
-      return { id: account.id, balance: account.currentBalance, balanceVerified: false };
+      const proof = account.balanceEvidence;
+      const balanceVerified = proof?.source === 'bank-manual' && proof.amount === account.currentBalance
+        && validDate(proof.date) && proof.date <= today;
+      return { id: account.id, balance: account.currentBalance, balanceVerified };
     });
     if (!accounts.length) throw new Error('旧口座がありません');
     const cards = new Map();
