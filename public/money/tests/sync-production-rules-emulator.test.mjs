@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { connectFirestoreEmulator, deleteDoc, doc, getDocFromServer, getFirestore, runTransaction, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import sync from '../redesign-sync-coordinator.js';
+import refunds from '../redesign-refund.js';
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8487') throw new Error('ローカル模擬環境専用です');
 const app = initializeApp({ projectId: 'demo-kurashi', apiKey: 'demo', appId: 'demo' }, `sync-${randomUUID()}`);
 const db = getFirestore(app);
@@ -72,6 +73,34 @@ try {
         assert.equal((await getDocFromServer(ignored)).data().status, 'ignored');
       } finally { await deleteDoc(ignored); }
     } finally { await deleteDoc(candidate); }
+  });
+  await check('照合済みの返金だけを候補と一緒に保存する', async () => {
+    const refundWorkspace = doc(db, 'workspaces', 'refund-' + randomUUID());
+    const candidateRef = id => doc(refundWorkspace, 'importCandidates', id);
+    const candidate = { id: 'refund', sourcePackage: 'test.example', detectedAt: '2026-11-04T00:00:00Z', amount: 1000, type: 'refund', status: 'pending', fingerprint: 'refund-fingerprint' };
+    const { id, ...candidateData } = candidate;
+    const purchase = { id: 'purchase', kind: 'payment', entryType: 'itemized', status: 'planned', amount: 3000, cardId: 'card', sourceAccountId: 'a', transactionDate: '2026-11-01', dueDate: '2026-12-10' };
+    const state = { cards: [{ id: 'card', accountId: 'a', closingDay: 15, paymentDay: 10 }], transactions: [purchase] };
+    await setDoc(refundWorkspace, { ...original, state });
+    await setDoc(candidateRef(id), candidateData);
+    try {
+      const prepared = refunds.preparePendingRefund({ state, candidate, targetId: purchase.id, amount: 1000, confirmed: true });
+      const saveRefund = entry => sync.saveSnapshot({
+        db, ref: refundWorkspace, uid: 'sync-user', baseline: state,
+        state: { ...state, transactions: [purchase, entry] }, expectedRevision: 0,
+        runTransaction, updatedAt: serverTimestamp(), candidateRef,
+        acceptances: [{ id, patch: { status: 'accepted', amount: 1000 }, refundTarget: purchase.id }]
+      });
+      await assert.rejects(saveRefund({ ...prepared.transaction, amount: -1001 }), /保存条件/);
+      assert.deepEqual((await getDocFromServer(refundWorkspace)).data().state, state);
+      assert.equal((await getDocFromServer(candidateRef(id))).data().status, 'pending');
+      await saveRefund(prepared.transaction);
+      assert.equal((await getDocFromServer(refundWorkspace)).data().state.transactions[1].amount, -1000);
+      assert.equal((await getDocFromServer(candidateRef(id))).data().status, 'accepted');
+    } finally {
+      await deleteDoc(candidateRef(id));
+      await deleteDoc(refundWorkspace);
+    }
   });
   await check('新形式の家計へ旧画面から保存しない', async () => {
     const before = (await getDocFromServer(ref)).data();

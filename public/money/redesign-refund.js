@@ -1,6 +1,7 @@
 /* 返金・取消の照合計画。保存や本番の残高変更は行わない。 */
 (function attach(root) {
   'use strict';
+  const engine = typeof module !== 'undefined' && module.exports ? require('./finance-engine.js') : root.FinanceEngine;
   function planRefund(input = {}) {
     const { notice, purchases, processed = [] } = input;
     if (!notice || typeof notice.id !== 'string' || !notice.id || !['refund', 'cancel'].includes(notice.type) || typeof notice.cardId !== 'string' || !notice.cardId || !Number.isSafeInteger(notice.amount) || notice.amount <= 0 || !Array.isArray(purchases) || !Array.isArray(processed)) throw new Error('返金通知が不正です');
@@ -23,7 +24,55 @@
     if (target.billStatus !== 'estimate') return { status: 'review', reason: 'billing_period_unresolved' };
     return { status: 'ready', plan: { noticeId: notice.id, targetId: target.id, cardId: notice.cardId, type: notice.type, amount: notice.amount, newRefundedAmount: target.refundedAmount + notice.amount, remainingAmount: remaining - notice.amount } };
   }
-  const api = { planRefund };
+  function preparePendingRefund({ state, candidate, targetId, amount, confirmed }) {
+    if (!state || !Array.isArray(state.transactions) || !Array.isArray(state.cards)
+      || !candidate?.id || !['pending', 'needs_review'].includes(candidate.status)) {
+      return { status: 'review', reason: 'missing_evidence' };
+    }
+    const matches = state.transactions.filter(item => item.id === targetId);
+    const target = matches[0];
+    if (matches.length !== 1 || target.kind !== 'payment' || target.entryType !== 'itemized'
+      || target.status !== 'planned' || target.affectsForecast === false || target.dateEstimated === true) {
+      return { status: 'review', reason: 'target_not_unique' };
+    }
+    const card = state.cards.find(item => item.id === target.cardId);
+    if (!card?.accountId || card.accountId !== target.sourceAccountId) return { status: 'review', reason: 'card_mismatch' };
+    const holidayOptions = { overrides: state.settings?.holidayOverrides || {} };
+    const cycle = engine.cardBillingCycleOf(target, card, holidayOptions);
+    if (!cycle || !target.dueDate) return { status: 'review', reason: 'billing_period_unresolved' };
+    const hasStatement = state.transactions.some(item => item.kind === 'payment' && item.entryType === 'statement'
+      && item.cardId === card.id && ['planned', 'settled'].includes(item.status)
+      && engine.cardBillingCycleOf(item, card, holidayOptions) === cycle);
+    const hasUnlinkedRefund = state.transactions.some(item => item.kind === 'payment' && item.amount < 0
+      && item.cardId === card.id && item.status !== 'cancelled' && !item.refundEvidence
+      && engine.cardBillingCycleOf(item, card, holidayOptions) === cycle);
+    if (hasUnlinkedRefund) return { status: 'review', reason: 'notice_conflict' };
+    const previous = state.transactions.filter(item => item.refundEvidence?.targetId === targetId && item.status !== 'cancelled');
+    const conflictingNotice = state.transactions.some(item => item.id === 'mail_' + candidate.id
+      || (candidate.fingerprint && item.refundEvidence?.fingerprint === candidate.fingerprint));
+    if (conflictingNotice) return { status: 'review', reason: 'notice_conflict' };
+    const result = planRefund({
+      notice: { id: candidate.id, targetId, type: candidate.type, amount, cardId: card.id,
+        amountConfirmed: confirmed === true, targetConfirmed: confirmed === true },
+      purchases: [{ id: targetId, cardId: card.id, amount: target.amount,
+        refundedAmount: previous.reduce((sum, item) => sum + Math.abs(item.amount), 0),
+        billStatus: hasStatement ? 'confirmed' : 'estimate' }]
+    });
+    if (result.status !== 'ready') return result;
+    return { ...result, transaction: {
+      id: 'mail_' + candidate.id, kind: 'payment', amount: -amount, cardId: card.id, sourceAccountId: card.accountId,
+      entryType: 'itemized', status: 'planned', origin: 'mail-import', dueDate: target.dueDate,
+      transactionDate: target.transactionDate, refundEvidence: { targetId, noticeId: candidate.id, type: candidate.type, cycle, fingerprint: candidate.fingerprint || '' }
+    } };
+  }
+  function matchesPreparedRefund(transaction, prepared) {
+    if (prepared.status !== 'ready' || !transaction || transaction.affectsForecast === false) return false;
+    const expected = prepared.transaction;
+    return ['id', 'kind', 'amount', 'cardId', 'sourceAccountId', 'entryType', 'status', 'origin', 'dueDate', 'transactionDate']
+      .every(key => transaction[key] === expected[key])
+      && Object.keys(expected.refundEvidence).every(key => transaction.refundEvidence?.[key] === expected.refundEvidence[key]);
+  }
+  const api = { planRefund, preparePendingRefund, matchesPreparedRefund };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.RedesignRefund = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

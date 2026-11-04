@@ -191,6 +191,7 @@
       ...(source.scheduledDate ? { scheduledDate: source.scheduledDate } : {}),
       ...(source.statementEvidence ? { statementEvidence: source.statementEvidence } : {}),
       ...(source.debitEvidence ? { debitEvidence: source.debitEvidence } : {}),
+      ...(source.refundEvidence ? { refundEvidence: source.refundEvidence } : {}),
       // シフトから作った給与の取引だけが持つ。どの支給月か（'YYYY-MM'）と、手で直したか（2026-09-15）
       salaryPaymentMonth: source.salaryPaymentMonth || '',
       salaryManual: source.salaryManual === true,
@@ -649,7 +650,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=65" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=66" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1185,11 +1186,11 @@
             <div class="candidate-head"><strong>${candidate.amount ? formatAbsoluteYen(candidate.amount) : '金額を確認'}</strong><span class="badge ${status.className}">${status.label}</span><span class="badge badge-muted">${CANDIDATE_TYPE[candidate.type] || '不明'}</span>${duplicate ? '<span class="badge badge-warn">重複の可能性</span>' : ''}</div>
             <small>${candidate.usedDate ? '利用日 ' + formatDate(candidateDate(candidate), true) : '受信日 ' + formatDate(candidateDate(candidate), true) + '（利用日未確認）'}${candidate.merchant ? `・${esc(candidate.merchant)}` : ''}・${esc(candidate.cardHint || 'カード不明')}・${esc(candidate.sourceLabel || candidate.sourcePackage || '取込元不明')}</small>
             ${candidate.note ? `<small>${esc(candidate.note)}</small>` : ''}
-            ${actionable && needsOriginal ? '<small>元の利用と返金先の請求を確認してください。</small>' : ''}
+            ${actionable && needsOriginal ? renderRefundTarget() : ''}
             ${actionable ? `<div class="candidate-edit-fields"><label><span>金額</span><input type="number" min="1" step="1" inputmode="numeric" data-candidate-field="amount" data-candidate-id="${esc(candidate.id)}" value="${esc(amountValue)}"></label><label><span>利用日／引落日</span><input type="date" data-candidate-field="date" data-candidate-id="${esc(candidate.id)}" value="${esc(dateValue)}"></label><label><span>内容の種類</span><select data-candidate-field="entryType" data-candidate-id="${esc(candidate.id)}"><option value="">種類を選択</option><option value="itemized" ${entryTypeValue === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${entryTypeValue === 'statement' ? 'selected' : ''}>請求総額</option></select></label><label><span>利用先・メモ</span><input type="text" maxlength="40" data-candidate-field="merchant" data-candidate-id="${esc(candidate.id)}" value="${esc(merchantValue)}"></label></div><small>1件の利用は利用日、請求総額は引落日を入力してください。</small>` : ''}
           </div>
           ${actionable ? `<div class="candidate-actions"><label class="candidate-card-select"><span>取り込むカード</span><select data-candidate-card="${esc(candidate.id)}" aria-label="取り込むカード"><option value="">カードを選択</option>${state.cards.map(card => `<option value="${esc(card.id)}" ${card.id === selectedCard ? 'selected' : ''}>${esc(card.name)}</option>`).join('')}</select></label><button class="mini-button" data-action="remember-candidate-card" data-id="${esc(candidate.id)}">このカードの対応を覚える</button><div class="list-actions">
-            <button class="mini-button primary" data-action="accept-candidate" data-id="${esc(candidate.id)}" ${needsOriginal ? 'disabled' : ''}>取り込む</button>
+            <button class="mini-button primary" data-action="accept-candidate" data-id="${esc(candidate.id)}">取り込む</button>
             <button class="mini-button" data-action="ignore-candidate" data-id="${candidate.id}">無視</button>
             <button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button>
           </div></div>` : `<div class="list-actions"><button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button></div>`}
@@ -1209,12 +1210,41 @@
   }
 
   /** 候補を正式なカード取引へ変換する。承認するまで計算には含めない。 */
+  function renderRefundTarget() {
+    const options = state.transactions.filter(item => item.cardId && item.entryType === 'itemized' && item.status === 'planned' && item.amount > 0)
+      .map(item => `<option value="${esc(item.id)}">${esc(cardName(item.cardId))}・${esc(item.transactionDate)}・${esc(item.memo)}・${formatAbsoluteYen(item.amount)}</option>`).join('');
+    return `<label>元のカード利用<select data-refund-target><option value="">選択してください</option>${options}</select></label><small>元の利用と同じ未確定の請求期間に反映する返金を取り込めます。</small>`;
+  }
+
+  async function acceptPendingRefund(candidate, edits) {
+    const amount = Number(edits?.amount);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || !edits?.refundTarget) {
+      showToast('返金額と元の利用を選んでください');
+      return;
+    }
+    try {
+      const result = window.RedesignRefund.preparePendingRefund({ state, candidate, targetId: edits.refundTarget, amount, confirmed: true });
+      if (result.status !== 'ready') {
+        showToast('返金額・元の利用・反映先の請求期間を確認してください');
+        return;
+      }
+      const row = result.transaction;
+      if (!window.confirm(cardName(row.cardId) + 'の元の利用に ' + formatAbsoluteYen(amount)
+        + ' を返金し、同じ未確定の請求期間に反映することをカード会社の明細で確認しましたか？')) return;
+      state.transactions.push(createTransaction({ ...row, memo: edits.merchant || candidate.merchant || 'カード返金' }));
+      const patch = { ...stripCandidate(candidate), amount, status: 'accepted' };
+      if (persist({ id: candidate.id, patch, refundTarget: edits.refundTarget }) === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast('返金を元の利用に紐付けました');
+    } catch (error) { showToast(error.message || '返金を同期できませんでした'); }
+    renderPage();
+  }
+
   async function acceptCandidate(id, selectedCardId, edits) {
     const candidate = importCandidates.find(item => item.id === id);
     if (!candidate || !['pending', 'needs_review'].includes(candidate.status)) return;
     if (['refund', 'cancel'].includes(candidate.type)) {
-      showToast('返金・取消は元の利用と返金先の請求を確認してください。');
-      return;
+      return acceptPendingRefund(candidate, edits);
     }
     // クラウドの候補更新を待つ間の連打や、再読込後の再取込を防ぐ。
     const transactionId = `mail_${id}`;
@@ -3030,6 +3060,7 @@
     if (!state.accounts.length) { closeModal('event-modal'); showToast('先に口座を追加してください'); return; }
     const id = $('#event-id').value;
     const current = id ? state.transactions.find(item => item.id === id) : null;
+    if (current && hasLinkedRefund(current)) { showToast('返金と紐付いた取引は直接変更できません'); return; }
     const next = createTransaction({
       id: id || '', kind: $('#event-kind').value, amount: Number($('#event-amount').value || 0), dueDate: $('#event-date').value,
       transactionDate: eventUsageDateValue(), transactionAt: current?.transactionAt || '', absorbedBy: current?.absorbedBy || '', dateEstimated: false,
@@ -3161,9 +3192,14 @@
     renderPage();
   }
 
+  function hasLinkedRefund(transaction) {
+    return Boolean(transaction.refundEvidence || state.transactions.some(item => item.refundEvidence?.targetId === transaction.id));
+  }
+
   function settleEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction || transaction.status !== 'planned') return;
+    if (hasLinkedRefund(transaction)) { showToast('返金を含む請求総額から引落を記録してください'); return; }
     if (transaction.kind === 'payment' && transaction.cardId && transaction.entryType === 'statement') {
       const card = creditCard(transaction.cardId);
       if (!card || card.accountId !== transaction.sourceAccountId
@@ -3188,6 +3224,7 @@
   function deleteEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction) return;
+    if (hasLinkedRefund(transaction)) { showToast('返金と紐付いた取引は直接削除できません'); return; }
     const salaryNote = transaction.salaryPaymentMonth ? '\nこの月の給与は、シフトから作り直しません（シフト画面から戻せます）。' : '';
     if (!window.confirm(`${transaction.memo || kindMeta(transaction.kind).label}を削除しますか？${transaction.status === 'settled' ? '\n確定済みのため、残高も元に戻します。' : ''}${salaryNote}`)) return;
     if (transaction.status === 'settled') revertEffect(transaction);
@@ -3527,7 +3564,8 @@
         amount: row?.querySelector('[data-candidate-field="amount"]')?.value || '',
         date: row?.querySelector('[data-candidate-field="date"]')?.value || '',
         merchant: row?.querySelector('[data-candidate-field="merchant"]')?.value || '',
-        entryType: row?.querySelector('[data-candidate-field="entryType"]')?.value || ''
+        entryType: row?.querySelector('[data-candidate-field="entryType"]')?.value || '',
+        refundTarget: row?.querySelector('[data-refund-target]')?.value || ''
       });
       return;
     }

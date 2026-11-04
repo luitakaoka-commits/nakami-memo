@@ -2,6 +2,7 @@
 (function attach(root) {
   'use strict';
   const engine = typeof module !== 'undefined' && module.exports ? require('./finance-engine.js') : root.FinanceEngine;
+  const refunds = () => typeof module !== 'undefined' && module.exports ? require('./redesign-refund.js') : root.RedesignRefund;
   function validDate(value) {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const date = new Date(`${value}T00:00:00Z`);
@@ -86,7 +87,18 @@
       if (!Number.isSafeInteger(item.amount)) throw new Error('旧取引の金額を確認してください');
       if (item.amount < 0 && item.kind === 'payment') {
         if (item.cardId && !cards.has(item.cardId)) throw new Error('返金先のカードを確認してください');
-        // 元の購入・請求との対応が分からない返金は請求を勝手に減らさない。
+        const proof = item.refundEvidence;
+        if (proof?.noticeId && ['refund', 'cancel'].includes(proof.type)) {
+          const prepared = refunds().preparePendingRefund({
+            state: { ...state, transactions: state.transactions.filter(entry => entry.id !== item.id) },
+            candidate: { id: proof.noticeId, type: proof.type, status: 'pending', fingerprint: proof.fingerprint },
+            targetId: proof.targetId, amount: -item.amount, confirmed: true
+          });
+          if (refunds().matchesPreparedRefund(item, prepared)) {
+            cardTransactions.push(item);
+            continue;
+          }
+        }
         issues.push({ type: 'legacy_refund_unverified', id: item.id });
         continue;
       }

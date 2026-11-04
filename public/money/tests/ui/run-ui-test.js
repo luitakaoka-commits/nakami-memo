@@ -1369,6 +1369,25 @@ const closeModals = page => page.evaluate(() => {
       });
     }
   });
+  await record('linked_refund_import', async () => {
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_REFUND_STATE__ = { cards: state.cards, transactions: state.transactions };
+      const account = state.accounts[0];
+      state.cards = [{ id: 'refund-card', name: '返金テストカード', accountId: account.id, closingDay: 15, paymentDay: 10 }];
+      state.transactions = [api.createTransaction({ id: 'refund-purchase', kind: 'payment', status: 'planned', entryType: 'itemized', amount: 3000, cardId: 'refund-card', sourceAccountId: account.id, transactionDate: '2026-09-02', dueDate: '2026-10-13' })];
+      api.setImportCandidates([{ id: 'refund-test', status: 'pending', type: 'refund', amount: 1000, fingerprint: 'refund-test' }]);
+      api.setPage('imports');
+    });
+    try {
+      await page.locator('[data-refund-target]').selectOption('refund-purchase');
+      await page.locator('[data-action="accept-candidate"][data-id="refund-test"]').click();
+      const result = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_refund-test'));
+      assert(result?.amount === -1000 && result.refundEvidence.targetId === 'refund-purchase' && result.dueDate === '2026-10-13', '元の利用に返金が紐付いていない');
+    } finally {
+      await page.evaluate(() => { const api = window.__YORYOKU__; Object.assign(api.getState(), window.__TEST_REFUND_STATE__); api.setImportCandidates([]); });
+    }
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

@@ -9,7 +9,7 @@ const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
 const { previewLegacy } = require('../redesign-legacy-preview.js');
 const { previewSpendable } = require('../redesign-spendable-preview.js');
 const { confirmBill, recordDebit } = require('../redesign-bill-lifecycle.js');
-const { planRefund } = require('../redesign-refund.js');
+const { planRefund, preparePendingRefund } = require('../redesign-refund.js');
 const { planCsv } = require('../redesign-csv-reconciliation.js');
 const { periodForCards } = require('../redesign-deadline.js');
 const { evaluateCashflow } = require('../redesign-cashflow-composition.js');
@@ -487,6 +487,20 @@ test('照合済みの返金は指定された購入のみ減額する計画を�
   const result = planRefund({ notice, purchases });
   assert.equal(result.status, 'ready'); assert.equal(result.plan.targetId, 'b'); assert.equal(result.plan.remainingAmount, 600);
   assert.equal(purchases[0].refundedAmount, 0); assert.equal(purchases[1].refundedAmount, 0);
+});
+test('元の利用に紐付いた返金を未確定の同じ請求期間だけに反映する', () => {
+  const state = legacyFixture();
+  const purchase = { ...state.transactions[1], sourceAccountId: 'a', amount: 3000 };
+  state.transactions = [purchase];
+  const candidate = { id: 'refund-one', status: 'pending', type: 'refund', fingerprint: 'unique-refund' };
+  const args = { state, candidate, targetId: purchase.id, amount: 1000, confirmed: true };
+  const result = preparePendingRefund(args);
+  assert.equal(result.status, 'ready');
+  state.transactions.push(result.transaction);
+  assert.equal(preparePendingRefund(args).status, 'review');
+  assert.equal(preparePendingRefund({ ...args, candidate: { ...candidate, id: 'second', fingerprint: 'second' }, amount: 2100 }).status, 'review');
+  const { scenario } = buildLegacyScenario(state, '2026-10-30', '2026-12-31');
+  assert.equal(scenario.events.find(item => item.cardPayment).additionalPossible, 2000);
 });
 test('返金通知は対象不明・カード違い・返金超過を自動処理しない', () => {
   const purchase = { id: 'a', cardId: 'jcb', amount: 1000, refundedAmount: 300, billStatus: 'estimate' };
