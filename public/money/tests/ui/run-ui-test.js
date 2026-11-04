@@ -586,6 +586,13 @@ const closeModals = page => page.evaluate(() => {
     const before = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').currentBalance);
     await page.evaluate(() => window.__YORYOKU__.setPage('plans'));
     await page.waitForTimeout(150);
+    await page.click('[data-action="settle-event"][data-id="dx-st"]');
+    await page.getByText('引落を記録する前にカード会社の請求額を確認してください', { exact: true }).waitFor();
+    const unchecked = await page.evaluate(() => {
+      const state = window.__YORYOKU__.getState();
+      return { balance: state.accounts.find(item => item.id === 'a1').currentBalance, status: state.transactions.find(item => item.id === 'dx-st').status };
+    });
+    assert(unchecked.balance === before && unchecked.status === 'planned', '請求額の未確認時に引落が記録された');
     await page.click('[data-action="confirm-statement"][data-id="dx-st"]');
     await page.getByText('請求額確認済み', { exact: true }).first().waitFor();
     const confirmed = await page.evaluate(() => {

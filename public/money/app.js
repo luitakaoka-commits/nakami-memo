@@ -648,7 +648,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=62" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=63" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -3065,7 +3065,7 @@
       }
       next.debitEvidence = current.debitEvidence;
     }
-    if (next.status === 'settled' && current?.status === 'planned' && current.statementEvidence) {
+    if (next.status === 'settled' && current?.status !== 'settled' && next.kind === 'payment' && next.cardId && next.entryType === 'statement') {
       showToast('引落を記録する操作から銀行明細を入力してください');
       return;
     }
@@ -3160,7 +3160,16 @@
   function settleEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction || transaction.status !== 'planned') return;
-    if (transaction.statementEvidence) { openDebitForm(transaction); return; }
+    if (transaction.kind === 'payment' && transaction.cardId && transaction.entryType === 'statement') {
+      const card = creditCard(transaction.cardId);
+      if (!card || card.accountId !== transaction.sourceAccountId
+          || !finance.hasConfirmedCardStatement(transaction, finance.cardBillingCycleOf(transaction, card, holidayOptions()))) {
+        showToast('引落を記録する前にカード会社の請求額を確認してください');
+        return;
+      }
+      openDebitForm(transaction);
+      return;
+    }
     // 給与の見込みはシフトからの計算なので、実際の支給額と違うことが多い。
     // そのまま確定させず、確定済みにした編集画面を開いて額を直してもらう（2026-09-15）
     if (transaction.salaryPaymentMonth) { openEventModal(id, transaction.kind, 'settled'); return; }
