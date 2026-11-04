@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const { previewLegacy } = require('../redesign-legacy-preview.js');
 const { previewSpendable } = require('../redesign-spendable-preview.js');
 const { buildLegacyScenario } = require('../redesign-legacy-adapter.js');
+const { spendingAllowance } = require('../redesign-readiness.js');
 const source = process.argv[2];
 if (!source) throw new Error('テスト用の家計コピーを指定してください');
 const state = JSON.parse(fs.readFileSync(source, 'utf8'));
@@ -47,6 +48,19 @@ for (const account of scenario.accounts) {
   }
 }
 const forecastChecks = { cardChecks, shortageChecks, events: Object.fromEntries(['expense', 'income', 'transfer'].map(kind => [kind, active.filter(event => event.kind === kind).length])) };
+const funding = state.accounts.find(account => account.isPrimary) || state.accounts.find(account => account.role === 'primary') || state.accounts[0];
+const reserve = Number(state.settings?.defenseLine || 0);
+const deadline = main.period.deadline;
+const fundingOutflows = active.filter(event => event.accountId === funding.id && event.kind !== 'income');
+const cost = events => sum(events) + events.reduce((total, event) => total + (event.additionalPossible || 0), 0);
+const before = fundingOutflows.filter(event => event.date <= deadline);
+const after = fundingOutflows.filter(event => event.date > deadline);
+const expected = funding.currentBalance - cost(before) - cost(after) - reserve;
+const allowance = spendingAllowance(scenario, { deadline, accountId: funding.id, reserve });
+if (allowance.openingBalance !== funding.currentBalance || allowance.throughDeadline !== cost(before)
+  || allowance.afterDeadline !== cost(after) || allowance.reserve !== reserve || allowance.amount !== expected
+  || allowance.referenceOnly !== true) throw new Error('締め日までの参考額または内訳が独立集計と一致しません');
+const allowanceCheck = { beforeCount: before.length, afterCount: after.length, excludedIncome: active.filter(event => event.accountId === funding.id && event.kind === 'income').length, referenceOnly: allowance.referenceOnly };
 const issues = {};
 for (const issue of main.issues) issues[issue.type] = (issues[issue.type] || 0) + 1;
 const candidateSummary = candidates ? {
@@ -56,4 +70,4 @@ const candidateSummary = candidates ? {
   possibleExistingTransactions: candidates.filter(item => item.amount != null && item.merchant && state.transactions.some(tx => tx.amount === item.amount && tx.transactionDate === item.usedDate && (tx.memo || '').includes(item.merchant))).length
 } : null;
 if (candidates?.length && (main.assessment.nextStatus === 'safe' || main.assessment.futureStatus === 'safe')) throw new Error('未確認候補を含むデータを安全と判定しています');
-console.log(JSON.stringify({ suite: 'private-snapshot', asOf: today, endDate, deadline: main.period.deadline, counts: { accounts: state.accounts.length, cards: state.cards.length, transactions: state.transactions.length, workEntries: (state.workEntries || []).length }, candidates: candidateSummary, nextStatus: main.assessment.nextStatus, futureStatus: main.assessment.futureStatus, supplementalReferenceOnly: supplemental.referenceOnly, forecastChecks, issues }));
+console.log(JSON.stringify({ suite: 'private-snapshot', asOf: today, endDate, deadline: main.period.deadline, counts: { accounts: state.accounts.length, cards: state.cards.length, transactions: state.transactions.length, workEntries: (state.workEntries || []).length }, candidates: candidateSummary, nextStatus: main.assessment.nextStatus, futureStatus: main.assessment.futureStatus, supplementalReferenceOnly: supplemental.referenceOnly, forecastChecks, allowanceCheck, issues }));
