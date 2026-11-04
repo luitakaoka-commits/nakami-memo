@@ -742,6 +742,15 @@ test('旧定期支払いの日付を同月に変更しても変更前の予定�
   assert.deepEqual(dates, ['2026-11-07', '2026-12-05']);
   assert.ok(result.issues.some(issue => issue.type === 'legacy_recurring_date_changed' && issue.id === 'moved'));
 });
+test('旧定期支払いを翌月へ移しても元の月を再生成しない', () => {
+  const old = legacyFixture();
+  old.recurringPlans = [{ id: 'utility', dayOfMonth: 5, kind: 'payment', amount: 4000, sourceAccountId: 'a' }];
+  old.transactions.push({ id: 'recurring:utility:2026-11-05', status: 'planned', kind: 'payment', amount: 4000, sourceAccountId: 'a', dueDate: '2026-12-07', recurringPlanId: 'utility' });
+  const result = buildLegacyScenario(old, '2026-10-30', '2026-12-31');
+  const dates = result.scenario.events.filter(event => event.kind === 'expense' && !event.cardPayment).map(event => event.date).sort();
+  assert.deepEqual(dates, ['2026-12-05', '2026-12-07']);
+  assert.ok(result.issues.some(issue => issue.type === 'legacy_recurring_date_changed'));
+});
 test('登録済み給与とシフト見込みを二重に足さず未入金として扱う', () => {
   const old = legacyFixture();
   old.settings = { wage: { hourlyRate: 1000, salaryPaymentDay: 15, salaryMonthOffset: 1, depositAccountId: 'a' } };

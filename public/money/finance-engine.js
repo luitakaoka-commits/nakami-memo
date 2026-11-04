@@ -781,11 +781,22 @@
    * recurringPlans を指定期間の仮想取引へ展開する。
    * 同じ plan / 同じ日付の実取引が既にある場合は展開しない（二重計上を防ぐ）。
    */
+  function recurringOccurrenceDate(transaction) {
+    const prefix = 'recurring:' + transaction.recurringPlanId + ':';
+    const encoded = typeof transaction.id === 'string' && transaction.id.startsWith(prefix)
+      ? transaction.id.slice(prefix.length) : '';
+    for (const date of [transaction.scheduledDate, encoded]) {
+      if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+          && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date) return date;
+    }
+    return transaction.dueDate;
+  }
+
   function expandScheduledTransactions(recurringPlans = [], fromDate, toDate, existingTransactions = []) {
     if (!fromDate || !toDate || fromDate > toDate) return [];
     const taken = new Set(existingTransactions
       .filter(transaction => transaction && transaction.recurringPlanId)
-      .map(transaction => `${transaction.recurringPlanId}:${transaction.dueDate}`));
+      .map(transaction => `${transaction.recurringPlanId}:${String(recurringOccurrenceDate(transaction) || '').slice(0, 7)}`));
 
     const results = [];
     const start = parseLocalDate(fromDate);
@@ -804,7 +815,7 @@
         if (occurrence >= start && occurrence <= end
           && (!plan.startDate || key >= plan.startDate)
           && (!plan.endDate || key <= plan.endDate)
-          && !taken.has(`${plan.id}:${key}`)) {
+          && !taken.has(`${plan.id}:${key.slice(0, 7)}`)) {
           results.push({
             id: `recurring:${plan.id}:${key}`,
             kind: plan.kind || 'payment',
@@ -820,6 +831,7 @@
             memo: plan.name || '固定費',
             affectsForecast: true,
             recurringPlanId: plan.id,
+            scheduledDate: key,
             isVirtual: true
           });
         }
@@ -2034,6 +2046,7 @@
     recordedSalaryMonths, salaryMonthsOutsideForecast, salaryRecordOf, planLegacySalaryRecovery, planSalaryRecords, salaryRecordSummary,
     // 予定
     expandScheduledTransactions,
+    recurringOccurrenceDate,
     // 2つの主計算（必ず別関数・別結果）
     calculateCashflowCheck, calculateSpendableAmount,
     // 「今使える金額」の派生

@@ -55,13 +55,14 @@
       if (item?.recurringPlanId && item.status !== 'cancelled') {
         if (!validDate(item.dueDate)) throw new Error('定期支払いの日付を確認してください');
         const plan = monthlyPlans.get(item.recurringPlanId);
-        const key = JSON.stringify([item.recurringPlanId, plan ? item.dueDate.slice(0, 7) : item.dueDate]);
+        const occurrence = engine.recurringOccurrenceDate(item);
+        const key = JSON.stringify([item.recurringPlanId, plan ? occurrence.slice(0, 7) : occurrence]);
         if (recurringDates.has(key)) throw new Error('同じ日の定期支払いが重複しています');
         recurringDates.add(key);
         if (plan) {
           const [year, month, day] = item.dueDate.split('-').map(Number);
           const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-          if (day !== Math.min(plan.dayOfMonth, lastDay)) issues.push({ type: 'legacy_recurring_date_changed', id: item.id });
+          if (occurrence !== item.dueDate || day !== Math.min(plan.dayOfMonth, lastDay)) issues.push({ type: 'legacy_recurring_date_changed', id: item.id });
         }
       }
       if (!item?.salaryPaymentMonth || item.status === 'cancelled') continue;

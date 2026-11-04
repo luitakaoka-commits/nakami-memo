@@ -492,6 +492,17 @@
       equal(heavy.cashflow.afterVerdict, 'belowDefense', '判定が最低残高割れへ変わる');
     });
 
+    test('月をまたいで移動した定期予定を元の月に再生成しない', () => {
+      const plans = [{ id: 'p1', dayOfMonth: 27, amount: 60000 }];
+      for (const moved of [
+        { id: 'recurring:p1:2026-09-27' },
+        { id: 'saved', scheduledDate: '2026-09-27' }
+      ]) {
+        const rows = engine.expandScheduledTransactions(plans, '2026-09-01', '2026-10-31',
+          [{ ...moved, recurringPlanId: 'p1', dueDate: '2026-10-01' }]);
+        if (rows.length !== 1 || rows[0].dueDate !== '2026-10-27') throw new Error('元の月が再生成されたか翌月分が消えました');
+      }
+    });
     test('定期予定を期間内へ展開し、実取引と二重にしない', () => {
       const plans = [{ id: 'p1', kind: 'payment', name: '家賃', amount: 60000, dayOfMonth: 27, sourceAccountId: 'a1', isActive: true }];
       const expanded = engine.expandScheduledTransactions(plans, '2026-08-25', '2026-10-31', []);

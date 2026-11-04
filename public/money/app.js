@@ -189,6 +189,7 @@
       lendingAmount: Number(source.lendingAmount || 0),
       affectsForecast: source.affectsForecast !== false,
       recurringPlanId: source.recurringPlanId || '',
+      ...(source.scheduledDate ? { scheduledDate: source.scheduledDate } : {}),
       // シフトから作った給与の取引だけが持つ。どの支給月か（'YYYY-MM'）と、手で直したか（2026-09-15）
       salaryPaymentMonth: source.salaryPaymentMonth || '',
       salaryManual: source.salaryManual === true,
@@ -640,7 +641,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=52" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=53" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2894,7 +2895,7 @@
       id: id || '', kind: $('#event-kind').value, amount: Number($('#event-amount').value || 0), dueDate: $('#event-date').value,
       transactionDate: eventUsageDateValue(), transactionAt: current?.transactionAt || '', absorbedBy: current?.absorbedBy || '', dateEstimated: false,
       entryType: eventEntryTypeValue(), origin: current?.origin || '',
-      status: eventStatusValue(current), sourceAccountId: $('#event-source').value, destinationAccountId: $('#event-destination').value || '', transferType: $('#event-transfer-type').value || 'internal', destinationName: $('#event-recipient').value.trim(), cardId: $('#event-kind').value === 'payment' ? ($('#event-card').value || '') : '', category: $('#event-category').value, memo: $('#event-memo').value.trim(), lendingAmount: Math.min(Number($('#event-lending').value || 0), Number($('#event-amount').value || 0)), affectsForecast: !$('#event-exclude').checked, recurringPlanId: current?.recurringPlanId || '', settledAt: current?.settledAt || '', createdAt: current?.createdAt || '', updatedAt: nowIso(),
+      status: eventStatusValue(current), sourceAccountId: $('#event-source').value, destinationAccountId: $('#event-destination').value || '', transferType: $('#event-transfer-type').value || 'internal', destinationName: $('#event-recipient').value.trim(), cardId: $('#event-kind').value === 'payment' ? ($('#event-card').value || '') : '', category: $('#event-category').value, memo: $('#event-memo').value.trim(), lendingAmount: Math.min(Number($('#event-lending').value || 0), Number($('#event-amount').value || 0)), affectsForecast: !$('#event-exclude').checked, recurringPlanId: current?.recurringPlanId || '', scheduledDate: current?.scheduledDate, settledAt: current?.settledAt || '', createdAt: current?.createdAt || '', updatedAt: nowIso(),
       salaryPaymentMonth: current?.salaryPaymentMonth || '', salaryManual: current?.salaryManual === true
     });
     // シフトから作った給与を、金額か日付を変えて保存したか、一度でも確定したら、もうシフトでは上書きしない
