@@ -12,7 +12,10 @@
     if (rootFields?.ownerUid?.stringValue !== uid || !Array.isArray(members) || members.length !== 1 || members[0]?.stringValue !== uid) throw new Error('所有者と共有状態を確認してください');
     const sourceRoot = snapshot.workspace.name;
     const targetRoot = sourceRoot.slice(0, sourceRoot.lastIndexOf('/') + 1) + targetId;
-    const writes = [{ update: { name: targetRoot, fields: structuredClone(rootFields) }, currentDocument: { exists: false } }];
+    const restoredFields = structuredClone(rootFields);
+    // 同期の版番号は家計ごとに進む。新規家計には元の版番号を持ち込まない。
+    if (Object.hasOwn(restoredFields, 'revision')) restoredFields.revision = { integerValue: '0' };
+    const writes = [{ update: { name: targetRoot, fields: restoredFields }, currentDocument: { exists: false } }];
     for (const name of names) for (const doc of snapshot.collections[name].documents) {
       writes.push({ update: { name: `${targetRoot}/${name}/${doc.id}`, fields: structuredClone(doc.data.fields || {}) }, currentDocument: { exists: false } });
     }

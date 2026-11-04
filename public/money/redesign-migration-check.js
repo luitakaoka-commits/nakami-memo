@@ -59,7 +59,11 @@
     return { workspace: fields(copy.workspace), collections };
   }
   function compareRestored(source, restored) {
-    return { matches: JSON.stringify(restoreContent(source)) === JSON.stringify(restoreContent(restored)) };
+    const expected = restoreContent(source), actual = restoreContent(restored);
+    if (source.workspaceId !== restored.workspaceId && Object.hasOwn(expected.workspace, 'revision')) {
+      expected.workspace.revision = { integerValue: '0' };
+    }
+    return { matches: JSON.stringify(expected) === JSON.stringify(actual) };
   }
   const api = { compare, compareRestored };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -53,6 +53,7 @@ const cleanup = [];
 const failures = [];
 try {
   await write(`workspaces/${sourceId}`, rootFields); cleanup.push(`workspaces/${sourceId}`);
+  await write(`workspaces/${sourceId}`, { ...rootFields, revision: { integerValue: '1' } });
   let last;
   for (const name of names) {
     const path = `workspaces/${sourceId}/${name}/one`;
@@ -78,6 +79,8 @@ try {
   assert.equal(latest.collections.receiptItems.documents.find(row => row.id === 'one').data.fields.amount.integerValue, '9999');
   const plan = planner.planRestore({ snapshot, targetId, uid: 'restore-user' });
   assert.equal(plan.rootWrites.length, 1); assert.equal(plan.childWrites.length, 4);
+  assert.equal(snapshot.workspace.fields.revision.integerValue, '1');
+  assert.equal(plan.rootWrites[0].update.fields.revision.integerValue, '0');
   assert.throws(() => planner.planRestore({ snapshot, targetId: sourceId, uid: 'restore-user' }), /上書き/);
   assert.throws(() => planner.planRestore({ snapshot, targetId, uid: 'other-user' }), /所有者/);
   let attempts = 0;
@@ -133,6 +136,7 @@ try {
   const duplicateChildren = await fetch(`${base}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes: plan.childWrites }) });
   assert.equal(duplicateChildren.ok, false);
   const restored = await read(targetId, last.updateTime);
+  assert.equal(restored.workspace.fields.revision.integerValue, '0');
   assert.equal(migration.compareRestored(snapshot, restored).matches, true);
   await write(`workspaces/${targetId}/receiptItems/one`, { ...fields('receiptItems'), amount: { integerValue: '1235' } });
   const changed = await request(`workspaces/${targetId}/receiptItems/one`);
