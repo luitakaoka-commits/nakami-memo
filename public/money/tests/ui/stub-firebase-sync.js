@@ -7,6 +7,10 @@ export const firebaseSync = {
     if (onStatus) onStatus('saved');
     if (onCandidates) { window.__TEST_CANDIDATE_SINK__ = onCandidates; onCandidates([]); }
   },
+  readCloudBackup: async () => {
+    if (window.__TEST_BACKUP_FAIL__) throw new Error('権限エラー');
+    return { workspaceId: 'test-workspace', collections: { importCandidates: { complete: true, documents: [] } } };
+  },
   selectWorkspace: async () => {},
   refreshWorkspaces: async () => [],
   queueSave: (_state, acceptance) => { if (acceptance) (window.__TEST_CALLS__ ||= []).push({ fn: 'updateImportCandidate', ...acceptance }); },

@@ -27,7 +27,8 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=51';
+import './redesign-sync-coordinator.js?v=52';
+import './redesign-backup-read.js?v=52';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -704,7 +705,36 @@ async function signInCurrentUser() {
   return credential;
 }
 
+async function readCloudBackup() {
+  const user = currentUser;
+  const workspaceId = currentWorkspace?.id;
+  if (!user || !workspaceId) throw new Error('ログインして家計を開いてください');
+  const token = await user.getIdToken();
+  const signal = AbortSignal.timeout(60000);
+  const ensureSession = () => {
+    if (currentUser !== user || currentWorkspace?.id !== workspaceId) throw new Error('読み取り中に家計が切り替わりました');
+  };
+  const snapshot = await globalThis.RedesignBackupRead.readSnapshot({
+    projectId: firebaseConfig.projectId,
+    workspaceId,
+    readTime: new Date(Date.now() - 1000).toISOString(),
+    getJson: async url => {
+      ensureSession();
+      const response = await fetch(url, {
+        headers: { Authorization: 'Bearer ' + token },
+        cache: 'no-store',
+        signal
+      });
+      if (!response.ok) throw new Error('クラウドの取得に失敗しました（HTTP ' + response.status + '）');
+      return response.json();
+    }
+  });
+  ensureSession();
+  return snapshot;
+}
+
 export const firebaseSync = {
+  readCloudBackup,
   waitForAuth: async () => {
     await authReady;
     return currentUser ? { uid: currentUser.uid, email: currentUser.email || '' } : null;

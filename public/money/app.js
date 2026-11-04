@@ -640,7 +640,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=51" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=52" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2515,7 +2515,7 @@
         <section class="settings-card"><h2>計算設定</h2><p>今使える金額の計算に使う基準です。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>毎月14日締め</option></select></label><label><span>支払い能力チェックの期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日先まで</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日先まで</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日先まで</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日先まで</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
         <section class="settings-card"><h2>給与設定</h2><p>勤務月は1日から末日までの暦月、支給は翌月の給料日です。給料日が土日祝のときは前営業日へ繰り上げます。</p><form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><p class="form-note">同じ給与を通常の「収入」にも登録すると二重計算になるため、どちらか一方を使ってください。</p><button class="button button-primary" type="submit">給与設定を保存</button></form></section>
         ${renderAliasSettings()}
-        <section class="settings-card"><h2>バックアップ</h2><p>Firestoreへ自動保存します。手元にも残したい場合はJSONを書き出せます。</p><div class="field-grid field-grid-2"><button class="button button-quiet" data-action="export">JSONを書き出す</button><button class="button button-quiet" data-action="import">JSONを読み込む</button></div></section>
+        <section class="settings-card"><h2>バックアップ</h2><p>Firestoreへ自動保存します。手元にも残したい場合はJSONを書き出せます。</p><div class="field-grid field-grid-2"><button class="button button-quiet" data-action="export">JSONを書き出す</button><button class="button button-quiet" data-action="import">JSONを読み込む</button></div><button class="button button-quiet" data-action="export-cloud" ${cloud?.readCloudBackup ? '' : 'disabled'}>クラウドの原本を書き出す</button></section>
       </div><div class="stack">${renderCloudSettings()}<section class="settings-card"><h2>データ</h2><p>端末内にもキャッシュを残し、通信復帰後に同期します。</p><div class="formula-box"><div class="formula-row"><span>保存場所</span><strong>Cloud Firestore</strong></div><div class="formula-row"><span>最終更新</span><strong>${new Date(state.meta.updatedAt).toLocaleString('ja-JP')}</strong></div></div></section><section class="settings-card danger-zone"><h2>データをリセット</h2><p>この共有スペースの口座・予定・記録を削除して、初期設定に戻します。</p><button class="button button-danger button-full" data-action="reset">すべて削除</button></section></div></div>`;
   }
 
@@ -3119,6 +3119,25 @@
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `yoryoku-backup-${today()}.json`; link.click(); URL.revokeObjectURL(link.href); showToast('バックアップを書き出しました');
   }
 
+  async function exportCloudData(button) {
+    button.disabled = true;
+    try {
+      const snapshot = await cloud.readCloudBackup();
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'yoryoku-cloud-snapshot-' + today() + '.json';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast('クラウドの原本を書き出しました');
+    } catch (error) {
+      showToast('原本を書き出せませんでした: ' + error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function importData(file) {
     if (!file) return;
     const reader = new FileReader();
@@ -3264,6 +3283,7 @@
     if (name === 'delete-work') deleteWork(action.dataset.id);
     if (name === 'reset-what-if') updateWhatIf(0);
     if (name === 'export') exportData();
+    if (name === 'export-cloud') void exportCloudData(action);
     if (name === 'import') $('#import-file').click();
     if (name === 'reset') resetData();
   }

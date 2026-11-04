@@ -1226,6 +1226,24 @@ const closeModals = page => page.evaluate(() => {
     assert(!result.added && result.toast.includes('既存の総額を編集'), '同じ請求分の総額がもう一度登録された');
   });
 
+  await record('cloud_snapshot_export', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+    const button = page.locator('[data-action="export-cloud"]');
+    const [file] = await Promise.all([page.waitForEvent('download'), button.click()]);
+    assert(file.suggestedFilename().startsWith('yoryoku-cloud-snapshot-'), '原本のファイル名が不正');
+    const snapshot = JSON.parse(fs.readFileSync(await file.path(), 'utf8'));
+    assert(snapshot.collections.importCandidates.complete, '候補の取得情報が書き出されていない');
+    let failedDownloads = 0;
+    const onDownload = () => failedDownloads++;
+    page.on('download', onDownload);
+    try {
+      await page.evaluate(() => { window.__TEST_BACKUP_FAIL__ = true; });
+      await button.click();
+      await page.getByText('原本を書き出せませんでした: 権限エラー', { exact: true }).waitFor();
+      assert(failedDownloads === 0, '取得失敗後にファイルが書き出された');
+      assert(await button.isEnabled(), '再実行できない');
+    } finally { page.off('download', onDownload); }
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];
