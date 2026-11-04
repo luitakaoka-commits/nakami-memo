@@ -27,8 +27,8 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=54';
-import './redesign-backup-read.js?v=54';
+import './redesign-sync-coordinator.js?v=55';
+import './redesign-backup-read.js?v=55';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',

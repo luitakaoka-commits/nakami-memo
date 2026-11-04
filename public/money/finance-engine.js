@@ -733,6 +733,7 @@
     const items = [];
     groups.forEach(group => {
       group.adopted.forEach(item => {
+        if (item.isVirtual === true && item.recurringPlanId) return;
         if (group.source === STATEMENT) { items.push(item); return; }
         if (item.dateEstimated === true) { items.push(item); return; }
         const usedOn = usageDateOf(item);
@@ -803,7 +804,7 @@
     return interval;
   }
 
-  function expandScheduledTransactions(recurringPlans = [], fromDate, toDate, existingTransactions = []) {
+  function expandScheduledTransactions(recurringPlans = [], fromDate, toDate, existingTransactions = [], options = {}) {
     if (!fromDate || !toDate || fromDate > toDate) return [];
     const taken = new Set(existingTransactions
       .filter(transaction => transaction && transaction.recurringPlanId)
@@ -813,8 +814,11 @@
     const start = parseLocalDate(fromDate);
     const end = parseLocalDate(toDate);
 
+    const cards = new Map((options.cards || []).map(card => [card.id, card]));
     recurringPlans.forEach(plan => {
       if (!plan || plan.isActive === false) return;
+      const card = plan.cardId ? cards.get(plan.cardId) : null;
+      if (plan.cardId && (!card?.accountId || plan.kind !== 'payment')) return;
       const interval = recurringInterval(plan);
       if (interval === null) return;
       const anchorMonth = interval > 1 ? Number(plan.startDate.slice(0, 4)) * 12 + Number(plan.startDate.slice(5, 7)) - 1 : null;
@@ -836,12 +840,13 @@
             kind: plan.kind || 'payment',
             amount,
             transactionDate: key,
-            dueDate: key,
+            dueDate: card ? calculateCardPaymentDate(key, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, options.holidayOptions) : key,
             status: 'planned',
-            sourceAccountId: plan.sourceAccountId || '',
+            sourceAccountId: card?.accountId || plan.sourceAccountId || '',
             destinationAccountId: plan.destinationAccountId || '',
             transferType: plan.transferType || 'external',
-            cardId: '',
+            cardId: card?.id || '',
+            ...(card ? { entryType: 'itemized' } : {}),
             category: plan.category || '固定費',
             memo: plan.name || '固定費',
             affectsForecast: true,
@@ -927,7 +932,10 @@
     const includeSalary = input.includeSalary !== false;
 
     // 同じ請求サイクルに請求総額と明細が併存する場合、明細は内数なので銀行残高からは引かない
-    const cardGroups = groupCardCharges(input.transactions || [], input.cards || [], holidayOptions);
+    const virtualTransactions = expandScheduledTransactions(
+      input.recurringPlans || [], today, endDate, input.transactions || [], { cards: input.cards, holidayOptions }
+    );
+    const cardGroups = groupCardCharges([...(input.transactions || []), ...virtualTransactions], input.cards || [], holidayOptions);
     const suppressedIds = new Set(cardGroups.flatMap(group => group.suppressed).map(item => item.id));
 
     const realTransactions = (input.transactions || []).filter(transaction => transaction
@@ -937,10 +945,6 @@
       && (includeSalary || !transaction.salaryPaymentMonth)
       && transaction.dueDate >= today
       && transaction.dueDate <= endDate);
-
-    const virtualTransactions = expandScheduledTransactions(
-      input.recurringPlans || [], today, endDate, input.transactions || []
-    );
 
     // 記録に給与の取引がある月は、その取引（realTransactions）で数える。裏での見込みは足さない
     const salaryEvents = includeSalary
@@ -965,7 +969,7 @@
       salary
     }));
 
-    const events = [...realTransactions, ...virtualTransactions, ...salaryTransactions]
+    const events = [...realTransactions, ...virtualTransactions.filter(item => item.dueDate <= endDate && !suppressedIds.has(item.id)), ...salaryTransactions]
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
     const balances = new Map(accounts.map(item => [item.id, Number(item.currentBalance || 0)]));
@@ -1160,7 +1164,7 @@
       && transaction.dueDate <= deadline;
 
     const virtualTransactions = expandScheduledTransactions(
-      input.recurringPlans || [], today, deadline, input.transactions || []
+      input.recurringPlans || [], today, deadline, input.transactions || [], { cards: input.cards, holidayOptions }
     );
     const events = [...(input.transactions || []).filter(withinRange), ...virtualTransactions];
 
@@ -1195,9 +1199,12 @@
       : [];
     const salaryTotal = salaryEvents.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
 
-    const unpaidCard = calculateUnpaidCardUsage(input.transactions || [], today, {
+    const unpaidCard = calculateUnpaidCardUsage([...(input.transactions || []), ...virtualTransactions], today, {
       deadline, cards: input.cards || [], ...holidayOptions
     });
+
+    const plannedCardItems = unpaidCard.groups.flatMap(group => group.adopted).filter(item => item.isVirtual === true && item.recurringPlanId);
+    const plannedCardTotal = plannedCardItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
     // 二重計上していないことを確認できるよう、意図的に現金支出から外したカード引落を保持する
     const excludedCardDues = events.filter(item => item.kind === 'payment' && item.cardId);
@@ -1207,6 +1214,7 @@
       + salaryTotal
       - cashOutflow
       - unpaidCard.total
+      - plannedCardTotal
       - savingTotal
       - nisaTotal
       - defenseLine;
@@ -1231,6 +1239,7 @@
       cashOutflow,
       cashOutflowItems,
       unpaidCardTotal: unpaidCard.total,
+      plannedCardTotal,
       unpaidCardCount: unpaidCard.count,
       unpaidCardItems: unpaidCard.items,
       unpaidCardByCard: unpaidCard.byCard,
@@ -1256,6 +1265,7 @@
         { key: 'salary', label: '期限までの給与', amount: salaryTotal, direction: 'in' },
         { key: 'cashOut', label: '期限までの現金支出', amount: -cashOutflow, direction: 'out' },
         { key: 'unpaidCard', label: '未払いのカード利用', amount: -unpaidCard.total, direction: 'out' },
+        ...(plannedCardTotal ? [{ key: 'plannedCard', label: '期限までのカード定期利用見込み', amount: -plannedCardTotal, direction: 'out' }] : []),
         { key: 'saving', label: '期限までの貯金', amount: -savingTotal, direction: 'out' },
         { key: 'nisa', label: '期限までのNISA', amount: -nisaTotal, direction: 'out' },
         { key: 'defense', label: '最低限残す金額', amount: -defenseLine, direction: 'out' }

@@ -70,15 +70,7 @@
       if (salaryMonths.has(item.salaryPaymentMonth)) throw new Error('同じ月の給与記録が重複しています');
       salaryMonths.add(item.salaryPaymentMonth);
     }
-    const virtual = engine.expandScheduledTransactions(mappedPlans, today, endDate, state.transactions)
-      .filter(item => !recurringDates.has(JSON.stringify([item.recurringPlanId, item.dueDate.slice(0, 7)])))
-      .map(item => {
-        const plan = monthlyPlans.get(item.recurringPlanId);
-        if (!plan.cardId) return item;
-        const card = cards.get(plan.cardId);
-        return { ...item, cardId: card.id, sourceAccountId: card.accountId, entryType: 'itemized',
-          dueDate: engine.calculateCardPaymentDate(item.transactionDate, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions) };
-      });
+    const virtual = engine.expandScheduledTransactions(mappedPlans, today, endDate, state.transactions, { cards: state.cards, holidayOptions });
     for (const item of [...state.transactions, ...virtual]) {
       if (!item || !item.id || ids.has(item.id)) throw new Error('旧取引の識別子が不正または重複しています');
       ids.add(item.id);

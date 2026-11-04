@@ -492,6 +492,26 @@
       equal(heavy.cashflow.afterVerdict, 'belowDefense', '判定が最低残高割れへ変わる');
     });
 
+    test('カード定期払いは引落日へ送り、請求総額と二重に控除しない', () => {
+      const input = {
+        today: '2026-09-01', deadline: '2026-09-14', endDate: '2026-10-13',
+        accounts: [account('a1', '生活費口座', 'primary', 50000)],
+        cards: [{ id: 'c1', name: 'カード', accountId: 'a1', closingDay: 15, paymentDay: 10 }],
+        recurringPlans: [{ id: 'electricity', kind: 'payment', amount: 5000, dayOfMonth: 5, cardId: 'c1' }]
+      };
+      for (const amount of [0, 20000]) {
+        const transactions = amount ? [tx({ amount, cardId: 'c1', sourceAccountId: 'a1', entryType: 'statement', dueDate: '2026-10-13' })] : [];
+        const due = amount || 5000;
+        const cashflow = engine.calculateCashflowCheck({ ...input, transactions });
+        equal(cashflow.timeline.find(day => day.date === '2026-09-05').primaryBalance, 50000);
+        equal(cashflow.timeline.find(day => day.date === '2026-10-13').primaryBalance, 50000 - due);
+        const budget = engine.calculateSpendableAmount({ ...input, transactions });
+        equal(budget.cashOutflow, 0);
+        equal(budget.unpaidCardTotal, amount);
+        equal(budget.plannedCardTotal, amount ? 0 : 5000);
+        equal(budget.total, 50000 - due);
+      }
+    });
     test('月をまたいで移動した定期予定を元の月に再生成しない', () => {
       const plans = [{ id: 'p1', dayOfMonth: 27, amount: 60000 }];
       for (const moved of [
