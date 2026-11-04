@@ -189,6 +189,7 @@
       affectsForecast: source.affectsForecast !== false,
       recurringPlanId: source.recurringPlanId || '',
       ...(source.scheduledDate ? { scheduledDate: source.scheduledDate } : {}),
+      ...(source.statementEvidence ? { statementEvidence: source.statementEvidence } : {}),
       // シフトから作った給与の取引だけが持つ。どの支給月か（'YYYY-MM'）と、手で直したか（2026-09-15）
       salaryPaymentMonth: source.salaryPaymentMonth || '',
       salaryManual: source.salaryManual === true,
@@ -646,7 +647,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=60" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=61" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2718,9 +2719,16 @@
       const salaryBadge = transaction.salaryPaymentMonth
         ? `<span class="badge badge-muted">${transaction.status === 'settled' ? 'シフトの給与' : transaction.salaryManual ? 'シフトの給与・直した額' : 'シフトからの見込み'}</span>`
         : '';
-      const settleButton = transaction.status === 'planned' ? `<button class="mini-button" data-action="settle-event" data-id="${transaction.id}">確定</button>` : '';
+      const statement = transaction.kind === 'payment' && transaction.cardId && transaction.entryType === 'statement';
+      const card = statement ? creditCard(transaction.cardId) : null;
+      const confirmed = transaction.statementEvidence && card?.accountId === transaction.sourceAccountId
+        && finance.hasConfirmedCardStatement(transaction, finance.cardBillingCycleOf(transaction, card, holidayOptions()));
+      const confirmButton = statement && transaction.status === 'planned'
+        ? confirmed ? '<span class="badge badge-settled">請求額確認済み</span>' : `<button class="mini-button" data-action="confirm-statement" data-id="${esc(transaction.id)}">請求額を確認</button>`
+        : '';
+      const settleButton = transaction.status === 'planned' ? `<button class="mini-button" data-action="settle-event" data-id="${transaction.id}">${statement ? '引落を記録' : '確定'}</button>` : '';
       const detailPanel = expanded ? renderStatementDetailPanel(transaction, details) : '';
-      const actions = transaction.status === 'absorbed' ? '' : `${settleButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button>`;
+      const actions = transaction.status === 'absorbed' ? '' : `${confirmButton}${settleButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button>`;
       const shownDate = dateMode === 'usage' ? formatUsageMoment(transaction) : formatDate(transaction.dueDate);
       return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${esc(shownDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge} ${salaryBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact && actions ? `<div class="list-actions">${actions}</div>` : ''}</div></div>${detailPanel}</div>`;
     }).join('');
@@ -3032,6 +3040,12 @@
     // 確定した給与はもう見込みではないので、自動で付けたメモの「（シフトからの見込み）」を外す
     if (next.salaryPaymentMonth && next.status === 'settled') next.memo = next.memo.replace('（シフトからの見込み）', '');
     if (!next.amount || !next.dueDate || !next.sourceAccountId) { showToast('日付・金額・口座を入力してください'); return; }
+    if (current?.statementEvidence) {
+      next.statementEvidence = current.statementEvidence;
+      const card = next.cardId ? creditCard(next.cardId) : null;
+      const cycle = card ? finance.cardBillingCycleOf(next, card, holidayOptions()) : '';
+      if (!finance.hasConfirmedCardStatement(next, cycle)) delete next.statementEvidence;
+    }
     const statementError = cardStatementRegistrationError(next, current);
     if (statementError) { showToast(statementError); return; }
     const overlapError = cardSettlementOverlapError(next);
@@ -3064,6 +3078,26 @@
       : next.salaryPaymentMonth && !wasSettled && willSettle
         ? `給与を${formatAbsoluteYen(next.amount)}で確定しました。残高とシフト画面に反映しました`
         : (current ? '予定を更新しました' : '予定を追加しました'));
+  }
+
+  async function confirmStatement(id) {
+    const transaction = state.transactions.find(item => item.id === id);
+    if (transaction?.kind !== 'payment' || transaction.entryType !== 'statement' || transaction.status !== 'planned') return;
+    const card = creditCard(transaction.cardId);
+    if (!card || card.accountId !== transaction.sourceAccountId || !Number.isSafeInteger(transaction.amount) || transaction.amount <= 0) {
+      showToast('カード、引落口座、請求額を確認してください');
+      return;
+    }
+    const cycle = finance.cardBillingCycleOf(transaction, card, holidayOptions());
+    if (!window.confirm(card.name + 'の請求額 ' + formatAbsoluteYen(transaction.amount) + '（引落日 ' + formatDate(transaction.dueDate, true) + '）をカード会社の明細で確認しましたか？')) return;
+    transaction.statementEvidence = { source: 'issuer-manual', cardId: card.id, accountId: card.accountId,
+      dueDate: transaction.dueDate, amount: transaction.amount, cycle, checkedAt: nowIso() };
+    try {
+      if (persist() === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast('請求額の確認を保存しました');
+    } catch (_) { showToast('請求額の確認を同期できませんでした'); }
+    renderPage();
   }
 
   function settleEvent(id) {
@@ -3382,6 +3416,7 @@
     if (name === 'toggle-details') { toggleStatementDetails(action.dataset.id); return; }
     if (name === 'edit-event') openEventModal(action.dataset.id);
     if (name === 'delete-event') deleteEvent(action.dataset.id);
+    if (name === 'confirm-statement') void confirmStatement(action.dataset.id);
     if (name === 'settle-event') settleEvent(action.dataset.id);
     if (name === 'restore-salary') restoreSalaryRecord(action.dataset.month);
     if (name === 'add-account') { closeAddMenu(); openAccountModal(); }

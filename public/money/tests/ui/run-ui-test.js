@@ -586,6 +586,14 @@ const closeModals = page => page.evaluate(() => {
     const before = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').currentBalance);
     await page.evaluate(() => window.__YORYOKU__.setPage('plans'));
     await page.waitForTimeout(150);
+    await page.click('[data-action="confirm-statement"][data-id="dx-st"]');
+    await page.getByText('請求額確認済み', { exact: true }).first().waitFor();
+    const confirmed = await page.evaluate(() => {
+      const saved = JSON.parse(localStorage.getItem('yoryoku-finance-v2'));
+      const bill = saved.transactions.find(item => item.id === 'dx-st');
+      return { balance: saved.accounts.find(item => item.id === 'a1').currentBalance, status: bill.status, evidence: bill.statementEvidence };
+    });
+    assert(confirmed.balance === before && confirmed.status === 'planned' && confirmed.evidence.amount === 20000, '請求額の確認だけで残高または引落状態が変わった');
     await page.click('[data-action="settle-event"][data-id="dx-st"]');
     await page.waitForTimeout(400);
 

@@ -128,9 +128,12 @@
       // 請求総額に含まれるか不明な定期予定は、別の口座支出や追加額として重ねない。
       const suppressedActual = group.suppressed.filter(item => item.isVirtual !== true).reduce((total, item) => total + item.amount, 0);
       const detailsOnly = group.source === 'itemized';
-      events.push({ id: `legacy-card:${group.key}`, date: dates.values().next().value, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed: false, additionalPossible: detailsOnly ? group.adoptedTotal : suppressedActual });
+      const statement = group.statements[0];
+      const amountConfirmed = !detailsOnly && statement.sourceAccountId === group.accountId
+        && engine.hasConfirmedCardStatement(statement, group.billingCycle);
+      events.push({ id: `legacy-card:${group.key}`, date: dates.values().next().value, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed, additionalPossible: detailsOnly ? group.adoptedTotal : suppressedActual });
       if (detailsOnly) issues.push({ type: 'legacy_card_details_unverified', cardId: group.cardId, cycle: group.billingCycle });
-      issues.push({ type: 'card_group_unverified', cardId: group.cardId, cycle: group.billingCycle });
+      if (!amountConfirmed) issues.push({ type: 'card_group_unverified', cardId: group.cardId, cycle: group.billingCycle });
     }
     if (!Array.isArray(state.workEntries) || !state.settings?.wage) issues.push({ type: 'salary_data_missing' });
     else {

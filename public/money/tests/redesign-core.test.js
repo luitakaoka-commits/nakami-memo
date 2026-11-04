@@ -662,6 +662,17 @@ test('旧請求総額とメール明細は内訳か不明なので二重加算�
   assert.equal(calculateReadiness(converted.scenario).nextStatus, 'review');
   assert.equal(JSON.stringify(old), before);
 });
+test('請求額の確認は元のカード・口座・金額にだけ有効', () => {
+  const state = legacyFixture();
+  const statement = state.transactions[0];
+  statement.sourceAccountId = 'a';
+  statement.statementEvidence = { source: 'issuer-manual', cardId: 'c', accountId: 'a', dueDate: '2026-11-10', amount: 20000, cycle: '2026-10', checkedAt: '2026-10-30T00:00:00Z' };
+  const read = () => buildLegacyScenario(state, '2026-10-30', '2026-12-31').scenario.events.find(event => event.cardPayment);
+  assert.equal(read().amountConfirmed, true);
+  statement.amount = 21000;
+  assert.equal(read().amountConfirmed, false);
+  assert.equal(state.accounts[0].currentBalance, 50000);
+});
 test('旧記録の未確認残高・定期予定・除外取引は安全の根拠にしない', () => {
   const old = legacyFixture(); old.recurringPlans = [{ id: 'water' }];
   old.transactions.push({ id: 'excluded', status: 'planned', affectsForecast: false });

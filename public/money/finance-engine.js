@@ -663,6 +663,15 @@
    * 明細は内数として計算から外す。請求総額がまだ無いサイクルは明細を採用するため、
    * 「利用してから総額を入力するまで」の空白期間も金額に反映される。
    */
+  function hasConfirmedCardStatement(transaction, cycle) {
+    const proof = transaction?.statementEvidence;
+    return Boolean(transaction?.kind === 'payment' && transaction.entryType === 'statement' && proof?.source === 'issuer-manual'
+      && Number.isSafeInteger(transaction.amount) && transaction.amount > 0 && proof.amount === transaction.amount
+      && proof.cardId === transaction.cardId && proof.accountId === transaction.sourceAccountId
+      && proof.dueDate === transaction.dueDate && Boolean(cycle) && proof.cycle === cycle
+      && typeof proof.checkedAt === 'string' && Number.isFinite(Date.parse(proof.checkedAt)));
+  }
+
   function groupCardCharges(transactions = [], cards = [], options = {}) {
     const cardsById = new Map((cards || []).map(card => [card.id, card]));
     const groups = new Map();
@@ -2063,7 +2072,7 @@
     previousBusinessDay, nextBusinessDay, holidaysForYear,
     // カード
     calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills,
-    closingMonthOf, cardBillingCycleOf, groupCardCharges, detailsOfStatement,
+    closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement,
     // 記録の集計
     summarizePeriod,
     // 給与
