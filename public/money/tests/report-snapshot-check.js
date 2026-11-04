@@ -36,5 +36,19 @@ const mismatches = result.timeline.filter(row => row.projectedBalance !== expect
 const failures = [];
 if (result.timeline.length !== 5 || mismatches.length) failures.push({ check: 'card_balances', mismatches });
 if (result.timeline.some(row => row.status === 'safe') || result.futureStatus === 'safe') failures.push({ check: 'unconfirmed_not_safe' });
-console.log(JSON.stringify({ suite: 'report-snapshot', asOf: '2026-10-28', sourceRows: rows.length, cardChecks: result.timeline.length, passed: failures.length === 0, failures }));
+const transferSection = text.match(/三井住友銀行([\d,]+)円が現在も残っており[^\n]*\r?\n[^\n]*仮に([\d,]+)円を移せば12\/10後の追加支出前はUFJ([\d,]+)円・三井住友([\d,]+)円/);
+if (!transferSection) throw new Error('資料の振替案を読み取れません');
+const [sourceBalance, transferAmount, expectedTarget, expectedSource] = transferSection.slice(1).map(yen);
+const withTransfer = calculateReadiness({
+  today: '2026-10-28', endDate: '2026-12-10', coverageVerified: false,
+  accounts: [{ id: 'account', balance: opening, balanceVerified: false }, { id: 'source', balance: sourceBalance, balanceVerified: false }],
+  events: [{ id: 'proposed-transfer', date: '2026-10-28', accountId: 'source', toAccountId: 'account', kind: 'transfer', status: 'planned', amount: transferAmount }, ...events]
+});
+const originalLast = result.timeline.at(-1), transferLast = withTransfer.timeline.at(-1);
+if (transferLast?.projectedBalance !== originalLast.projectedBalance + transferAmount
+  || transferLast.projectedBalance + (sourceBalance - transferAmount) !== originalLast.projectedBalance + sourceBalance
+  || transferLast.confirmedBalance !== originalLast.confirmedBalance
+  || withTransfer.futureStatus === 'safe') failures.push({ check: 'proposed_transfer' });
+const transferSourceMatches = transferLast?.projectedBalance === expectedTarget && sourceBalance - transferAmount === expectedSource;
+console.log(JSON.stringify({ suite: 'report-snapshot', asOf: '2026-10-28', sourceRows: rows.length, cardChecks: result.timeline.length, transferScenario: !failures.some(failure => failure.check === 'proposed_transfer'), transferSourceStatus: transferSourceMatches ? 'matches' : 'review', passed: failures.length === 0, failures }));
 if (failures.length) process.exitCode = 1;
