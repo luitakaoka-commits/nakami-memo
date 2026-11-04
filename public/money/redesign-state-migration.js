@@ -11,7 +11,7 @@
     const { scenario, issues } = adapter.buildLegacyScenario(original, today, endDate, { candidates });
     const accounts = original.accounts.map(account => {
       const mapped = scenario.accounts.find(item => item.id === account.id);
-      const result = { ...account, balance: mapped.balance, revision: 0, balanceVerified: false };
+      const result = { ...account, balance: mapped.balance, revision: 0, balanceVerified: mapped.balanceVerified };
       delete result.currentBalance;
       return result;
     });
@@ -21,7 +21,7 @@
       if (!original.cards.some(card => card.id === cardId) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(cycle)) throw new Error('請求期間とカードを特定できません');
       return { id: event.id, cardId, cycle, accountId: event.accountId, dueDate: event.date,
         amount: event.amount, additionalPossible: event.additionalPossible || 0,
-        amountConfirmed: false, status: 'planned', origin: 'legacy-migration' };
+        amountConfirmed: event.amountConfirmed === true, status: 'planned', origin: 'legacy-migration' };
     });
     const migrated = { ...original, modelVersion: 1, asOf: today, forecastEnd: endDate,
       accounts, bills, forecastEvents: scenario.events.filter(event => !event.cardPayment),

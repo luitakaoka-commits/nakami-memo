@@ -15,6 +15,7 @@ const { periodForCards } = require('../redesign-deadline.js');
 const { evaluateCashflow } = require('../redesign-cashflow-composition.js');
 const { forecast90 } = require('../redesign-forecast.js');
 const assert = require('node:assert/strict');
+const { migrateState, assessMigrated } = require('../redesign-state-migration.js');
 
 const cases = [];
 const test = (name, fn) => cases.push({ name, fn });
@@ -672,6 +673,20 @@ test('請求額の確認は元のカード・口座・金額にだけ有効', ()
   statement.amount = 21000;
   assert.equal(read().amountConfirmed, false);
   assert.equal(state.accounts[0].currentBalance, 50000);
+});
+test('新形式の移行は確認済みの残高と請求の判定を保持する', () => {
+  const state = legacyFixture();
+  state.accounts[0].balanceEvidence = { source: 'bank-manual', amount: 50000, date: '2026-10-30' };
+  state.accounts.push({ id: 'unknown', currentBalance: 100 });
+  const statement = state.transactions[0];
+  statement.sourceAccountId = 'a';
+  statement.statementEvidence = { source: 'issuer-manual', cardId: 'c', accountId: 'a', dueDate: '2026-11-10', amount: 20000, cycle: '2026-10', checkedAt: '2026-10-30T00:00:00Z' };
+  const today = '2026-10-30', endDate = '2026-12-31';
+  const converted = migrateState({ state, today, endDate }).migrated;
+  assert.deepEqual(converted.accounts.map(item => item.balanceVerified), [true, false]);
+  assert.equal(converted.bills[0].amountConfirmed, true);
+  assert.equal(converted.coverageVerified, false);
+  assert.deepEqual(assessMigrated(converted), calculateReadiness(buildLegacyScenario(state, today, endDate).scenario));
 });
 test('旧記録の未確認残高・定期予定・除外取引は安全の根拠にしない', () => {
   const old = legacyFixture(); old.recurringPlans = [{ id: 'water' }];
