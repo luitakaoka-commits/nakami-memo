@@ -54,6 +54,11 @@ try {
       await assert.rejects(accept({ status: 'accepted', invalidField: true }), /permission/i);
       assert.equal((await getDocFromServer(candidate)).data().status, 'pending');
       assert.deepEqual((await getDocFromServer(ref)).data().state, before.state);
+      await updateDoc(candidate, { type: 'refund' });
+      await assert.rejects(accept({ status: 'accepted' }), /返金・取消/);
+      assert.equal((await getDocFromServer(candidate)).data().status, 'pending');
+      assert.deepEqual((await getDocFromServer(ref)).data().state, before.state);
+      await updateDoc(candidate, { type: 'purchase' });
       await accept({ status: 'accepted' });
       assert.equal((await getDocFromServer(candidate)).data().status, 'accepted');
       assert.equal((await getDocFromServer(ref)).data().state.transactions[0].id, 'mail_atomic');

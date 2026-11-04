@@ -25,6 +25,9 @@
         if (!candidate.exists() || !['pending', 'needs_review'].includes(candidate.data().status)) {
           throw new Error('メール候補は別の端末で更新されました');
         }
+        if (['refund', 'cancel'].includes(candidate.data().type)) {
+          throw new Error('返金・取消は元の利用と返金先の請求を確認してください');
+        }
         if (patch.status !== 'accepted' || !payload.transactions?.some(item => item.id === 'mail_' + id)) {
           throw new Error('メール候補に対応する取引がありません');
         }

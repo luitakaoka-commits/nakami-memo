@@ -640,7 +640,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=50" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=51" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1141,6 +1141,7 @@
       .map(candidate => {
         const status = CANDIDATE_STATUS[candidate.status] || CANDIDATE_STATUS.pending;
         const actionable = ['pending', 'needs_review'].includes(candidate.status);
+        const needsOriginal = ['refund', 'cancel'].includes(candidate.type);
         const duplicate = importCandidates.some(other => other.id !== candidate.id && other.fingerprint && other.fingerprint === candidate.fingerprint);
         const selectedCard = candidateCardSelections.has(candidate.id) ? candidateCardSelections.get(candidate.id) : matchedCardId(candidate);
         const draft = candidateEdits.get(candidate.id) || {};
@@ -1153,10 +1154,11 @@
             <div class="candidate-head"><strong>${candidate.amount ? formatAbsoluteYen(candidate.amount) : '金額を確認'}</strong><span class="badge ${status.className}">${status.label}</span><span class="badge badge-muted">${CANDIDATE_TYPE[candidate.type] || '不明'}</span>${duplicate ? '<span class="badge badge-warn">重複の可能性</span>' : ''}</div>
             <small>${candidate.usedDate ? '利用日 ' + formatDate(candidateDate(candidate), true) : '受信日 ' + formatDate(candidateDate(candidate), true) + '（利用日未確認）'}${candidate.merchant ? `・${esc(candidate.merchant)}` : ''}・${esc(candidate.cardHint || 'カード不明')}・${esc(candidate.sourceLabel || candidate.sourcePackage || '取込元不明')}</small>
             ${candidate.note ? `<small>${esc(candidate.note)}</small>` : ''}
+            ${actionable && needsOriginal ? '<small>元の利用と返金先の請求を確認してください。</small>' : ''}
             ${actionable ? `<div class="candidate-edit-fields"><label><span>金額</span><input type="number" min="1" step="1" inputmode="numeric" data-candidate-field="amount" data-candidate-id="${esc(candidate.id)}" value="${esc(amountValue)}"></label><label><span>利用日／引落日</span><input type="date" data-candidate-field="date" data-candidate-id="${esc(candidate.id)}" value="${esc(dateValue)}"></label><label><span>内容の種類</span><select data-candidate-field="entryType" data-candidate-id="${esc(candidate.id)}"><option value="">種類を選択</option><option value="itemized" ${entryTypeValue === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${entryTypeValue === 'statement' ? 'selected' : ''}>請求総額</option></select></label><label><span>利用先・メモ</span><input type="text" maxlength="40" data-candidate-field="merchant" data-candidate-id="${esc(candidate.id)}" value="${esc(merchantValue)}"></label></div><small>1件の利用は利用日、請求総額は引落日を入力してください。</small>` : ''}
           </div>
           ${actionable ? `<div class="candidate-actions"><label class="candidate-card-select"><span>取り込むカード</span><select data-candidate-card="${esc(candidate.id)}" aria-label="取り込むカード"><option value="">カードを選択</option>${state.cards.map(card => `<option value="${esc(card.id)}" ${card.id === selectedCard ? 'selected' : ''}>${esc(card.name)}</option>`).join('')}</select></label><button class="mini-button" data-action="remember-candidate-card" data-id="${esc(candidate.id)}">このカードの対応を覚える</button><div class="list-actions">
-            <button class="mini-button primary" data-action="accept-candidate" data-id="${candidate.id}">取り込む</button>
+            <button class="mini-button primary" data-action="accept-candidate" data-id="${esc(candidate.id)}" ${needsOriginal ? 'disabled' : ''}>取り込む</button>
             <button class="mini-button" data-action="ignore-candidate" data-id="${candidate.id}">無視</button>
             <button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button>
           </div></div>` : `<div class="list-actions"><button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button></div>`}
@@ -1179,6 +1181,10 @@
   async function acceptCandidate(id, selectedCardId, edits) {
     const candidate = importCandidates.find(item => item.id === id);
     if (!candidate || !['pending', 'needs_review'].includes(candidate.status)) return;
+    if (['refund', 'cancel'].includes(candidate.type)) {
+      showToast('返金・取消は元の利用と返金先の請求を確認してください。');
+      return;
+    }
     // クラウドの候補更新を待つ間の連打や、再読込後の再取込を防ぐ。
     const transactionId = `mail_${id}`;
     if (state.transactions.some(item => item.id === transactionId)) return;
@@ -1206,13 +1212,11 @@
     const dueDate = entryType === 'statement' ? transactionDate : card
       ? finance.calculateCardPaymentDate(transactionDate, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions())
       : transactionDate;
-    const isNegative = ['refund', 'cancel'].includes(candidate.type);
-    if (isNegative && entryType === 'statement') { showToast('返金・取消は1件の利用として確認してください'); return; }
 
     const transaction = createTransaction({
       id: transactionId,
       kind: 'payment',
-      amount: amount * (isNegative ? -1 : 1),
+      amount,
       transactionDate,
       transactionAt: entryType === 'statement' ? '' : confirmedCandidateInstant(candidate, transactionDate),
       dateEstimated: edits ? false : !candidate.usedDate,
