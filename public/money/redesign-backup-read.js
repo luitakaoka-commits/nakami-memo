@@ -2,9 +2,20 @@
 (function attach(root) {
   'use strict';
   const collections = ['importCandidates', 'receipts', 'receiptItems', 'itemAliases'];
+  function timestampKey(value) {
+    if (typeof value !== 'string') return '';
+    const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(value);
+    if (!match || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 19) !== match[1]) return '';
+    return match[1] + (match[2] || '').padEnd(9, '0');
+  }
   async function readSnapshot({ projectId, databaseId = '(default)', workspaceId, readTime, getJson }) {
     if (![projectId, databaseId, workspaceId].every(value => typeof value === 'string' && value && !value.includes('/'))) throw new Error('プロジェクトまたは家計IDが不正です');
-    if (typeof getJson !== 'function' || typeof readTime !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(readTime) || !Number.isFinite(Date.parse(readTime)) || new Date(readTime).toISOString().slice(0, 19) !== readTime.slice(0, 19)) throw new Error('読み取り時刻または通信手段が不正です');
+    const cutoff = timestampKey(readTime);
+    if (typeof getJson !== 'function' || !cutoff || /\.\d{7,}Z$/.test(readTime)) throw new Error('読み取り時刻または通信手段が不正です');
+    const checkDocumentTime = doc => {
+      const created = timestampKey(doc.createTime), updated = timestampKey(doc.updateTime);
+      if (!created || !updated || created > updated || updated > cutoff) throw new Error('文書の更新時刻が読み取り時点と一致しません');
+    };
     const rootName = `projects/${projectId}/databases/${databaseId}/documents/workspaces/${workspaceId}`;
     const base = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/workspaces/${encodeURIComponent(workspaceId)}`;
     const request = async url => {
@@ -15,6 +26,7 @@
     const rootUrl = new URL(base); rootUrl.searchParams.set('readTime', readTime);
     const workspace = await request(rootUrl.toString());
     if (workspace.name !== rootName || !workspace.createTime || !workspace.updateTime) throw new Error('家計データを確認できません');
+    checkDocumentTime(workspace);
     const result = { workspaceId, readTime, workspace, collections: {} };
     for (const collection of collections) {
       const documents = [], ids = new Set(), tokens = new Set();
@@ -30,6 +42,7 @@
           if (!doc || typeof doc.name !== 'string' || !doc.name.startsWith(prefix) || !doc.createTime || !doc.updateTime) throw new Error('別の場所の文書か、内容が不正です');
           const id = doc.name.slice(prefix.length);
           if (!id || id.includes('/') || ids.has(id)) throw new Error('文書IDが不正または重複しています');
+          checkDocumentTime(doc);
           ids.add(id); documents.push({ id, data: doc });
         }
         if (page.nextPageToken != null && typeof page.nextPageToken !== 'string') throw new Error('ページ番号が不正です');

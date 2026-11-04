@@ -63,6 +63,9 @@ test('途中のアクセス拒否やサーバーエラーで部分的なバッ�
   const s = server((name, page) => name === 'receipts' && page ? { error: { code: 403 } } : null);
   await assert.rejects(readSnapshot(args(s.getJson)), /取得に失敗/);
   await assert.rejects(readSnapshot(args(async () => { throw new Error('network'); })), /network/);
+  const futurePage = server((name, page, reply) => name === 'receipts' && page
+    ? { documents: [{ ...reply.documents[0], updateTime: '2026-10-30T12:00:00.123457Z' }] } : null);
+  await assert.rejects(readSnapshot(args(futurePage.getJson)), /更新時刻/);
 });
 test('繰り返すページ・異なる家計の文書・文書ID重複を拒否', async () => {
   const loop = server((name, page, reply) => name === 'receipts' && page ? { ...reply, nextPageToken: 'page2' } : null);
