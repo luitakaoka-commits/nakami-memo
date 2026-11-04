@@ -27,8 +27,8 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=63';
-import './redesign-backup-read.js?v=63';
+import './redesign-sync-coordinator.js?v=64';
+import './redesign-backup-read.js?v=64';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -281,9 +281,14 @@ function startCandidateWatch() {
 
 async function updateImportCandidate(candidateId, patch) {
   if (!currentUser || !currentWorkspace) throw new Error('ログインが必要です');
-  await updateDoc(doc(db, 'workspaces', currentWorkspace.id, 'importCandidates', candidateId), {
-    ...patch,
-    updatedAt: serverTimestamp()
+  if (patch.status !== 'ignored') throw new Error('取込候補の操作が不正です');
+  const ref = doc(db, 'workspaces', currentWorkspace.id, 'importCandidates', candidateId);
+  await runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists() || !['pending', 'needs_review'].includes(snapshot.data().status)) {
+      throw new Error('メール候補は別の端末で更新されました');
+    }
+    transaction.update(ref, { status: 'ignored', updatedAt: serverTimestamp() });
   });
 }
 

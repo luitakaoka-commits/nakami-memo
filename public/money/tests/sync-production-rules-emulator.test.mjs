@@ -62,6 +62,15 @@ try {
       await accept({ status: 'accepted' });
       assert.equal((await getDocFromServer(candidate)).data().status, 'accepted');
       assert.equal((await getDocFromServer(ref)).data().state.transactions[0].id, 'mail_atomic');
+      await assert.rejects(updateDoc(candidate, { status: 'ignored' }), /permission/i);
+      assert.equal((await getDocFromServer(candidate)).data().status, 'accepted');
+      const ignored = candidateRef('ignored');
+      await setDoc(ignored, { sourcePackage: 'jcb.example', detectedAt: '2026-01-01T00:00:00Z', amount: 1000, type: 'purchase', status: 'pending', fingerprint: 'ignored' });
+      try {
+        await updateDoc(ignored, { status: 'ignored' });
+        await assert.rejects(updateDoc(ignored, { status: 'accepted' }), /permission/i);
+        assert.equal((await getDocFromServer(ignored)).data().status, 'ignored');
+      } finally { await deleteDoc(ignored); }
     } finally { await deleteDoc(candidate); }
   });
   await check('新形式の家計へ旧画面から保存しない', async () => {

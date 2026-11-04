@@ -67,7 +67,8 @@ service cloud.firestore {
 
         allow read: if isMember();
         allow create: if isMember() && validCandidate(request.resource.data);
-        allow update: if isMember() && validCandidate(request.resource.data);
+        allow update: if isMember() && validCandidate(request.resource.data)
+          && resource.data.status in ['pending', 'needs_review'];
         allow delete: if isMember();
       }
 

@@ -648,7 +648,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=63" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=64" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1282,9 +1282,9 @@
 
   async function ignoreCandidate(id) {
     const candidate = importCandidates.find(item => item.id === id);
-    if (!candidate) return;
-    try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), status: 'ignored' }); showToast('無視しました'); }
-    catch (error) { showToast('取込候補を更新できませんでした'); }
+    if (!candidate || !['pending', 'needs_review'].includes(candidate.status)) return;
+    try { await cloud.updateImportCandidate(id, { status: 'ignored' }); showToast('無視しました'); }
+    catch (error) { showToast(error.message || '取込候補を更新できませんでした'); }
   }
 
   async function deleteCandidate(id) {
