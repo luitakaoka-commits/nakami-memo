@@ -4,6 +4,13 @@
   const node = typeof module !== 'undefined' && module.exports;
   const planner = node ? require('./redesign-restore-plan.js') : root.RedesignRestorePlan;
   const migration = node ? require('./redesign-migration-check.js') : root.RedesignMigrationCheck;
+  function guardRoot(document, updateTime) {
+    return {
+      update: { name: document.name, fields: { updatedAt: document.fields.updatedAt } },
+      updateMask: { fieldPaths: ['updatedAt'] },
+      currentDocument: { updateTime }
+    };
+  }
   async function executeRestore({ snapshot, targetId, uid, commitWrites, readBack }) {
     if (typeof commitWrites !== 'function' || typeof readBack !== 'function') throw new Error('復元の通信手段を確認してください');
     const plan = planner.planRestore({ snapshot, targetId, uid });
@@ -17,8 +24,9 @@
     }
     const rootVersion = commitTime;
     if (plan.childWrites.length) {
+      if (typeof rootVersion !== 'string' || !rootVersion) return { status: 'root_uncertain', targetId };
       try {
-        const result = await commitWrites(plan.childWrites);
+        const result = await commitWrites([guardRoot(plan.rootWrites[0].update, rootVersion), ...plan.childWrites]);
         commitTime = result?.commitTime;
       } catch (_) {
         return { status: 'children_uncertain', targetId, rootVersion, sourceName: snapshot.workspace.name, sourceReadTime: snapshot.readTime };
@@ -47,13 +55,8 @@
     // 明細は元の処理でも一括コミット。中途半端な件数なら別の更新を疑い停止する。
     if (inspection.status !== 'incomplete' || inspection.missingWrites.length !== plan.childWrites.length
       || target.workspace.updateTime !== rootVersion) return { status: 'conflict', targetId };
-    const guard = {
-      update: { name: target.workspace.name, fields: { updatedAt: target.workspace.fields.updatedAt } },
-      updateMask: { fieldPaths: ['updatedAt'] },
-      currentDocument: { updateTime: rootVersion }
-    };
     try {
-      const result = await commitWrites([guard, ...inspection.missingWrites]);
+      const result = await commitWrites([guardRoot(target.workspace, rootVersion), ...inspection.missingWrites]);
       const restored = await readBack(targetId, result.commitTime);
       if (migration.compareRestored(snapshot, restored).matches) return { status: 'verified', targetId };
     } catch (_) {
