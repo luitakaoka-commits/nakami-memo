@@ -849,6 +849,17 @@ test('カード払いの電気代は旧請求に加えて口座から二重に�
   assert.equal(result.assessment.nextPayments[0].projectedBalance, 40000);
   assert.equal(result.assessment.nextStatus, 'review');
 });
+test('カード払いの定期予定は請求のある月には重ねず、他の月は未確定に残す', () => {
+  const state = legacyFixture();
+  state.recurringPlans.push({ id: 'electricity', kind: 'payment', dayOfMonth: 5, amount: 5000, cardId: 'c' });
+  const result = buildLegacyScenario(state, '2026-10-01', '2026-12-31');
+  const expenses = result.scenario.events.filter(event => event.kind === 'expense');
+  assert.ok(expenses.every(event => event.cardPayment && event.accountId === 'a'));
+  assert.deepEqual(expenses.slice(0, 2).map(event => [event.date, event.amount, event.additionalPossible]), [
+    ['2026-11-10', 20000, 3000], ['2026-12-10', 0, 5000]
+  ]);
+  assert.ok(result.issues.some(issue => issue.type === 'card_recurring_inclusion_unverified'));
+});
 test('隔月の水道代は口座から引き、登録済みの同じ支払いを再生成しない', () => {
   const saved = { id: 'water-saved', recurringPlanId: 'water', date: '2026-12-20', accountId: 'a', kind: 'expense', amount: 6000, amountConfirmed: true, status: 'planned' };
   const generated = generateRecurring({ id: 'water', accountId: 'a', firstDate: '2026-10-20', intervalMonths: 2, amount: 6000 }, '2026-10-30', '2027-01-28', [saved]);

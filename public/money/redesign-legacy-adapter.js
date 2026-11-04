@@ -36,12 +36,13 @@
         else if (!['accepted', 'ignored'].includes(candidate.status)) issues.push({ type: 'mail_candidate_status_unknown', id: candidate.id });
       }
     }
+    const holidayOptions = { overrides: state.settings?.holidayOverrides || {} };
     const planIds = new Set(), mappedPlans = [];
     for (const plan of state.recurringPlans) {
       if (!plan || !plan.id || planIds.has(plan.id)) throw new Error('定期予定の識別子が不正または重複しています');
       planIds.add(plan.id);
       if (plan.isActive === false) continue;
-      if (!Number.isInteger(plan.dayOfMonth) || plan.dayOfMonth < 1 || plan.dayOfMonth > 31 || engine.recurringInterval(plan) === null || !Number.isSafeInteger(plan.amount) || plan.amount < 0 || plan.cardId) {
+      if (!Number.isInteger(plan.dayOfMonth) || plan.dayOfMonth < 1 || plan.dayOfMonth > 31 || engine.recurringInterval(plan) === null || !Number.isSafeInteger(plan.amount) || plan.amount < 0 || (plan.cardId && (plan.kind !== 'payment' || !cards.has(plan.cardId)))) {
         issues.push({ type: 'recurring_plans_not_mapped', id: plan.id });
         continue;
       }
@@ -70,7 +71,14 @@
       salaryMonths.add(item.salaryPaymentMonth);
     }
     const virtual = engine.expandScheduledTransactions(mappedPlans, today, endDate, state.transactions)
-      .filter(item => !recurringDates.has(JSON.stringify([item.recurringPlanId, item.dueDate.slice(0, 7)])));
+      .filter(item => !recurringDates.has(JSON.stringify([item.recurringPlanId, item.dueDate.slice(0, 7)])))
+      .map(item => {
+        const plan = monthlyPlans.get(item.recurringPlanId);
+        if (!plan.cardId) return item;
+        const card = cards.get(plan.cardId);
+        return { ...item, cardId: card.id, sourceAccountId: card.accountId, entryType: 'itemized',
+          dueDate: engine.calculateCardPaymentDate(item.transactionDate, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions) };
+      });
     for (const item of [...state.transactions, ...virtual]) {
       if (!item || !item.id || ids.has(item.id)) throw new Error('旧取引の識別子が不正または重複しています');
       ids.add(item.id);
@@ -113,16 +121,22 @@
       issues.push({ type: 'card_name_missing', cardId: card.id });
       return { ...card, name: card.id };
     });
-    const groups = engine.groupCardCharges(cardTransactions, namedCards, state.settings?.holidayOverrides ? { overrides: state.settings.holidayOverrides } : {});
+    const groups = engine.groupCardCharges(cardTransactions, namedCards, holidayOptions);
     for (const group of groups) {
       if (group.statements.length > 1) throw new Error('同じ請求期間に複数の総額があります');
-      const dates = new Set([...group.adopted, ...group.suppressed].map(item => item.dueDate));
+      const entries = [...group.adopted, ...group.suppressed];
+      const recorded = entries.filter(item => item.isVirtual !== true);
+      const dates = new Set((recorded.length ? recorded : entries).map(item => item.dueDate));
       if (dates.size !== 1 || !group.dueDate) throw new Error('カードの引落日が一致しません');
       if (!Number.isSafeInteger(group.adoptedTotal) || !Number.isSafeInteger(group.suppressedTotal)) throw new Error('カード請求額が不正です');
       // 旧明細にはメールの重複照合や利用日時の根拠が保存されていない。
       // 総額が無い場合、明細合計を確定額とせず上限側に残す。
+      const scheduled = group.itemized.filter(item => item.isVirtual === true);
+      if (scheduled.length) issues.push({ type: 'card_recurring_inclusion_unverified', cardId: group.cardId, cycle: group.billingCycle });
+      // 請求総額に含まれるか不明な定期予定は、別の口座支出や追加額として重ねない。
+      const suppressedActual = group.suppressed.filter(item => item.isVirtual !== true).reduce((total, item) => total + item.amount, 0);
       const detailsOnly = group.source === 'itemized';
-      events.push({ id: `legacy-card:${group.key}`, date: group.dueDate, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed: false, additionalPossible: detailsOnly ? group.adoptedTotal : group.suppressedTotal });
+      events.push({ id: `legacy-card:${group.key}`, date: dates.values().next().value, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed: false, additionalPossible: detailsOnly ? group.adoptedTotal : suppressedActual });
       if (detailsOnly) issues.push({ type: 'legacy_card_details_unverified', cardId: group.cardId, cycle: group.billingCycle });
       issues.push({ type: 'card_group_unverified', cardId: group.cardId, cycle: group.billingCycle });
     }
