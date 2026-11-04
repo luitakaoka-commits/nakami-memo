@@ -8,7 +8,7 @@
     if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
     throw new Error('保存データの形式を確認してください');
   }
-  async function saveSnapshot({ db, ref, uid, expectedRevision, baseline, state, runTransaction, updatedAt }) {
+  async function saveSnapshot({ db, ref, uid, expectedRevision, baseline, state, runTransaction, updatedAt, acceptances = [], candidateRef }) {
     if (!db || !ref || typeof uid !== 'string' || !uid.trim() || typeof runTransaction !== 'function' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= Number.MAX_SAFE_INTEGER) throw new Error('保存条件を確認してください');
     const payload = structuredClone(state), baseText = canonical(baseline);
     if (payload?.modelVersion !== undefined || payload?.bills !== undefined) throw new Error('新形式の家計です。対応した画面で開いてください。');
@@ -19,12 +19,25 @@
       const data = snapshot.data(), revision = data.revision === undefined ? 0 : data.revision;
       if (revision !== expectedRevision || canonical(data.state) !== baseText) throw new Error('他の端末で更新されました。未保存の変更はこの端末に保管しています。');
       if (data.state?.modelVersion !== undefined || data.state?.bills !== undefined) throw new Error('新形式の家計です。対応した画面で開いてください。');
+      const candidates = await Promise.all(acceptances.map(async ({ id, patch }) => {
+        const ref = candidateRef(id);
+        const candidate = await transaction.get(ref);
+        if (!candidate.exists() || !['pending', 'needs_review'].includes(candidate.data().status)) {
+          throw new Error('メール候補は別の端末で更新されました');
+        }
+        if (patch.status !== 'accepted' || !payload.transactions?.some(item => item.id === 'mail_' + id)) {
+          throw new Error('メール候補に対応する取引がありません');
+        }
+        return { ref, patch };
+      }));
+      for (const candidate of candidates) transaction.update(candidate.ref, { ...candidate.patch, updatedAt });
       transaction.update(ref, { state: payload, revision: expectedRevision + 1, updatedBy: uid, ...(updatedAt === undefined ? {} : { updatedAt }) });
       return expectedRevision + 1;
     });
   }
   function createCoordinator({ write, applyRemote, onStatus, retain, clearRetained }) {
     let base = null, pending = null, flight = null, blocked = false, running = null;
+    let acceptances = [];
     const conflict = () => {
       blocked = true;
       const error = new Error('他の端末で更新されました。未保存の変更はこの端末に保管しています。');
@@ -50,12 +63,13 @@
         throw error;
       }
     }
-    function enqueue(state) {
+    function enqueue(state, acceptance) {
       if (!base) throw new Error('サーバーの家計を読み込んでから保存してください');
       const copy = structuredClone(state);
       canonical(copy);
       // 退避に失敗したら、未保存内容を安全に保持できないため送信しない。
       retain(copy);
+      if (acceptance) acceptances.push(structuredClone(acceptance));
       pending = copy;
       if (blocked) { conflict(); return; }
       onStatus('saving');
@@ -65,9 +79,10 @@
       running = (async () => {
         while (pending && !blocked) {
           const payload = pending; pending = null;
+          const batch = acceptances; acceptances = [];
           flight = { state: payload, text: canonical(payload), revision: base.revision };
           try {
-            const revision = await write({ state: structuredClone(payload), baseline: structuredClone(base.state), expectedRevision: base.revision });
+            const revision = await write({ state: structuredClone(payload), baseline: structuredClone(base.state), expectedRevision: base.revision, acceptances: batch });
             if (revision !== flight.revision + 1) throw new Error('保存後の版番号が一致しません');
             if (blocked) break;
             base = { state: payload, text: flight.text, revision };

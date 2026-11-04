@@ -44,10 +44,25 @@ try {
     await assert.rejects(updateDoc(ref, { revision: 4, state: { n: 4 } }), /permission/i);
     assert.equal((await getDocFromServer(ref)).data().revision, 2);
   });
+  await check('メール候補と取引は同時に保存し、拒否時は両方を戻す', async () => {
+    const candidateRef = id => doc(ref, 'importCandidates', id);
+    const candidate = candidateRef('atomic');
+    await setDoc(candidate, { sourcePackage: 'jcb.example', detectedAt: '2026-01-01T00:00:00Z', amount: 1000, type: 'purchase', status: 'pending', fingerprint: 'atomic' });
+    try {
+      const before = (await getDocFromServer(ref)).data();
+      const accept = patch => sync.saveSnapshot({ db, ref, uid: 'sync-user', baseline: before.state, state: { transactions: [{ id: 'mail_atomic' }] }, expectedRevision: before.revision, runTransaction, updatedAt: serverTimestamp(), candidateRef, acceptances: [{ id: 'atomic', patch }] });
+      await assert.rejects(accept({ status: 'accepted', invalidField: true }), /permission/i);
+      assert.equal((await getDocFromServer(candidate)).data().status, 'pending');
+      assert.deepEqual((await getDocFromServer(ref)).data().state, before.state);
+      await accept({ status: 'accepted' });
+      assert.equal((await getDocFromServer(candidate)).data().status, 'accepted');
+      assert.equal((await getDocFromServer(ref)).data().state.transactions[0].id, 'mail_atomic');
+    } finally { await deleteDoc(candidate); }
+  });
   await check('新形式の家計へ旧画面から保存しない', async () => {
     const before = (await getDocFromServer(ref)).data();
-    await updateDoc(ref, { state: { modelVersion: 1, bills: [] }, revision: 3 });
-    await assert.rejects(save({ modelVersion: 1, bills: [] }, before.state, 3), /新形式/);
+    await updateDoc(ref, { state: { modelVersion: 1, bills: [] }, revision: 4 });
+    await assert.rejects(save({ modelVersion: 1, bills: [] }, before.state, 4), /新形式/);
     assert.deepEqual((await getDocFromServer(ref)).data().state, { modelVersion: 1, bills: [] });
   });
 } finally { await deleteDoc(ref).catch(() => {}); await deleteApp(app); }

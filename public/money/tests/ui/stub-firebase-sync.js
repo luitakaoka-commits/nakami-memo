@@ -9,7 +9,7 @@ export const firebaseSync = {
   },
   selectWorkspace: async () => {},
   refreshWorkspaces: async () => [],
-  queueSave: () => {},
+  queueSave: (_state, acceptance) => { if (acceptance) (window.__TEST_CALLS__ ||= []).push({ fn: 'updateImportCandidate', ...acceptance }); },
   addMember: async () => {},
   removeMember: async () => {},
   renameWorkspace: async () => {},

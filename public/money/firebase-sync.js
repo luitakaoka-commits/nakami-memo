@@ -27,7 +27,7 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=49';
+import './redesign-sync-coordinator.js?v=50';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -151,7 +151,7 @@ async function selectWorkspace(workspaceId) {
       if (currentWorkspace?.id === selected.id && currentUser?.uid === uid) statusHandler(...args);
     },
     applyRemote: (state, meta) => remoteHandler(state, meta),
-    write: request => saveSnapshot({ ...request, db, ref: workspaceRef, uid, runTransaction, updatedAt: serverTimestamp() })
+    write: request => saveSnapshot({ ...request, db, ref: workspaceRef, uid, runTransaction, candidateRef: id => doc(workspaceRef, 'importCandidates', id), updatedAt: serverTimestamp() })
   });
   const saver = workspaceSaver;
   localStorage.setItem(ACTIVE_WORKSPACE_KEY, selected.id);
@@ -209,11 +209,11 @@ async function connect(initialState, onRemote, onStatus, onCandidates, onReceipt
   return getSession();
 }
 
-function queueSave(nextState) {
+function queueSave(nextState, acceptance) {
   if (!currentUser || !currentWorkspace || !workspaceSaver) return false;
   clearTimeout(saveTimer);
   try {
-    workspaceSaver.enqueue(clone(nextState));
+    workspaceSaver.enqueue(clone(nextState), acceptance);
     const saver = workspaceSaver;
     saveTimer = setTimeout(() => saver.flush(), 450);
     return true;

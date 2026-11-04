@@ -393,10 +393,10 @@
     }
   }
 
-  function persist() {
+  function persist(acceptance) {
     state.meta.updatedAt = nowIso();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    return cloud?.queueSave(state);
+    return cloud?.queueSave(state, acceptance);
   }
 
   /** 空状態の共通マークアップ。title / body は既にエスケープ済みの文字列を渡すこと。 */
@@ -640,7 +640,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=49" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=50" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1229,24 +1229,20 @@
     if (statementError) { showToast(statementError); return; }
     state.transactions.push(transaction);
     absorbSettledStatementDetails(state);
-    const queued = persist();
-    try {
-      if (queued === false) throw new Error('クラウド保存を開始できませんでした');
-      await cloud?.flushPendingSave?.();
-    }
-    catch (_) {
-      renderPage();
-      showToast('取引を同期できなかったため、メール候補は未確認のままです。');
-      return;
-    }
-    let candidateUpdated = true;
     const sameDate = candidate.usedDate === transactionDate;
     const timePatch = Object.prototype.hasOwnProperty.call(candidate, 'usedTime')
       ? { usedTime: sameDate ? candidate.usedTime || '' : '', usedTimeZone: sameDate ? candidate.usedTimeZone || '' : '', usedTimeSource: sameDate ? candidate.usedTimeSource || '' : '' } : {};
-    try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), ...timePatch, amount, usedDate: transactionDate, merchant, status: 'accepted' }); }
-    catch (error) { candidateUpdated = false; console.warn('取込候補の更新に失敗しました', error); }
+    const patch = { ...stripCandidate(candidate), ...timePatch, amount, usedDate: transactionDate, merchant, status: 'accepted' };
+    try {
+      if (persist({ id, patch }) === false) throw new Error('クラウド保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+    } catch (_) {
+      renderPage();
+      showToast('メール候補と取引を同期できませんでした。端末内に変更を保管しています。');
+      return;
+    }
     renderPage();
-    showToast(!candidateUpdated ? '取引は作成しましたが、候補の更新に失敗しました。同期状態を確認してください' : transaction.status === 'absorbed' ? '請求総額の内訳にまとめました。予定の明細タブから確認できます' : '取り込みました。内容は予定の明細タブから編集できます');
+    showToast(transaction.status === 'absorbed' ? '請求総額の内訳にまとめました。予定の明細タブから確認できます' : '取り込みました。内容は予定の明細タブから編集できます');
     if (transaction.status !== 'absorbed') openEventModal(transaction.id);
   }
 
