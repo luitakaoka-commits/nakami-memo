@@ -1,5 +1,6 @@
 /* ローカルFirestore模擬環境の架空データ専用。利用者権限で復元を試験する。 */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import backup from '../redesign-backup-read.js';
 import migration from '../redesign-migration-check.js';
@@ -30,7 +31,7 @@ async function request(path, options = {}) {
   return response.status === 204 ? {} : response.json();
 }
 async function write(path, content) { return request(path, { method: 'PATCH', body: JSON.stringify({ fields: content }) }); }
-async function read(workspaceId, time, afterRootRead) {
+async function read(workspaceId, time, afterRootRead, readHeaders = headers) {
   return backup.readSnapshot({ projectId: 'demo-kurashi', workspaceId, readTime: time, getJson: async url => {
     const parsed = new URL(url);
     // エミュレーターのRESTはRFC 3339のreadTimeを誤解析するため、
@@ -42,7 +43,7 @@ async function read(workspaceId, time, afterRootRead) {
     parsed.searchParams.set('readTime.seconds', String(Date.parse(`${match[1]}Z`) / 1000));
     parsed.searchParams.set('readTime.nanos', String(Number((match[2] || '').padEnd(9, '0'))));
     const local = `http://127.0.0.1:8487${parsed.pathname}${parsed.search}`;
-    const response = await fetch(local, { headers });
+    const response = await fetch(local, { headers: readHeaders });
     const body = await response.json();
     if (!response.ok) throw new Error(`模擬Firestoreの読み取り ${response.status}: ${body.error?.message || '不明'}`);
     if (afterRootRead && parsed.pathname.endsWith(`/workspaces/${workspaceId}`)) await afterRootRead();
@@ -195,5 +196,41 @@ try {
 } finally {
   for (const path of cleanup.reverse()) await request(path, { method: 'DELETE' }).catch(() => {});
 }
-console.log(JSON.stringify({ suite: 'redesign-restore-emulator', total: 1, passed: 1 - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
+let total = 1;
+if (process.env.PRIVATE_CLOUD_SNAPSHOT) {
+  total++;
+  const privateCleanup = [];
+  let privateHeaders;
+  try {
+    const snapshot = JSON.parse(readFileSync(process.env.PRIVATE_CLOUD_SNAPSHOT, 'utf8').replace(/^\uFEFF/, ''));
+    const uid = snapshot.workspace.fields.ownerUid.stringValue;
+    privateHeaders = { Authorization: `Bearer ${token(uid)}`, 'Content-Type': 'application/json' };
+    const privateTargetId = `private-copy-${randomUUID()}`;
+    const original = JSON.stringify(snapshot);
+    const result = await executor.executeRestore({
+      snapshot, targetId: privateTargetId, uid,
+      readBack: (id, time) => read(id, time, undefined, privateHeaders),
+      commitWrites: async writes => {
+        // 原本のprojectsパスは外部へ送らず、ローカル模擬プロジェクトだけに書く。
+        const localWrites = writes.map(write => ({ ...write, update: {
+          ...write.update, name: write.update.name.replace(/^projects\/[^/]+\/databases\/[^/]+\/documents\//, 'projects/demo-kurashi/databases/(default)/documents/')
+        } }));
+        const response = await fetch(`${base}:commit`, { method: 'POST', headers: privateHeaders, body: JSON.stringify({ writes: localWrites }) });
+        if (!response.ok) throw new Error('private_restore_write_failed');
+        privateCleanup.push(...localWrites.map(write => write.update.name.split('/documents/')[1]));
+        return response.json();
+      }
+    });
+    assert.equal(result.status, 'verified');
+    assert.equal(JSON.stringify(snapshot), original);
+    const restored = await read(privateTargetId, new Date().toISOString(), undefined, privateHeaders);
+    assert.equal(migration.compareRestored(snapshot, restored).matches, true);
+    assert.deepEqual(names.map(name => restored.collections[name].documents.length), names.map(name => snapshot.collections[name].documents.length));
+  } catch (_) {
+    failures.push({ name: '非公開原本全体の隔離復元', message: 'private_restore_check_failed' });
+  } finally {
+    for (const path of privateCleanup.reverse()) await fetch(`${base}/${path}`, { method: 'DELETE', headers: privateHeaders });
+  }
+}
+console.log(JSON.stringify({ suite: 'redesign-restore-emulator', total, passed: total - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
 if (failures.length) process.exitCode = 1;
