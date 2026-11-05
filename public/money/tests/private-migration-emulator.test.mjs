@@ -10,7 +10,8 @@ process.once('uncaughtException', () => {
   console.log(JSON.stringify({ suite: 'private-migration-emulator', status: 'fail', privateValuesOmitted: true }));
   process.exitCode = 1;
 });
-if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8488') throw new Error('ローカル模擬環境専用です');
+const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
+if (!['127.0.0.1:8487', '127.0.0.1:8488'].includes(emulatorHost)) throw new Error('ローカル模擬環境専用です');
 const read = path => JSON.parse(fs.readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
 const source = read(process.argv[2]), before = structuredClone(source);
 const candidates = read(process.argv[3]).pending;
@@ -19,12 +20,13 @@ const end = new Date(`${today}T00:00:00Z`); end.setUTCDate(end.getUTCDate() + 89
 const converted = migration.migrateState({ state: source, today, endDate: end.toISOString().slice(0, 10), candidates });
 const app = initializeApp({ projectId: 'demo-kurashi', apiKey: 'demo', appId: 'demo' }, `private-migration-${randomUUID()}`);
 const db = getFirestore(app);
-connectFirestoreEmulator(db, '127.0.0.1', 8488, { mockUserToken: { sub: 'migration-user', user_id: 'migration-user' } });
+connectFirestoreEmulator(db, '127.0.0.1', Number(emulatorHost.split(':')[1]), { mockUserToken: { sub: 'migration-user', user_id: 'migration-user' } });
 const ref = doc(db, 'workspaces', `private-migration-${randomUUID()}`);
 let total = 0;
 const pass = () => total++;
 try {
-  await setDoc(ref, { name: 'isolated-test', ownerUid: 'migration-user', memberUids: ['migration-user'], updatedBy: 'migration-user', revision: 0, state: converted.migrated });
+  await setDoc(ref, { name: 'isolated-test', ownerUid: 'migration-user', memberUids: ['migration-user'],
+    createdAt: 'test', updatedAt: 'test', updatedBy: 'migration-user', revision: 0, state: converted.migrated });
   const restored = (await getDocFromServer(ref)).data().state;
   assert.deepEqual(restored, converted.migrated); pass();
   assert.deepEqual(migration.assessMigrated(restored), migration.assessMigrated(converted.migrated)); pass();
