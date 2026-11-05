@@ -55,6 +55,8 @@ function audit(bundle, prior, recovery) {
   const transactions = new Map(state.transactions.map(item => [item.id, item]));
   const cards = new Map(state.cards.map(item => [item.id, item]));
   const candidateIds = new Set();
+  const legacyLinkHints = { uniqueByAmountDateMerchant: 0, multipleByAmountDateMerchant: 0, noMatchByAmountDateMerchant: 0 };
+  const normalized = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
   const candidates = { pending: 0, needs_review: 0, accepted: 0, ignored: 0, unknown: 0, acceptedWithoutTransaction: 0, pendingWithTransaction: 0, transactionsWithoutCandidate: 0, linkedAmountMismatch: 0, linkedDateMismatch: 0, linkedCardAccountMismatch: 0 };
   for (const { id, data } of bundle.collections.importCandidates.documents) {
     candidateIds.add(id);
@@ -62,7 +64,15 @@ function audit(bundle, prior, recovery) {
     if (['pending', 'needs_review', 'accepted', 'ignored'].includes(status)) candidates[status]++;
     else candidates.unknown++;
     const linked = transactions.get('mail_' + id);
-    if (status === 'accepted' && !linked) candidates.acceptedWithoutTransaction++;
+    if (status === 'accepted' && !linked) {
+      candidates.acceptedWithoutTransaction++;
+      const amount = data.fields?.amount ? decode(data.fields.amount) : undefined;
+      const date = data.fields?.usedDate?.stringValue, merchant = normalized(data.fields?.merchant?.stringValue);
+      const matches = merchant && date && Number.isSafeInteger(amount) ? state.transactions.filter(item =>
+        item.amount === amount && item.transactionDate === date && normalized(item.memo).includes(merchant)) : [];
+      const key = matches.length === 1 ? 'uniqueByAmountDateMerchant' : matches.length > 1 ? 'multipleByAmountDateMerchant' : 'noMatchByAmountDateMerchant';
+      legacyLinkHints[key]++;
+    }
     if ((status === 'pending' || status === 'needs_review') && linked) candidates.pendingWithTransaction++;
     if (status === 'accepted' && linked?.entryType === 'itemized' && !linked.refundEvidence) {
       const amount = data.fields?.amount ? decode(data.fields.amount) : undefined;
@@ -76,7 +86,7 @@ function audit(bundle, prior, recovery) {
   candidates.transactionsWithoutCandidate = state.transactions.filter(item => item.id.startsWith('mail_') && !candidateIds.has(item.id.slice(5))).length;
   const receiptIds = new Set(bundle.collections.receipts.documents.map(item => item.id));
   const receiptItemsWithoutReceipt = bundle.collections.receiptItems.documents.filter(({ data }) => !receiptIds.has(data.fields?.receiptId?.stringValue)).length;
-  return { counts, differences: prior ? differences : null, candidates, receiptItemsWithoutReceipt, collections: Object.fromEntries(Object.entries(bundle.collections).map(([name, data]) => [name, data.documents.length])),
+  return { counts, differences: prior ? differences : null, candidates, legacyLinkHints, receiptItemsWithoutReceipt, collections: Object.fromEntries(Object.entries(bundle.collections).map(([name, data]) => [name, data.documents.length])),
     ...(recovery ? { recovery: auditRecovery(bundle, transactions, recovery) } : {}) };
 }
 
