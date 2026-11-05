@@ -39,7 +39,7 @@ var AMOUNT_PATTERNS = [
 ];
 
 /** 「【ご利用金額】 279円」のように、金額そのものにラベルが付いている場合 */
-var AMOUNT_LABEL_PATTERN = /【?\s*(?:ご利用金額|ご利用額|利用金額|ご請求金額|請求金額|ご請求額|請求額|お支払金額|支払金額|決済金額)\s*】?\s*[：:]?\s*[¥￥]?\s*([0-9,]+)\s*(?:円|JPY)?/;
+var AMOUNT_LABEL_PATTERN = /【?\s*(?:ご利用金額|ご利用額|利用金額|ご請求金額|請求金額|ご請求額|請求額|お支払い?金額|支払い?金額|決済金額)\s*】?\s*[：:]?\s*[¥￥]?\s*([0-9,]+)\s*(?:円|JPY)?/;
 
 /** 「【ご利用日時(日本時間)】」「ご利用日時：」のような利用日ラベル */
 var USED_AT_LABEL_PATTERN = /【?\s*(?:ご利用日時|ご利用年月日|ご利用日|利用日時|利用日)\s*(?:\([^)\n]{0,12}\)|（[^）\n]{0,12}）)?\s*】?\s*[：:]?\s*/;
@@ -69,7 +69,7 @@ var IGNORE_LINE_WORDS = ['ポイント', '残高', '利用可能枠', '限度額
 function parseCardMail(mail) {
   var text = normalizeText(mail.subject + '\n' + mail.body);
   var issuer = findIssuer(mail.sender);
-  var type = detectType(text);
+  var type = detectType(text, normalizeText(mail.subject));
 
   var amounts = extractAmounts(text);
   var primary = findPrimaryAmount(text, issuer);
@@ -206,12 +206,16 @@ function findIssuer(sender) {
   return null;
 }
 
-function detectType(text) {
+function detectType(text, subject) {
+  // 通常の利用通知の注意書きにある「キャンセル」は取消の実行を表さない。
+  var evidence = subject || '';
+  var explicit = text.match(/(?:ご?返金|ご?取消|お取消|取り消し|キャンセル)(?:金額|額|日|日時|完了|処理完了)\s*[：:】]?/g);
+  evidence += '\n' + (explicit || []).join('\n');
   for (var i = 0; i < CANCEL_WORDS.length; i += 1) {
-    if (text.indexOf(CANCEL_WORDS[i]) !== -1) return 'cancel';
+    if (evidence.indexOf(CANCEL_WORDS[i]) !== -1) return 'cancel';
   }
   for (var j = 0; j < REFUND_WORDS.length; j += 1) {
-    if (text.indexOf(REFUND_WORDS[j]) !== -1) return 'refund';
+    if (evidence.indexOf(REFUND_WORDS[j]) !== -1) return 'refund';
   }
   if (text.indexOf('利用') !== -1) return 'purchase';
   return 'unknown';
