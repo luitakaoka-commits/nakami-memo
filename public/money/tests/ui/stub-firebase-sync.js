@@ -1,6 +1,12 @@
 // テスト用のFirebaseスタブ。ネットワークへ接続せずにアプリを起動する。
 import './redesign-sync-coordinator.js?v=57';
+import './redesign-migration-check.js';
+import './redesign-restore-plan.js';
 export const firebaseSync = {
+  restoreCloudBackup: async (snapshot, resume) => {
+    (window.__TEST_CALLS__ ||= []).push({ fn: 'restoreCloudBackup', snapshot, resume });
+    return { status: 'verified', targetId: 'restore-test' };
+  },
   readUnsavedRecovery: () => globalThis.RedesignSyncCoordinator.readRecovery(localStorage, 'test-user', 'test-workspace'),
   waitForAuth: async () => ({ uid: 'test-user', email: 'test@example.com' }),
   signIn: async () => ({ user: { uid: 'test-user' } }),

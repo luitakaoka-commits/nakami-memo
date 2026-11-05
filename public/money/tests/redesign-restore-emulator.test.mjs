@@ -1,6 +1,7 @@
 /* ローカルFirestore模擬環境の架空データ専用。利用者権限で復元を試験する。 */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import backup from '../redesign-backup-read.js';
 import migration from '../redesign-migration-check.js';
@@ -205,29 +206,61 @@ if (process.env.PRIVATE_CLOUD_SNAPSHOT) {
     const snapshot = JSON.parse(readFileSync(process.env.PRIVATE_CLOUD_SNAPSHOT, 'utf8').replace(/^\uFEFF/, ''));
     const uid = snapshot.workspace.fields.ownerUid.stringValue;
     privateHeaders = { Authorization: `Bearer ${token(uid)}`, 'Content-Type': 'application/json' };
-    const privateTargetId = `private-copy-${randomUUID()}`;
+    const privateTargetId = `restore-${randomUUID()}`;
     const original = JSON.stringify(snapshot);
-    const result = await executor.executeRestore({
-      snapshot, targetId: privateTargetId, uid,
-      readBack: (id, time) => read(id, time, undefined, privateHeaders),
-      commitWrites: async writes => {
-        // 原本のprojectsパスは外部へ送らず、ローカル模擬プロジェクトだけに書く。
-        const localWrites = writes.map(write => ({ ...write, update: {
-          ...write.update, name: write.update.name.replace(/^projects\/[^/]+\/databases\/[^/]+\/documents\//, 'projects/demo-kurashi/databases/(default)/documents/')
-        } }));
-        const response = await fetch(`${base}:commit`, { method: 'POST', headers: privateHeaders, body: JSON.stringify({ writes: localWrites }) });
-        if (!response.ok) throw new Error('private_restore_write_failed');
-        privateCleanup.push(...localWrites.map(write => write.update.name.split('/documents/')[1]));
-        return response.json();
+    const retained = new Map(), projectId = snapshot.workspace.name.split('/')[1];
+    const production = readFileSync(new URL('../firebase-sync.js', import.meta.url), 'utf8');
+    const start = production.indexOf('async function restoreCloudBackup(');
+    const end = production.indexOf('\nexport const firebaseSync', start);
+    assert.ok(start >= 0 && end > start);
+    const restoreFromScreen = runInNewContext('(' + production.slice(start, end).trim() + ')', {
+      currentUser: { uid, getIdToken: async () => token(uid) },
+      currentWorkspace: { id: snapshot.workspaceId }, flushPendingSave: async () => {},
+      refreshWorkspaces: async () => [], firebaseConfig: { projectId },
+      crypto: { randomUUID: () => privateTargetId.slice('restore-'.length) },
+      localStorage: { getItem: key => retained.get(key) ?? null, setItem: (key, value) => retained.set(key, value), removeItem: key => retained.delete(key) },
+      RedesignRestorePlan: planner, RedesignRestoreExecute: executor, RedesignBackupRead: backup,
+      AbortSignal,
+      fetch: async (url, options) => {
+        const parsed = new URL(url);
+        assert.equal(parsed.hostname, 'firestore.googleapis.com');
+        parsed.pathname = parsed.pathname.replace('/projects/' + projectId + '/', '/projects/demo-kurashi/');
+        const stamp = parsed.searchParams.get('readTime');
+        if (stamp) {
+          const match = /^(.*?)(?:\.(\d+))?Z$/.exec(stamp);
+          parsed.searchParams.delete('readTime');
+          parsed.searchParams.set('readTime.seconds', String(Date.parse(match[1] + 'Z') / 1000));
+          parsed.searchParams.set('readTime.nanos', String(Number((match[2] || '').padEnd(9, '0'))));
+        }
+        const local = 'http://127.0.0.1:8487' + parsed.pathname + parsed.search;
+        if (options.body) {
+          const body = JSON.parse(options.body);
+          body.writes = body.writes.map(write => ({ ...write, update: { ...write.update,
+            name: write.update.name.replace(/^projects\/[^/]+\//, 'projects/demo-kurashi/') } }));
+          const response = await fetch(local, { ...options, body: JSON.stringify(body) });
+          if (response.ok) privateCleanup.push(...body.writes.map(write => write.update.name.split('/documents/')[1]));
+          return response;
+        }
+        const response = await fetch(local, options);
+        const body = await response.json();
+        const rewriteName = document => {
+          if (document?.name) document.name = document.name.replace(/^projects\/demo-kurashi\//, 'projects/' + projectId + '/');
+        };
+        rewriteName(body);
+        for (const document of body.documents || []) rewriteName(document);
+        return { ok: response.ok, status: response.status, json: async () => body };
       }
     });
+    const result = await restoreFromScreen(snapshot);
+    if (result.status !== 'verified') throw new Error('private_restore_status_' + result.status);
     assert.equal(result.status, 'verified');
+    assert.equal(retained.size, 0);
     assert.equal(JSON.stringify(snapshot), original);
     const restored = await read(privateTargetId, new Date().toISOString(), undefined, privateHeaders);
     assert.equal(migration.compareRestored(snapshot, restored).matches, true);
     assert.deepEqual(names.map(name => restored.collections[name].documents.length), names.map(name => snapshot.collections[name].documents.length));
-  } catch (_) {
-    failures.push({ name: '非公開原本全体の隔離復元', message: 'private_restore_check_failed' });
+  } catch (error) {
+    failures.push({ name: '非公開原本全体の隔離復元', message: /^private_restore_status_\w+$/.test(error.message) ? error.message : 'private_restore_check_failed' });
   } finally {
     for (const path of privateCleanup.reverse()) await fetch(`${base}/${path}`, { method: 'DELETE', headers: privateHeaders });
   }

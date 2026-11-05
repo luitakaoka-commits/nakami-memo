@@ -14,15 +14,15 @@
   async function executeRestore({ snapshot, targetId, uid, commitWrites, readBack }) {
     if (typeof commitWrites !== 'function' || typeof readBack !== 'function') throw new Error('復元の通信手段を確認してください');
     const plan = planner.planRestore({ snapshot, targetId, uid });
-    let commitTime;
+    let commitTime, rootVersion;
     try {
       const result = await commitWrites(plan.rootWrites);
       commitTime = result?.commitTime;
+      rootVersion = result?.writeResults?.[0]?.updateTime || commitTime;
     } catch (_) {
       // 応答が失われた場合、親が作られたかどうか断定できない。
       return { status: 'root_uncertain', targetId };
     }
-    const rootVersion = commitTime;
     if (plan.childWrites.length) {
       if (typeof rootVersion !== 'string' || !rootVersion) return { status: 'root_uncertain', targetId };
       try {

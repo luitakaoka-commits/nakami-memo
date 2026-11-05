@@ -27,8 +27,11 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=73';
-import './redesign-backup-read.js?v=73';
+import './redesign-sync-coordinator.js?v=74';
+import './redesign-backup-read.js?v=74';
+import './=74';
+import './=74';
+import './=74';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -743,7 +746,61 @@ function readUnsavedRecovery() {
   return globalThis.RedesignSyncCoordinator.readRecovery(localStorage, currentUser.uid, currentWorkspace.id);
 }
 
+async function restoreCloudBackup(snapshot, resume = false) {
+  const user = currentUser;
+  const workspaceId = currentWorkspace?.id;
+  if (!user || !workspaceId) throw new Error('ログインして家計を開いてください');
+  await flushPendingSave();
+  const recoveryKey = 'okane-cloud-restore:' + user.uid;
+  const retained = resume ? JSON.parse(localStorage.getItem(recoveryKey) || 'null') : null;
+  if (resume && !retained) throw new Error('再開する復元がありません');
+  if (!resume && localStorage.getItem(recoveryKey)) throw new Error('前の復元を先に確認してください');
+  const source = resume ? retained.snapshot : snapshot;
+  const targetId = resume ? retained.receipt.targetId : 'restore-' + crypto.randomUUID();
+  const plan = globalThis.RedesignRestorePlan.planRestore({ snapshot: source, targetId, uid: user.uid });
+  const prefix = 'projects/' + firebaseConfig.projectId + '/databases/(default)/documents/workspaces/';
+  if (plan.rootWrites[0].update.name !== prefix + targetId) throw new Error('このプロジェクトの原本を選択してください');
+  const token = await user.getIdToken();
+  const ensureSession = () => {
+    if (currentUser !== user || currentWorkspace?.id !== workspaceId) throw new Error('復元中に家計が切り替わりました');
+  };
+  const base = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId + '/databases/(default)/documents';
+  const call = async (url, options = {}) => {
+    ensureSession();
+    const response = await fetch(url, {
+      ...options, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      cache: 'no-store', signal: AbortSignal.timeout(60000)
+    });
+    if (!response.ok) throw new Error('復元先の通信に失敗しました（HTTP ' + response.status + '）');
+    return response.json();
+  };
+  const readBack = (id, time) => globalThis.RedesignBackupRead.readSnapshot({
+    projectId: firebaseConfig.projectId, workspaceId: id, readTime: time, getJson: url => call(url)
+  });
+  const commitWrites = writes => call(base + ':commit', { method: 'POST', body: JSON.stringify({ writes }) });
+  if (!resume) localStorage.setItem(recoveryKey, JSON.stringify({
+    snapshot: source, receipt: { status: 'root_uncertain', targetId }
+  }));
+  const options = { snapshot: source, uid: user.uid, commitWrites, readBack };
+  const result = resume
+    ? await globalThis.RedesignRestoreExecute.resumeRestore({
+      ...options, receipt: retained.receipt,
+      readCurrent: async id => {
+        const document = await call(base + '/workspaces/' + encodeURIComponent(id));
+        return readBack(id, document.updateTime);
+      }
+    })
+    : await globalThis.RedesignRestoreExecute.executeRestore({ ...options, targetId });
+  ensureSession();
+  if (result.status === 'verified') {
+    localStorage.removeItem(recoveryKey);
+    await refreshWorkspaces();
+  } else localStorage.setItem(recoveryKey, JSON.stringify({ snapshot: source, receipt: result }));
+  return result;
+}
+
 export const firebaseSync = {
+  restoreCloudBackup,
   readUnsavedRecovery,
   readCloudBackup,
   waitForAuth: async () => {

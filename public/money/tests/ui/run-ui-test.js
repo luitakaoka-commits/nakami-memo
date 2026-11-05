@@ -1273,6 +1273,24 @@ const closeModals = page => page.evaluate(() => {
     assert(!result.added && result.toast.includes('既存の総額を編集'), '同じ請求分の総額がもう一度登録された');
   });
 
+  await record('cloud_restore_file_confirmation', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+    const name = 'projects/test/databases/(default)/documents/workspaces/original';
+    const snapshot = {
+      workspaceId: 'original', readTime: '2026-09-02T00:00:00Z',
+      workspace: { name, createTime: '2026-09-01T00:00:00Z', updateTime: '2026-09-01T00:00:00Z',
+        fields: { ownerUid: { stringValue: 'test-user' }, memberUids: { arrayValue: { values: [{ stringValue: 'test-user' }] } } } },
+      collections: Object.fromEntries(['importCandidates', 'receipts', 'receiptItems', 'itemAliases'].map(key => [key, { complete: true, documents: [] }]))
+    };
+    await page.locator('#restore-cloud-file').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(snapshot)) });
+    await page.waitForFunction(() => window.__TEST_CALLS__?.some(call => call.fn === 'restoreCloudBackup'));
+    assert(await page.locator('#toast').textContent().then(text => text.includes('復元と内容の照合が完了')), '復元完了が表示されない');
+    const before = await page.evaluate(() => window.__TEST_CALLS__.filter(call => call.fn === 'restoreCloudBackup').length);
+    snapshot.workspace.fields.ownerUid.stringValue = 'other-user';
+    await page.locator('#restore-cloud-file').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(snapshot)) });
+    await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('所有者'));
+    assert(await page.evaluate(() => window.__TEST_CALLS__.filter(call => call.fn === 'restoreCloudBackup').length) === before, '別利用者の原本を復元した');
+  });
   await record('cloud_snapshot_export', async () => {
     await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
     const button = page.locator('[data-action="export-cloud"]');
