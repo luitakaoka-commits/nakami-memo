@@ -650,7 +650,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=75" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=76" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2855,6 +2855,7 @@
 
   /** 請求総額を選んだときに、内数として外れる明細を明示する */
   function updateEntryTypeNote() {
+    $('#event-usage-time-wrap').hidden = eventEntryTypeValue() !== 'itemized';
     const note = $('#event-entry-type-note');
     if (!note) return;
     const cardId = $('#event-card').value;
@@ -2930,6 +2931,7 @@
     $('#event-kind').value = transaction?.kind || presetKind;
     $('#event-date').value = transaction?.dueDate || dateAdd(today(), 7);
     $('#event-usage-date').value = transaction?.transactionDate || '';
+    $('#event-usage-time').value = finance.jstTimeStringOf(transaction?.transactionAt);
     $('#event-entry-type').value = transaction?.entryType === 'itemized' ? 'itemized' : 'statement';
     $('#event-status').value = transaction?.status === 'settled' ? 'settled' : 'planned';
     $('#event-status-wrap').hidden = !transaction;
@@ -3094,9 +3096,16 @@
     const id = $('#event-id').value;
     const current = id ? state.transactions.find(item => item.id === id) : null;
     if (current && (hasLinkedRefund(current) || hasRefundDestination(current.id))) { showToast('返金と紐付いた取引は直接変更できません'); return; }
+    const usageDate = eventUsageDateValue();
+    let transactionAt = current?.transactionDate === usageDate ? current?.transactionAt || '' : '';
+    if (eventEntryTypeValue() === 'itemized') {
+      try {
+        transactionAt = finance.editedUsageInstant({ date: usageDate, time: $('#event-usage-time').value, previous: current?.transactionAt || '' });
+      } catch (error) { showToast(error.message); return; }
+    }
     const next = createTransaction({
       id: id || '', kind: $('#event-kind').value, amount: Number($('#event-amount').value || 0), dueDate: $('#event-date').value,
-      transactionDate: eventUsageDateValue(), transactionAt: current?.transactionAt || '', absorbedBy: current?.absorbedBy || '', dateEstimated: false,
+      transactionDate: usageDate, transactionAt, absorbedBy: current?.absorbedBy || '', dateEstimated: false,
       entryType: eventEntryTypeValue(), origin: current?.origin || '',
       status: eventStatusValue(current), sourceAccountId: $('#event-source').value, destinationAccountId: $('#event-destination').value || '', transferType: $('#event-transfer-type').value || 'internal', destinationName: $('#event-recipient').value.trim(), cardId: $('#event-kind').value === 'payment' ? ($('#event-card').value || '') : '', category: $('#event-category').value, memo: $('#event-memo').value.trim(), lendingAmount: Math.min(Number($('#event-lending').value || 0), Number($('#event-amount').value || 0)), affectsForecast: !$('#event-exclude').checked, recurringPlanId: current?.recurringPlanId || '', scheduledDate: current?.scheduledDate, settledAt: current?.settledAt || '', createdAt: current?.createdAt || '', updatedAt: nowIso(),
       salaryPaymentMonth: current?.salaryPaymentMonth || '', salaryManual: current?.salaryManual === true
@@ -3662,6 +3671,14 @@
   }
 
   function bindEvents() {
+    // 更新直後に古いHTMLが残っていても日時訂正欄を用意する。
+    if (!$('#event-usage-time')) {
+      const label = document.createElement('label');
+      label.id = 'event-usage-time-wrap';
+      label.hidden = true;
+      label.innerHTML = '<span>利用時刻（日本時間・任意）</span><input id="event-usage-time" type="time" step="60"><small class="field-hint">時刻が不明なら空欄にしてください。メールの受信時刻からは補いません。</small>';
+      $('#event-usage-date-wrap').after(label);
+    }
     document.addEventListener('click', event => {
       const close = event.target.closest('[data-close-modal]'); if (close) closeModal(close.dataset.closeModal);
       if (event.target.classList.contains('modal-backdrop')) event.target.hidden = true;

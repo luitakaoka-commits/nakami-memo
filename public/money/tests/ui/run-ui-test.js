@@ -1273,15 +1273,69 @@ const closeModals = page => page.evaluate(() => {
     assert(!result.added && result.toast.includes('既存の総額を編集'), '同じ請求分の総額がもう一度登録された');
   });
 
+  await record('usage_time_edit_clear_and_reload', async () => {
+    await closeModals(page);
+    const balances = await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      state.cards.push({ ...state.cards.find(x => x.id === 'c1'), id: 'usage-edit-card', name: '時刻編集専用カード', accountId: 'a1' });
+      state.transactions.push(api.createTransaction({ id: 'usage-time-edit', kind: 'payment', amount: 731,
+        transactionDate: '2026-09-02', transactionAt: '2026-09-01T23:13:25.000Z', dueDate: '2026-10-13',
+        cardId: 'usage-edit-card', sourceAccountId: 'a1', entryType: 'itemized', status: 'planned', memo: '時刻訂正テスト' }));
+      api.setPage('records');
+      return JSON.stringify(state.accounts);
+    });
+    const open = async () => {
+      await page.evaluate(() => window.__YORYOKU__.setPage('records'));
+      await page.evaluate(() => window.__YORYOKU__.setRecordTab('transactions'));
+      await page.locator('#record-search').fill('');
+      const clearCategory = page.locator('[data-action="filter-category"][data-category=""]');
+      if (await clearCategory.count()) await clearCategory.click();
+      await page.locator('[data-record-filter="all"]').click();
+      if (await page.locator('[data-action="edit-event"][data-id="usage-time-edit"]').count() !== 1) {
+        const details = await page.evaluate(() => ({ tx: window.__YORYOKU__.getState().transactions.find(x => x.id === 'usage-time-edit'), search: document.querySelector('#record-search')?.value }));
+        throw new Error('時刻編集用の記録が表示されない: ' + JSON.stringify(details));
+      }
+      await page.locator('[data-action="edit-event"][data-id="usage-time-edit"]').click();
+    };
+    const save = async expected => {
+      await page.locator('#event-form button[type="submit"]').click();
+      await page.waitForFunction(value => window.__YORYOKU__.getState().transactions.find(x => x.id === 'usage-time-edit')?.transactionAt === value, expected);
+    };
+    await open();
+    assert(await page.inputValue('#event-usage-time') === '08:13', '保存済み時刻が日本時間で表示されない');
+    await save('2026-09-01T23:13:25.000Z');
+    await open();
+    await page.fill('#event-usage-time', '08:12');
+    await save('2026-09-01T23:12:00.000Z');
+    await page.reload({ waitUntil: 'networkidle' });
+    await open();
+    assert(await page.inputValue('#event-usage-time') === '08:12', '訂正時刻が再読込で消えた');
+    await page.fill('#event-usage-time', '');
+    await save('');
+    await open();
+    await page.fill('#event-usage-date', '2026-09-03');
+    await page.locator('#event-usage-date').dispatchEvent('change');
+    await page.fill('#event-usage-time', '23:59');
+    await save('2026-09-03T14:59:00.000Z');
+    const result = await page.evaluate(() => ({
+      tx: window.__YORYOKU__.getState().transactions.find(x => x.id === 'usage-time-edit'),
+      balances: JSON.stringify(window.__YORYOKU__.getState().accounts)
+    }));
+    assert(result.tx.transactionDate === '2026-09-03' && result.tx.amount === 731, '時刻訂正で日付や金額が壊れた');
+    assert(result.balances === balances, '未払いの時刻訂正で口座残高が動いた');
+  });
+
   await record('legacy_cached_html_boot', async () => {
     await page.route('**/money/index.html?legacy-shell', async route => {
       const response = await route.fetch();
-      const html = (await response.text()).replace(/<input id="restore-cloud-file"[^>]*>/, '');
+      const html = (await response.text()).replace(/<input id="restore-cloud-file"[^>]*>/, '')
+        .replace(/<label id="event-usage-time-wrap"[\s\S]*?<\/label>/, '');
       await route.fulfill({ response, body: html });
     });
     await page.goto(`http://localhost:${PORT}/money/index.html?legacy-shell`, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => Boolean(window.__YORYOKU__));
     assert(await page.locator('#restore-cloud-file').count() === 1, '旧HTMLで復元用ファイル選択が作られない');
+    assert(await page.locator('#event-usage-time').count() === 1, '旧HTMLで利用時刻の訂正欄が作られない');
     await page.unroute('**/money/index.html?legacy-shell');
   });
   await record('cloud_restore_file_confirmation', async () => {

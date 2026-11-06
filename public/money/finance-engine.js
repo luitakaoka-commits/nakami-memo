@@ -72,6 +72,16 @@
     return `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`;
   }
 
+  /** 編集画面で明示された日本時間だけを使う。空欄は時刻不明へ戻す。 */
+  function editedUsageInstant({ date, time, previous = '' }) {
+    if (time === '') return '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '') || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time || '')) throw new RangeError('利用日と利用時刻を確認してください');
+    const value = new Date(`${date}T${time}:00+09:00`);
+    if (!Number.isFinite(value.getTime()) || jstDateStringOf(value.toISOString()) !== date) throw new RangeError('利用日と利用時刻を確認してください');
+    if (jstDateStringOf(previous) === date && jstTimeStringOf(previous) === time) return previous;
+    return value.toISOString();
+  }
+
   /** 「今日」を日本時間の 'YYYY-MM-DD' で返す。実行環境のタイムゾーンに依存しない。 */
   function jstToday(now = new Date()) {
     return jstDateStringOf(now instanceof Date ? now.toISOString() : now);
@@ -2086,7 +2096,7 @@
     parseLocalDate, toDateString, addDays, daysBetween, daysInMonth,
     monthKeyOf, shiftMonthKey, calendarMonthRange, monthRangeOf,
     // 日本時間(JST)と利用時刻
-    jstDateStringOf, jstTimeStringOf, jstToday, usageInstantOf, sortByUsageDesc,
+    jstDateStringOf, jstTimeStringOf, editedUsageInstant, jstToday, usageInstantOf, sortByUsageDesc,
     // 祝日・営業日
     japaneseHolidayName, isJapaneseHoliday, isJapaneseBusinessDay,
     previousBusinessDay, nextBusinessDay, holidaysForYear,

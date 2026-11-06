@@ -203,6 +203,26 @@ test('記録が無い期間では合計が0になる', () => {
   equal(summary.expense.categories.length, 0, 'カテゴリなし');
 });
 
+test('利用時刻の訂正は日本時間で保存し、変更しない時刻の秒も保持する', () => {
+  equal(engine.editedUsageInstant({ date: '2026-10-20', time: '00:05' }), '2026-10-19T15:05:00.000Z', '日付境界の訂正');
+  const previous = '2026-10-20T06:13:25.000Z';
+  equal(engine.editedUsageInstant({ date: '2026-10-20', time: '15:13', previous }), previous, '未編集の秒');
+});
+
+test('不明な利用時刻を空欄に戻せて、利用日を変更すると古い日付を残さない', () => {
+  const previous = '2026-10-20T06:13:25.000Z';
+  equal(engine.editedUsageInstant({ date: '2026-10-20', time: '', previous }), '', '不明な時刻を消す');
+  equal(engine.editedUsageInstant({ date: '2026-10-21', time: '15:13', previous }), '2026-10-21T06:13:00.000Z', '利用日の訂正');
+});
+
+test('存在しない日付と不正な利用時刻を保存しない', () => {
+  for (const input of [{ date: '2026-02-30', time: '12:00' }, { date: '2026-10-20', time: '24:00' }, { date: '2026-10-20', time: '15:60' }]) {
+    let rejected = false;
+    try { engine.editedUsageInstant(input); } catch (error) { rejected = error instanceof RangeError; }
+    assert(rejected, '不正な日時を受け入れた');
+  }
+});
+
 if (!failures.length) { console.log(JSON.stringify({ suite: 'records-view', total, passed: total, failed: 0 })); process.exit(0); }
 console.log(JSON.stringify({ suite: 'records-view', total, passed: total - failures.length, failed: failures.length, failures }, null, 2));
 process.exit(1);
