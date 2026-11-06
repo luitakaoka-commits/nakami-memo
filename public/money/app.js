@@ -12,6 +12,27 @@
   const today = () => finance.jstToday();
   const nowIso = () => new Date().toISOString();
   const uid = (prefix = 'id') => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  const modalEditContexts = new Map();
+
+  function editSessionKey() {
+    const session = cloud?.getSession?.();
+    return JSON.stringify([session?.user?.uid || '', session?.workspace?.id || '']);
+  }
+
+  function modalEditText(readCurrent) {
+    return window.RedesignSyncCoordinator.canonical(JSON.parse(JSON.stringify(readCurrent() ?? null)));
+  }
+
+  function rememberModalEdit(id, readCurrent) {
+    modalEditContexts.set(id, { readCurrent, baseline: modalEditText(readCurrent), session: editSessionKey() });
+  }
+
+  function canSaveModalEdit(id) {
+    const context = modalEditContexts.get(id);
+    if (context && context.session === editSessionKey() && context.baseline === modalEditText(context.readCurrent)) return true;
+    showToast('別の画面で内容が更新されました。この画面の入力は残っています。開き直して確認してください');
+    return false;
+  }
 
   const ROLE_LABELS = {
     primary: '基準口座',
@@ -650,7 +671,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=77" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=78" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2922,6 +2943,7 @@
   }
 
   function openEventModal(id = '', presetKind = 'payment', presetStatus = '') {
+    rememberModalEdit('event-modal', () => ({ transaction: id ? state.transactions.find(item => item.id === id) || null : null, cards: state.cards }));
     const modal = $('#event-modal');
     const transaction = id ? state.transactions.find(item => item.id === id) : null;
     $('#event-modal-title').textContent = transaction
@@ -2967,7 +2989,7 @@
     if (presetStatus === 'settled') $('#event-amount').select();
   }
 
-  function closeModal(id) { const modal = $(`#${id}`); if (modal) modal.hidden = true; }
+  function closeModal(id) { const modal = $(`#${id}`); if (modal) modal.hidden = true; modalEditContexts.delete(id); }
 
   function setAddMenu(open) {
     const menu = $('#add-menu');
@@ -3098,6 +3120,7 @@
 
   function saveEvent(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('event-modal')) return;
     if (!state.accounts.length) { closeModal('event-modal'); showToast('先に口座を追加してください'); return; }
     const id = $('#event-id').value;
     const current = id ? state.transactions.find(item => item.id === id) : null;
@@ -3196,6 +3219,7 @@
   }
 
   function openDebitForm(transaction) {
+    rememberModalEdit('debit-modal', () => ({ transaction: state.transactions.find(item => item.id === transaction.id) || null, account: account(transaction.sourceAccountId) || null }));
     const form = $('#debit-form');
     form.reset();
     form.elements.namedItem('transactionId').value = transaction.id;
@@ -3207,6 +3231,7 @@
 
   async function saveDebit(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('debit-modal')) return;
     const fields = new FormData(event.target);
     const transaction = state.transactions.find(item => item.id === fields.get('transactionId'));
     if (transaction?.status !== 'planned') { closeModal('debit-modal'); return; }
@@ -3292,6 +3317,7 @@
   }
 
   function openAccountModal(id = '') {
+    rememberModalEdit('account-modal', () => id ? account(id) || null : null);
     const current = id ? account(id) : null;
     $('#account-modal-title').textContent = current ? '口座を編集' : '口座を追加';
     $('#account-id').value = current?.id || '';
@@ -3306,6 +3332,7 @@
 
   function saveAccount(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('account-modal')) return;
     const id = $('#account-id').value;
     const role = $('#account-role').value;
     const current = id ? account(id) : null;
@@ -3333,6 +3360,7 @@
   }
 
   function openCardModal(id = '') {
+    rememberModalEdit('card-modal', () => ({ card: id ? creditCard(id) || null : null, accountIds: state.accounts.map(item => item.id) }));
     const current = id ? creditCard(id) : null;
     $('#card-modal-title').textContent = current ? 'カードを編集' : 'カードを追加';
     $('#card-id').value = current?.id || '';
@@ -3348,6 +3376,7 @@
 
   function saveCard(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('card-modal')) return;
     if (!state.accounts.length) { closeModal('card-modal'); showToast('先に引落口座を追加してください'); return; }
     const id = $('#card-id').value;
     const current = id ? creditCard(id) : null;
@@ -3378,6 +3407,7 @@
   }
 
   function openWorkModal(id = '') {
+    rememberModalEdit('work-modal', () => id ? state.workEntries.find(item => item.id === id) || null : null);
     const current = id ? state.workEntries.find(item => item.id === id) : null;
     $('#work-modal-title').textContent = current ? '勤務を編集' : '勤務を記録';
     $('#work-id').value = current?.id || '';
@@ -3392,6 +3422,7 @@
 
   function saveWork(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('work-modal')) return;
     const id = $('#work-id').value;
     const current = id ? state.workEntries.find(item => item.id === id) : null;
     const next = {

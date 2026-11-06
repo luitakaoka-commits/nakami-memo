@@ -12,6 +12,7 @@ export const firebaseSync = {
   signIn: async () => ({ user: { uid: 'test-user' } }),
   signOut: async () => {},
   connect: async (initialState, onRemote, onStatus, onCandidates) => {
+    window.__TEST_STATE_SINK__ = onRemote;
     if (onStatus) onStatus('saved');
     if (onCandidates) { window.__TEST_CANDIDATE_SINK__ = onCandidates; onCandidates([]); }
   },

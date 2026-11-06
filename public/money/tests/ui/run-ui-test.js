@@ -1274,6 +1274,65 @@ const closeModals = page => page.evaluate(() => {
     assert(!result.added && result.toast.includes('既存の総額を編集'), '同じ請求分の総額がもう一度登録された');
   });
 
+  await record('remote_updates_preserve_open_editors', async () => {
+    await closeModals(page);
+    const original = await page.evaluate(() => structuredClone(window.__YORYOKU__.getState()));
+    try {
+      await page.evaluate(() => {
+        const api = window.__YORYOKU__, copy = structuredClone(api.getState());
+        copy.cards.push({ ...copy.cards[0], id: 'concurrent-edit-card', name: '同時編集カード', accountId: 'a1' });
+        copy.transactions.push(api.createTransaction({ id: 'concurrent-edit', kind: 'payment', amount: 731,
+          transactionDate: '2026-09-02', dueDate: '2026-10-13', cardId: 'concurrent-edit-card',
+          sourceAccountId: 'a1', entryType: 'itemized', status: 'planned', category: '生活費', memo: '同時編集検査' }));
+        window.__TEST_STATE_SINK__(copy, { initial: true });
+        api.setPage('records'); api.setRecordTab('transactions');
+      });
+      await page.locator('#record-search').fill('');
+      const clear = page.locator('[data-action="filter-category"][data-category=""]');
+      if (await clear.count()) await clear.click();
+      await page.locator('[data-record-filter="all"]').click();
+      const openEvent = () => page.locator('[data-action="edit-event"][data-id="concurrent-edit"]').click();
+      await openEvent();
+      await page.locator('#event-memo').fill('この画面の下書き');
+      await page.evaluate(() => {
+        const copy = structuredClone(window.__YORYOKU__.getState());
+        copy.transactions.find(x => x.id === 'concurrent-edit').category = '食費';
+        window.__TEST_STATE_SINK__(copy, { initial: true });
+      });
+      assert(await page.inputValue('#event-memo') === 'この画面の下書き', '受信時に編集内容が消えた');
+      await page.locator('#event-form button[type="submit"]').click();
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(x => x.id === 'concurrent-edit').category) === '食費', '古い編集画面が別画面のカテゴリを上書きした');
+      assert(await page.locator('#event-modal').isVisible() && await page.inputValue('#event-memo') === 'この画面の下書き', '競合時の下書きが残っていない');
+      await closeModals(page);
+      await openEvent();
+      await page.locator('#event-memo').fill('無関係の更新とは両立');
+      const otherBalance = await page.evaluate(() => {
+        const copy = structuredClone(window.__YORYOKU__.getState()), bank = copy.accounts.find(x => x.id === 'a2');
+        bank.currentBalance += 10;
+        window.__TEST_STATE_SINK__(copy, { initial: true });
+        return bank.currentBalance;
+      });
+      await page.locator('#event-form button[type="submit"]').click();
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(x => x.id === 'concurrent-edit').memo) === '無関係の更新とは両立', '別の記録の更新で保存を止めた');
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(x => x.id === 'a2').currentBalance) === otherBalance, '無関係の更新を失った');
+      await page.evaluate(() => window.__YORYOKU__.setPage('accounts'));
+      await page.locator('[data-action="edit-account"][data-id="a1"]').click();
+      await page.locator('#account-name').fill('この画面の口座名下書き');
+      const remoteBalance = await page.evaluate(() => {
+        const copy = structuredClone(window.__YORYOKU__.getState()), bank = copy.accounts.find(x => x.id === 'a1');
+        bank.currentBalance += 321; delete bank.balanceEvidence;
+        window.__TEST_STATE_SINK__(copy, { initial: true });
+        return bank.currentBalance;
+      });
+      await page.locator('#account-form button[type="submit"]').click();
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(x => x.id === 'a1').currentBalance) === remoteBalance, '古い口座編集が新しい残高を上書きした');
+      assert(await page.locator('#account-modal').isVisible() && await page.inputValue('#account-name') === 'この画面の口座名下書き', '口座の競合時に下書きが消えた');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(copy => window.__TEST_STATE_SINK__(copy, { initial: true }), original);
+    }
+  });
+
   await record('usage_time_edit_clear_and_reload', async () => {
     await closeModals(page);
     const balances = await page.evaluate(() => {
