@@ -650,7 +650,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=74" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=75" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -3698,7 +3698,16 @@
       state.settings.defenseLine = Number($('#settings-defense').value || 0); state.settings.deadlineMode = $('#settings-deadline').value; state.settings.cashflowHorizonDays = Number($('#settings-horizon').value || 90); state.settings.reviewDayOfWeek = Math.min(Math.max(Number($('#settings-review-day').value || 0), 0), 6); persist(); renderPage(); showToast('設定を保存しました');
     });
     $('#import-file').addEventListener('change', event => importData(event.target.files[0]));
-    $('#restore-cloud-file').addEventListener('change', event => void restoreCloudFile(event.target.files[0]));
+    let restoreInput = $('#restore-cloud-file');
+    if (!restoreInput) {
+      restoreInput = document.createElement('input');
+      restoreInput.id = 'restore-cloud-file';
+      restoreInput.type = 'file';
+      restoreInput.accept = 'application/json';
+      restoreInput.hidden = true;
+      document.body.appendChild(restoreInput);
+    }
+    restoreInput.addEventListener('change', event => void restoreCloudFile(event.target.files[0]));
     document.addEventListener('change', event => {
       const candidateCard = event.target.closest?.('[data-candidate-card]');
       if (candidateCard) { candidateCardSelections.set(candidateCard.dataset.candidateCard, candidateCard.value); return; }

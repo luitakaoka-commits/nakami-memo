@@ -1273,6 +1273,17 @@ const closeModals = page => page.evaluate(() => {
     assert(!result.added && result.toast.includes('既存の総額を編集'), '同じ請求分の総額がもう一度登録された');
   });
 
+  await record('legacy_cached_html_boot', async () => {
+    await page.route('**/money/index.html?legacy-shell', async route => {
+      const response = await route.fetch();
+      const html = (await response.text()).replace(/<input id="restore-cloud-file"[^>]*>/, '');
+      await route.fulfill({ response, body: html });
+    });
+    await page.goto(`http://localhost:${PORT}/money/index.html?legacy-shell`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => Boolean(window.__YORYOKU__));
+    assert(await page.locator('#restore-cloud-file').count() === 1, '旧HTMLで復元用ファイル選択が作られない');
+    await page.unroute('**/money/index.html?legacy-shell');
+  });
   await record('cloud_restore_file_confirmation', async () => {
     await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
     const name = 'projects/test/databases/(default)/documents/workspaces/original';

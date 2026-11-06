@@ -18,7 +18,7 @@ const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..');
 /* sw.js がキャッシュ優先で抱えるファイル。sw.js の ASSETS と揃える。 */
-const SHELL = ['index.html', 'styles.css', 'finance-engine.js', 'app.js', 'firebase-sync.js', 'icons/app-icon.svg', 'tokens.css', 'redesign-sync-coordinator.js', 'redesign-backup-read.js', 'redesign-legacy-adapter.js', 'redesign-readiness.js', 'redesign-deadline.js', 'redesign-bill-lifecycle.js', 'redesign-refund.js'];
+const SHELL = ['index.html', 'styles.css', 'finance-engine.js', 'app.js', 'firebase-sync.js', 'icons/app-icon.svg', 'tokens.css', 'redesign-sync-coordinator.js', 'redesign-backup-read.js', 'redesign-legacy-adapter.js', 'redesign-readiness.js', 'redesign-deadline.js', 'redesign-bill-lifecycle.js', 'redesign-refund.js', 'redesign-migration-check.js', 'redesign-restore-plan.js', 'redesign-restore-execute.js'];
 
 const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
 const version = (sw.match(/const VERSION = '(\d+)'/) || [])[1];
@@ -52,7 +52,10 @@ else {
   if (stale.length) failures.push({ name: '?v=', message: `index.html に VERSION と違うクエリがあります: ${[...new Set(stale)].join(', ')}` });
 }
 
-const total = 3;
+const imports = fs.readFileSync(path.join(ROOT, 'firebase-sync.js'), 'utf8').matchAll(/^import\s+['"](\.[^'"]+)['"]/gm);
+const missing = [...imports].map(match => match[1].split('?')[0]).filter(file => !fs.existsSync(path.resolve(ROOT, file)));
+if (missing.length) failures.push({ name: '依存ファイル', message: 'Firebase接続処理のimport先がありません: ' + missing.join(', ') });
+const total = 4;
 if (!failures.length) {
   console.log(JSON.stringify({ suite: 'sw-version', total, passed: total, failed: 0 }));
   process.exit(0);
