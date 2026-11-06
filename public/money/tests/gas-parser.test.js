@@ -289,6 +289,31 @@ test('JPYの利用通知と本文中の外貨の説明を混同しない', () =>
   equal(result.amount, 120, 'JPYの金額を失った');
 });
 
+test('利用日ラベルの同じ行に記載された時刻も保持する', () => {
+  const result = parse('statement@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+    '◇利用日：2026/10/17 15:08\n◇利用金額：5080円\n◇利用先：テスト店舗');
+  equal(result.usedTime, '15:08', '本文にある利用時刻を失った');
+  equal(result.usedTimeZone, '', '時間帯を推測した');
+});
+
+test('キャッシュバック広告を返金の候補にしない', () => {
+  equal(parse('mail@contact.vpass.ne.jp',
+    '本ご案内が届いた方限定！もれなく最大1,000円キャッシュバック！',
+    'キャンペーン期間中にカードをご利用するだけで、最大1,000円キャッシュバック。'), null, '広告を返金にした');
+});
+
+test('利用情報のある抽選チケット案内を再度の購入候補にしない', () => {
+  equal(parse('suguchan@vpass.ne.jp', '【抽選チケット進呈】すぐチャン！Vポイントがその場で当たる！',
+    '利用カード：三井住友カードVISA（NL）\n利用日：2026/10/17 15:08\n利用金額：5080円\n利用先：テスト店舗'), null, '抽選案内を別取引にした');
+});
+
+test('キャンペーンの実際の返金完了通知は広告として捨てない', () => {
+  const result = parse('notice@vpass.ne.jp', 'キャンペーンの返金完了のお知らせ',
+    'ご返金日：2026/10/17\nご返金金額：1000円');
+  equal(result.type, 'refund', '返金完了を失った');
+  equal(result.confident, false, '返金を未照合のまま確定した');
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-parser', total, passed: total, failed: 0 }));
   process.exit(0);

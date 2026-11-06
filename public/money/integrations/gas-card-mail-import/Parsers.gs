@@ -67,6 +67,12 @@ var IGNORE_LINE_WORDS = ['ポイント', '残高', '利用可能枠', '限度額
  * 戻り値: { amount, usedDate, cardHint, merchant, type, confident, issuerLabel, note } または null
  */
 function parseCardMail(mail) {
+  var subject = normalizeText(mail.subject);
+  // 特典の上限額や、利用後に届く抽選案内は取引を表さない。
+  // 実際の返金完了通知は残し、従来どおり元取引との照合を要求する。
+  var promotion = /キャンペーン|もれなく|最大[\d,]+円キャッシュバック|抽選チケット|すぐチャン/.test(subject);
+  var completedRefund = /(?:返金|キャッシュバック|取消|取り消し|キャンセル)(?:完了|処理完了)/.test(subject);
+  if (promotion && !completedRefund) return null;
   var text = normalizeText(mail.subject + '\n' + mail.body);
   var issuer = findIssuer(mail.sender);
   var type = detectType(text, normalizeText(mail.subject));
@@ -148,14 +154,14 @@ function parseCardMail(mail) {
   };
 }
 
-/** 明示的な「利用日時」の同じ行だけを見る。受信時刻や年の推定は使わない。 */
+/** 利用日のラベルと同じ行にある時刻だけを見る。受信時刻や年の推定は使わない。 */
 function extractUsageMoment(body, usedDate) {
   var empty = { time: '', timeZone: '' };
   var text = normalizeText(body || '').normalize('NFKC');
-  var labels = text.match(/(?:ご利用日時|利用日時)/g) || [];
+  var labels = text.match(/(?:ご利用日時|利用日時|ご利用日|利用日)/g) || [];
   if (labels.length !== 1 || !usedDate) return empty;
-  var line = text.split(/\r?\n/).filter(function (row) { return /(?:ご利用日時|利用日時)/.test(row); })[0] || '';
-  var match = line.match(/(?:ご利用日時|利用日時)[ \t]*(\([^)]{1,12}\))?[ \t]*】?[ \t]*[:：]?[ \t]*(20\d{2})[\/\-年][ \t]*(\d{1,2})[\/\-月][ \t]*(\d{1,2})日?[ \t]+(\d{1,2}):(\d{2})(?![\d:])/);
+  var line = text.split(/\r?\n/).filter(function (row) { return /(?:ご利用日時|利用日時|ご利用日|利用日)/.test(row); })[0] || '';
+  var match = line.match(/(?:ご利用日時|利用日時|ご利用日|利用日)[ \t]*(\([^)]{1,12}\))?[ \t]*】?[ \t]*[:：]?[ \t]*(20\d{2})[\/\-年][ \t]*(\d{1,2})[\/\-月][ \t]*(\d{1,2})日?[ \t]+(\d{1,2}):(\d{2})(?![\d:])/);
   if (!match || !isValidCalendarDate(match[2], match[3], match[4]) || Number(match[5]) > 23 || Number(match[6]) > 59) return empty;
   var date = pad4(match[2]) + '-' + pad2(match[3]) + '-' + pad2(match[4]);
   if (date !== usedDate) return empty;
