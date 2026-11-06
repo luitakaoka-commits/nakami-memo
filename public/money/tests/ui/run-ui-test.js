@@ -64,6 +64,7 @@ const failures = [];
 const consoleErrors = [];
 
 function record(name, fn) {
+  if (process.env.UI_CHECK && !process.env.UI_CHECK.split(',').includes(name)) return Promise.resolve();
   return Promise.resolve()
     .then(fn)
     .then(() => { checks[name] = 'pass'; })
@@ -1280,7 +1281,7 @@ const closeModals = page => page.evaluate(() => {
       state.cards.push({ ...state.cards.find(x => x.id === 'c1'), id: 'usage-edit-card', name: '時刻編集専用カード', accountId: 'a1' });
       state.transactions.push(api.createTransaction({ id: 'usage-time-edit', kind: 'payment', amount: 731,
         transactionDate: '2026-09-02', transactionAt: '2026-09-01T23:13:25.000Z', dueDate: '2026-10-13',
-        cardId: 'usage-edit-card', sourceAccountId: 'a1', entryType: 'itemized', status: 'planned', memo: '時刻訂正テスト' }));
+        cardId: 'usage-edit-card', sourceAccountId: 'a1', entryType: 'itemized', status: 'planned', category: 'カード利用', memo: '時刻訂正テスト' }));
       api.setPage('records');
       return JSON.stringify(state.accounts);
     });
@@ -1322,6 +1323,7 @@ const closeModals = page => page.evaluate(() => {
       balances: JSON.stringify(window.__YORYOKU__.getState().accounts)
     }));
     assert(result.tx.transactionDate === '2026-09-03' && result.tx.amount === 731, '時刻訂正で日付や金額が壊れた');
+    assert(result.tx.category === 'カード利用', '時刻訂正で既存のカテゴリが変わった');
     assert(result.balances === balances, '未払いの時刻訂正で口座残高が動いた');
   });
 
@@ -1548,7 +1550,8 @@ const closeModals = page => page.evaluate(() => {
   await browser.close();
   server.close();
 
-  const output = { checks, console_errors: consoleErrors, failed_details: failures };
+  if (process.env.UI_CHECK && !Object.keys(checks).length) throw new Error('指定された画面検査がありません');
+  const output = { checks, console_errors: consoleErrors, failed_details: failures, selection: process.env.UI_CHECK || 'all' };
   console.log(JSON.stringify(output, null, failures.length || consoleErrors.length ? 2 : 0));
   process.exit(failures.length || consoleErrors.length ? 1 : 0);
 })();

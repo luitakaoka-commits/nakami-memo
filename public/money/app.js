@@ -650,7 +650,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=76" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=77" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2942,7 +2942,13 @@
     $('#event-card').value = transaction?.cardId || '';
     $('#event-transfer-type').value = transaction?.transferType || 'internal';
     $('#event-recipient').value = transaction?.destinationName || '';
-    $('#event-category').value = transaction?.category || '生活費';
+    const categorySelect = $('#event-category');
+    const savedCategory = transaction?.category || '生活費';
+    // 取込済みの既存カテゴリも選択肢に残し、別の項目の編集で消さない。
+    if (![...categorySelect.options].some(option => option.value === savedCategory)) {
+      categorySelect.add(new Option(savedCategory, savedCategory));
+    }
+    categorySelect.value = savedCategory;
     $('#event-exclude').checked = transaction?.affectsForecast === false;
     populateAccountSelect('#event-source');
     populateAccountSelect('#event-destination', true);
