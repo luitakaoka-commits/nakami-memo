@@ -336,6 +336,11 @@ test('通常のGoogle購入や本文の一時確認の説明は保留通知と�
   }
 });
 
+test('カード会社が送る公演案内の開催日と料金を利用明細にしない', () => {
+  equal(parse('info@cr.mufg.jp', '＜限定50名＞11/4(水)受付開始！新春公演の講座付きチケット',
+    'いつもご利用いただきありがとうございます。\n開催日 2027年1月10日\n料金 1名様10,000円\nお早めにお申込みください。'), null, '案内の価格を支出にした');
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-parser', total, passed: total, failed: 0 }));
   process.exit(0);

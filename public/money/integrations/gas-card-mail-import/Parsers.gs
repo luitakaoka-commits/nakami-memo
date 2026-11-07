@@ -90,7 +90,9 @@ function parseCardMail(mail) {
   var hasAmountLabel = AMOUNT_LABEL_PATTERN.test(text);
   var transactionSubject = /利用|決済|返金|取消|キャンセル|取り消し/.test(normalizeText(mail.subject));
   if (!issuer && !(hasUsageDateLabel && hasAmountLabel)) return null;
-  if (issuer && !transactionSubject && !hasUsageDateLabel && !hasAmountLabel && amounts.length === 0) return null;
+  // 金額が1つ書かれていても、開催日と料金だけでは利用の証拠にならない。
+  // 複数金額の既存通知は、従来どおり下段で要確認に残す。
+  if (issuer && !transactionSubject && !hasUsageDateLabel && !hasAmountLabel && amounts.length <= 1) return null;
 
   var amount = primary ? primary.value : (amounts.length ? amounts[0] : null);
   var note = '';
