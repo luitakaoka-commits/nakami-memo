@@ -55,7 +55,24 @@
     }
     return result;
   }
-  const api = { readSnapshot };
+  /** 端末時計を使わず、サーバーが返した読取点で全ページを揃える。 */
+  async function readCurrentSnapshot({ projectId, databaseId = '(default)', workspaceId, getJson, postJson, beforeRead = async () => {} }) {
+    if (![projectId, databaseId, workspaceId].every(value => typeof value === 'string' && value && !value.includes('/'))) throw new Error('プロジェクトまたは家計IDが不正です');
+    if (typeof getJson !== 'function' || typeof postJson !== 'function' || typeof beforeRead !== 'function') throw new Error('読み取りの通信手段が不正です');
+    await beforeRead();
+    const name = `projects/${projectId}/databases/${databaseId}/documents/workspaces/${workspaceId}`;
+    const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents:batchGet`;
+    const responses = await postJson(url, { documents: [name] });
+    if (!Array.isArray(responses) || responses.length !== 1) throw new Error('サーバーの読取時刻を取得できません');
+    const reply = responses[0];
+    if (!reply || reply.error || reply.missing !== undefined || reply.found?.name !== name || !timestampKey(reply.readTime)) throw new Error('家計またはサーバーの読取時刻を確認できません');
+    // readTimeパラメータはマイクロ秒精度。端数を上へ丸めて未来の状態を混ぜない。
+    const readTime = reply.readTime.replace(/(\.\d{6})\d+Z$/, '$1Z');
+    const cutoff = timestampKey(readTime), created = timestampKey(reply.found.createTime), updated = timestampKey(reply.found.updateTime);
+    if (!created || !updated || created > updated || updated > cutoff) throw new Error('文書の更新時刻がサーバーの読み取り時点と一致しません');
+    return readSnapshot({ projectId, databaseId, workspaceId, readTime, getJson });
+  }
+  const api = { readSnapshot, readCurrentSnapshot };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.RedesignBackupRead = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

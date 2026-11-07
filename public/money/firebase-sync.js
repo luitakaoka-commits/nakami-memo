@@ -27,11 +27,11 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=79';
-import './redesign-backup-read.js?v=79';
-import './redesign-migration-check.js?v=79';
-import './redesign-restore-plan.js?v=79';
-import './redesign-restore-execute.js?v=79';
+import './redesign-sync-coordinator.js?v=80';
+import './redesign-backup-read.js?v=80';
+import './redesign-migration-check.js?v=80';
+import './redesign-restore-plan.js?v=80';
+import './redesign-restore-execute.js?v=80';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -722,20 +722,28 @@ async function readCloudBackup() {
   const ensureSession = () => {
     if (currentUser !== user || currentWorkspace?.id !== workspaceId) throw new Error('読み取り中に家計が切り替わりました');
   };
-  const snapshot = await globalThis.RedesignBackupRead.readSnapshot({
+  const call = async (url, body) => {
+    ensureSession();
+    const response = await fetch(url, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { Authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      cache: 'no-store', signal
+    });
+    if (!response.ok) throw new Error('クラウドの取得に失敗しました（HTTP ' + response.status + '）');
+    return response.json();
+  };
+  const saver = workspaceSaver;
+  const snapshot = await globalThis.RedesignBackupRead.readCurrentSnapshot({
     projectId: firebaseConfig.projectId,
     workspaceId,
-    readTime: new Date(Date.now() - 1000).toISOString(),
-    getJson: async url => {
+    beforeRead: async () => {
+      // 送信中の通常保存を待つ。競合で退避中でもクラウド原本の取得は妨げない。
+      await saver?.flush();
       ensureSession();
-      const response = await fetch(url, {
-        headers: { Authorization: 'Bearer ' + token },
-        cache: 'no-store',
-        signal
-      });
-      if (!response.ok) throw new Error('クラウドの取得に失敗しました（HTTP ' + response.status + '）');
-      return response.json();
-    }
+    },
+    getJson: url => call(url),
+    postJson: (url, body) => call(url, body)
   });
   ensureSession();
   return snapshot;

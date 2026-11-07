@@ -671,7 +671,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=79" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=80" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2772,7 +2772,7 @@
   function renderStatementDetailPanel(statement, details) {
     const total = details.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const diff = Number(statement.amount || 0) - total;
-    const rows = details.map(item => `<div class="detail-row"><div class="detail-when">${esc(formatUsageMoment(item))}</div><div class="detail-name">${esc(item.memo || 'カード利用')}${item.transactionAt ? '' : '<span class="detail-flag">時刻なし</span>'}${item.status === 'absorbed' ? `<button type="button" class="mini-button" data-action="correct-detail-card" data-id="${esc(item.id)}">カードを訂正</button>` : ''}</div><div class="detail-amount">${formatAbsoluteYen(Math.abs(Number(item.amount || 0)))}</div></div>`).join('');
+    const rows = details.map(item => `<div class="detail-row"><div class="detail-when">${esc(formatUsageMoment(item))}</div><div class="detail-name">${esc(item.memo || 'カード利用')}${item.transactionAt ? '' : '<span class="detail-flag">時刻なし</span>'}${item.status === 'absorbed' ? `<button type="button" class="mini-button" data-action="correct-detail-card" data-id="${esc(item.id)}">カードを訂正</button><button type="button" class="mini-button" data-action="correct-detail-time" data-id="${esc(item.id)}">利用時刻を訂正</button>` : ''}</div><div class="detail-amount">${formatAbsoluteYen(Math.abs(Number(item.amount || 0)))}</div></div>`).join('');
     const note = diff === 0
       ? '請求総額と明細の合計が一致しています。'
       : diff > 0
@@ -2942,10 +2942,43 @@
         : ['saving', 'nisa'].includes(kind) ? '予定で保存します。確定すると残高に反映します。' : '予定で保存します。確定すると残高に反映します。';
   }
 
+  function openDetailTime(id) {
+    if (!$('#detail-time-modal')) { showToast('画面を更新してから、時刻の訂正を開き直してください'); return; }
+    const item = state.transactions.find(entry => entry.id === id);
+    if (!item || item.status !== 'absorbed' || item.entryType !== 'itemized') return;
+    clearTimeout(toastTimer); $('#toast')?.classList.remove('show');
+    rememberModalEdit('detail-time-modal', () => ({ item: state.transactions.find(entry => entry.id === id), transactions: state.transactions, accounts: state.accounts, cards: state.cards }));
+    $('#detail-time-id').value = id;
+    $('#detail-time-description').textContent = `${formatDate(item.transactionDate, true)} ${item.memo || 'カード利用'} ${formatAbsoluteYen(item.amount)}`;
+    $('#detail-time-value').value = finance.jstDateStringOf(item.transactionAt) === item.transactionDate ? finance.jstTimeStringOf(item.transactionAt) : '';
+    $('#detail-time-confirm').checked = false;
+    $('#detail-time-modal').hidden = false;
+  }
+
+  async function saveDetailTime(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('detail-time-modal') || !$('#detail-time-confirm').checked) return;
+    const button = event.target.querySelector('[type="submit"]');
+    try {
+      const current = state.transactions.find(item => item.id === $('#detail-time-id').value);
+      if (!current || current.status !== 'absorbed' || current.entryType !== 'itemized') throw new Error('訂正する明細を開き直してください');
+      const instant = finance.editedUsageInstant({ date: current.transactionDate, time: $('#detail-time-value').value, previous: current.transactionAt || '' });
+      button.disabled = true;
+      if (instant !== current.transactionAt) {
+        state.transactions = state.transactions.map(item => item.id === current.id ? { ...item, transactionAt: instant, updatedAt: nowIso() } : item);
+        if (persist() === false) throw new Error('クラウド保存を開始できませんでした');
+        await cloud?.flushPendingSave?.();
+      }
+      closeModal('detail-time-modal'); renderPage(); showToast('利用時刻を訂正しました。金額と引落状態は変更していません');
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
+  }
+
   function openCardCorrection(id) {
     if (!$('#card-correction-modal')) { showToast('画面を更新してから、カードの訂正を開き直してください'); return; }
     const item = state.transactions.find(entry => entry.id === id);
     if (!item || item.status !== 'absorbed') return;
+    clearTimeout(toastTimer); $('#toast')?.classList.remove('show');
     rememberModalEdit('card-correction-modal', () => ({ item: state.transactions.find(entry => entry.id === id), cards: state.cards, transactions: state.transactions, accounts: state.accounts }));
     $('#card-correction-id').value = id;
     $('#card-correction-detail').textContent = `${formatDate(item.transactionDate, true)} ${item.memo || 'カード利用'} ${formatAbsoluteYen(item.amount)}`;
@@ -3668,6 +3701,7 @@
     if (name === 'add-event') { closeAddMenu(); openEventModal('', action.dataset.kind || 'payment'); }
     if (name === 'toggle-details') { toggleStatementDetails(action.dataset.id); return; }
     if (name === 'correct-detail-card') { openCardCorrection(action.dataset.id); return; }
+    if (name === 'correct-detail-time') { openDetailTime(action.dataset.id); return; }
     if (name === 'edit-event') openEventModal(action.dataset.id);
     if (name === 'delete-event') deleteEvent(action.dataset.id);
     if (name === 'confirm-statement') void confirmStatement(action.dataset.id);
@@ -3765,6 +3799,7 @@
       if (event.target.id === 'debit-form') { void saveDebit(event); return; }
       if (event.target.id === 'recurring-plan-form') { void saveRecurringPlan(event); return; }
       if (event.target.id === 'card-correction-form') { void saveCardCorrection(event); return; }
+      if (event.target.id === 'detail-time-form') { void saveDetailTime(event); return; }
       if (event.target.id === 'receipt-form') { saveReceiptForm(event); return; }
       if (event.target.id === 'share-member-form') { addCloudMember(event); return; }
       if (event.target.id === 'workspace-name-form') { renameCloudWorkspace(event); return; }

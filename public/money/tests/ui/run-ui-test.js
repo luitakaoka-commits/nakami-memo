@@ -1624,6 +1624,28 @@ const closeModals = page => page.evaluate(() => {
       assert(JSON.stringify(after.accounts) === JSON.stringify(before.accounts), '残高を変更した');
       assert(JSON.stringify(after.bills) === JSON.stringify(before.bills), '引落済み総額を変更した');
       assert(after.detail.cardId === 'right' && after.detail.absorbedBy === 'right-bill' && after.detail.status === 'absorbed' && after.detail.amount === 500, '内訳のカード訂正に失敗した');
+      await page.locator('[data-action="toggle-details"][data-id="right-bill"]').click();
+      await page.locator('[data-action="correct-detail-time"][data-id="wrong-detail"]').click();
+      await page.locator('#detail-time-value').fill('12:34');
+      await page.locator('#detail-time-confirm').check();
+      if (process.env.MONEY_TIME_CORRECTION_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_TIME_CORRECTION_SCREENSHOT, fullPage: false });
+      await page.locator('#detail-time-form [type="submit"]').click();
+      await page.locator('#detail-time-modal').waitFor({ state: 'hidden' });
+      const timed = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(t => t.id === 'wrong-detail'));
+      assert(timed.transactionAt === '2026-08-10T03:34:00.000Z', '日本時間の利用時刻を保存できない');
+      assert(JSON.stringify({ ...timed, transactionAt: undefined, updatedAt: after.detail.updatedAt }) === JSON.stringify(after.detail), '時刻以外の明細を変更した');
+      await page.locator('[data-action="correct-detail-time"][data-id="wrong-detail"]').click();
+      await page.locator('#detail-time-value').fill('');
+      await page.locator('#detail-time-confirm').check();
+      await page.locator('#detail-time-form [type="submit"]').click();
+      await page.locator('#detail-time-modal').waitFor({ state: 'hidden' });
+      const cleared = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        return { accounts: state.accounts, bills: state.transactions.slice(0, 2), detail: state.transactions[2] };
+      });
+      assert(cleared.detail.transactionAt === '', '不明な時刻を空欄へ戻せない');
+      assert(cleared.detail.status === 'absorbed' && cleared.detail.absorbedBy === 'right-bill', '引落状態を戻してしまった');
+      assert(JSON.stringify(cleared.accounts) === JSON.stringify(before.accounts) && JSON.stringify(cleared.bills) === JSON.stringify(before.bills), '時刻訂正で残高や請求総額を変更した');
       assert(await page.locator('body').evaluate(e => e.scrollWidth <= document.documentElement.clientWidth + 1), '訂正後の画面に横スクロールがある');
     } finally {
       await closeModals(page);
