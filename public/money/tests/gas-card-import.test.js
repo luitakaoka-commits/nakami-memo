@@ -159,5 +159,16 @@ test('旧候補を確認できない場合は保存せずラベルも付けな�
   assert(result.failed === 1 && f.saved.size === 0 && f.labeled.length === 0, '確認失敗時に処理を進めた');
 });
 
+test('Googleの一時確認候補は金額とカードを保持して要確認で保存する', () => {
+  const f = fixture({ ids: ['a'], sender: 'notice@vpass.ne.jp', subject: 'ご利用のお知らせ【三井住友カード】',
+    body: '三井住友カードＶＩＳＡ（ＮＬ）についてカードの利用内容をお知らせします。\nご利用日時：2026/09/05 23:07\nGOOGLE*WALLET TEMP（買物） 200円' });
+  const result = f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(result.created === 1 && fields.status.stringValue === 'needs_review', '要確認で保存されない');
+  assert(fields.type.stringValue === 'unknown' && fields.amount.doubleValue === 200, '通知の種別や額が不正');
+  assert(fields.cardHint.stringValue.includes('三井住友') && fields.usedDate.stringValue === '2026-09-05' && fields.usedTime.stringValue === '23:07', 'カードや利用日時を失った');
+  assert(fields.note.stringValue.includes('一時的'), '理由を保存していない');
+});
+
 console.log(JSON.stringify({ suite: 'gas-card-import', total, passed: total - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
 process.exit(failures.length ? 1 : 0);

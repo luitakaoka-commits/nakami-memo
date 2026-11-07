@@ -314,6 +314,28 @@ test('キャンペーンの実際の返金完了通知は広告として捨て�
   equal(result.confident, false, '返金を未照合のまま確定した');
 });
 
+test('Googleの一時確認と思われる通知は金額を保持して要確認にする', () => {
+  for (const merchant of ['GOOGLE*WALLET TEMP', 'GOOGLE *WALLET TEMP', 'ＧＯＯＧＬＥ＊ＷＡＬＬＥＴ ＴＥＭＰ', 'GOOGLE *TEMPORARY HOLD']) {
+    const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+      `ご利用日時：2026/09/05 23:07\n${merchant}（買物） 200円`);
+    equal(result.amount, 200, '通知額を消した');
+    equal(result.usedDate, '2026-09-05', '利用日を失った');
+    equal(result.usedTime, '23:07', '時刻を失った');
+    equal(result.type, 'unknown', '購入と断定した');
+    equal(result.confident, false, '確定扱いにした');
+    assert(/一時的|確認/.test(result.note), '確認理由がない');
+  }
+});
+
+test('通常のGoogle購入や本文の一時確認の説明は保留通知と混同しない', () => {
+  for (const merchant of ['GOOGLE*YouTube', 'GOOGLE*WALLET TEMP STORE']) {
+    const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+      `ご利用日時：2026/09/05 23:07\n${merchant}（買物） 200円\nGOOGLE *TEMPORARY HOLDは確認用の場合があります。`);
+    equal(result.type, 'purchase', '別の購入を保留扱いにした');
+    equal(result.amount, 200, '金額を変えた');
+  }
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-parser', total, passed: total, failed: 0 }));
   process.exit(0);

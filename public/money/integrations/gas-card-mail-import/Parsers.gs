@@ -140,6 +140,15 @@ function parseCardMail(mail) {
     note = '外貨の利用通知です。円の請求額を確認してください。';
   }
 
+  // 利用先が確認用の表記と一致する場合だけ保留する。額だけでは判断しない。
+  // 実際の売上・解放を確認できないので、返金やゼロ円にも置き換えない。
+  var descriptor = String(merchant || '').normalize('NFKC').replace(/\s*\(買物\)\s*$/, '').trim();
+  if (/^GOOGLE\s*\*\s*(?:WALLET\s+TEMP|TEMPORARY\s+HOLD)$/i.test(descriptor) && type === 'purchase') {
+    type = 'unknown';
+    confident = false;
+    note = (note ? note + ' ' : '') + 'カード確認の一時的な利用通知の可能性があります。カード会社の明細で売上か保留かを確認してください。通知額は保持し、購入・返金とは断定していません。';
+  }
+
   return {
     amount: amount,
     usedDate: usedDate,
