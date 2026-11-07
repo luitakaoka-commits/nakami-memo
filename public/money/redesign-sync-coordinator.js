@@ -146,7 +146,15 @@
     }
     return { format: 'money-unsaved-recovery-v1', workspaceId, snapshots };
   }
-  const api = { canonical, createCoordinator, saveSnapshot, readRecovery };
+  function purchaseCandidateCorrection(candidate, expected, confirmed) {
+    if (confirmed !== true || !candidate || !expected) throw new Error('通知本文で1件の利用であることを確認してください');
+    if (!['pending', 'needs_review'].includes(candidate.status) || !['cancel', 'refund', 'unknown'].includes(candidate.type)) throw new Error('訂正できる未確認候補ではありません');
+    const reviewed = ['status', 'type', 'amount', 'usedDate', 'merchant', 'cardHint', 'sourcePackage', 'fingerprint', 'note', 'usedTime', 'usedTimeZone', 'usedTimeSource'];
+    if (reviewed.some(key => (candidate[key] ?? null) !== (expected[key] ?? null))) throw new Error('候補が別の画面で更新されました。通知を確認し直してください');
+    const original = { cancel: '取消', refund: '返金', unknown: '不明' }[candidate.type];
+    return { type: 'purchase', note: [candidate.note || '', `通知本文を確認し、「${original}」から「利用」に訂正しました。`].filter(Boolean).join(' ') };
+  }
+  const api = { canonical, createCoordinator, saveSnapshot, readRecovery, purchaseCandidateCorrection };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.RedesignSyncCoordinator = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

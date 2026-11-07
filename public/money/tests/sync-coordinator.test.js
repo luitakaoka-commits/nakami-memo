@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
-const { createCoordinator, canonical, readRecovery } = require('../redesign-sync-coordinator.js');
+const { createCoordinator, canonical, readRecovery, purchaseCandidateCorrection } = require('../redesign-sync-coordinator.js');
 const failures = []; let total = 0;
 const defer = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const check = async (name, fn) => { total++; try { await fn(); } catch (error) { failures.push({ name, message: error.message }); } };
@@ -67,6 +67,49 @@ function setup(write = async request => request.expectedRevision + 1, retain) {
   });
   await check('保存応答の版が不正なら退避を消さない', async () => {
     const { saver, held } = setup(async () => 7); saver.receive({ n: 0 }, 0); saver.enqueue({ n: 1 }); await saver.flush(); assert.equal(saver.isBlocked(), true); assert.equal(held.length, 1);
+  });
+  const candidate = { status: 'needs_review', type: 'cancel', amount: 6300, usedDate: '2026-11-01', merchant: '検証店', cardHint: '検証カード', sourcePackage: '01epos.jp', fingerprint: 'source-id', note: '元の判定理由' };
+  await check('利用通知への訂正は種類と説明だけを変え、確認済みにしない', async () => {
+    const before = structuredClone(candidate), patch = purchaseCandidateCorrection(candidate, before, true);
+    assert.deepEqual(Object.keys(patch).sort(), ['note', 'type']);
+    assert.equal(patch.type, 'purchase'); assert.ok(patch.note.includes('元の判定理由') && patch.note.includes('取消'));
+    assert.deepEqual(candidate, before);
+  });
+  await check('本文未確認・取り込み済み・無視済み・古い確認内容からは種類を変えない', async () => {
+    assert.equal(typeof purchaseCandidateCorrection, 'function');
+    assert.throws(() => purchaseCandidateCorrection(candidate, candidate, false));
+    for (const patch of [{ status: 'accepted' }, { status: 'ignored' }, { amount: 6400 }, { usedDate: '2026-11-02' }, { type: 'purchase' }]) {
+      assert.throws(() => purchaseCandidateCorrection({ ...candidate, ...patch }, candidate, true));
+    }
+  });
+  await check('実際の候補訂正APIはトランザクション内で再照合し、家計本体を書かない', async () => {
+    const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+    const source = fs.readFileSync(path.join(__dirname, '..', 'firebase-sync.js'), 'utf8');
+    const start = source.indexOf('async function correctImportCandidateType(');
+    assert.ok(start >= 0, '候補訂正APIがない');
+    const end = start + source.slice(start).search(/^}/m) + 1;
+    let current = structuredClone(candidate); const updates = [];
+    const context = vm.createContext({ currentUser: { uid: 'user' }, currentWorkspace: { id: 'home' }, db: {},
+      doc: (_db, ...parts) => parts.join('/'), serverTimestamp: () => 'server-time',
+      RedesignSyncCoordinator: require('../redesign-sync-coordinator.js'),
+      runTransaction: async (_db, callback) => callback({ get: async ref => { assert.equal(ref, 'workspaces/home/importCandidates/candidate'); return { exists: () => true, data: () => current }; }, update: (ref, patch) => updates.push({ ref, patch }) })
+    });
+    const run = vm.runInContext('(' + source.slice(start, end) + ')', context);
+    const patch = await run('candidate', candidate, true);
+    assert.equal(patch.type, 'purchase'); assert.equal(updates.length, 1);
+    assert.equal(updates[0].ref, 'workspaces/home/importCandidates/candidate');
+    assert.deepEqual(Object.keys(updates[0].patch).sort(), ['note', 'type', 'updatedAt']);
+    current = { ...candidate, status: 'accepted' };
+    await assert.rejects(run('candidate', candidate, true)); assert.equal(updates.length, 1);
+    current = { ...candidate, amount: 6400 };
+    await assert.rejects(run('candidate', candidate, true)); assert.equal(updates.length, 1);
+    current = structuredClone(candidate);
+    context.runTransaction = async (_db, callback) => callback({
+      get: async () => { context.currentWorkspace = { id: 'other-home' }; return { exists: () => true, data: () => current }; },
+      update: (ref, patch) => updates.push({ ref, patch })
+    });
+    await assert.rejects(run('candidate', candidate, true), /家計が切り替わりました/);
+    assert.equal(updates.length, 1);
   });
   console.log(JSON.stringify({ suite: 'sync-coordinator', total, passed: total - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
   if (failures.length) process.exitCode = 1;

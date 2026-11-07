@@ -671,7 +671,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=80" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=81" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1207,6 +1207,7 @@
             <div class="candidate-head"><strong>${candidate.amount ? formatAbsoluteYen(candidate.amount) : '金額を確認'}</strong><span class="badge ${status.className}">${status.label}</span><span class="badge badge-muted">${CANDIDATE_TYPE[candidate.type] || '不明'}</span>${duplicate ? '<span class="badge badge-warn">重複の可能性</span>' : ''}</div>
             <small>${candidate.usedDate ? '利用日 ' + formatDate(candidateDate(candidate), true) : '受信日 ' + formatDate(candidateDate(candidate), true) + '（利用日未確認）'}${candidate.merchant ? `・${esc(candidate.merchant)}` : ''}・${esc(candidate.cardHint || 'カード不明')}・${esc(candidate.sourceLabel || candidate.sourcePackage || '取込元不明')}</small>
             ${candidate.note ? `<small>${esc(candidate.note)}</small>` : ''}
+            ${actionable && ['cancel', 'refund', 'unknown'].includes(candidate.type) ? `<button class="mini-button" data-action="correct-candidate-type" data-id="${esc(candidate.id)}">利用通知として訂正</button>` : ''}
             ${actionable && needsOriginal ? renderRefundTarget() : ''}
             ${actionable ? `<div class="candidate-edit-fields"><label><span>金額</span><input type="number" min="1" step="1" inputmode="numeric" data-candidate-field="amount" data-candidate-id="${esc(candidate.id)}" value="${esc(amountValue)}"></label><label><span>利用日／引落日</span><input type="date" data-candidate-field="date" data-candidate-id="${esc(candidate.id)}" value="${esc(dateValue)}"></label><label><span>内容の種類</span><select data-candidate-field="entryType" data-candidate-id="${esc(candidate.id)}"><option value="">種類を選択</option><option value="itemized" ${entryTypeValue === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${entryTypeValue === 'statement' ? 'selected' : ''}>請求総額</option></select></label><label><span>利用先・メモ</span><input type="text" maxlength="40" data-candidate-field="merchant" data-candidate-id="${esc(candidate.id)}" value="${esc(merchantValue)}"></label></div><small>1件の利用は利用日、請求総額は引落日を入力してください。</small>` : ''}
           </div>
@@ -1283,6 +1284,33 @@
       showToast('返金を元の利用に紐付けました');
     } catch (error) { showToast(error.message || '返金を同期できませんでした'); }
     renderPage();
+  }
+
+  function openCandidateTypeCorrection(id) {
+    if (!$('#candidate-type-modal')) { showToast('画面を更新してから、通知の訂正を開き直してください'); return; }
+    const candidate = importCandidates.find(item => item.id === id);
+    if (!candidate || !['pending', 'needs_review'].includes(candidate.status) || !['cancel', 'refund', 'unknown'].includes(candidate.type)) return;
+    rememberModalEdit('candidate-type-modal', () => importCandidates.find(item => item.id === id));
+    clearTimeout(toastTimer); $('#toast')?.classList.remove('show');
+    $('#candidate-type-id').value = id;
+    $('#candidate-type-description').textContent = `${candidate.usedDate || '利用日未確認'} ${candidate.merchant || candidate.sourceLabel || ''} ${candidate.amount ? formatAbsoluteYen(candidate.amount) : '金額未確認'}`;
+    $('#candidate-type-confirm').checked = false;
+    $('#candidate-type-modal').hidden = false;
+  }
+
+  async function saveCandidateTypeCorrection(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('candidate-type-modal') || !$('#candidate-type-confirm').checked) return;
+    const button = event.target.querySelector('[type="submit"]');
+    try {
+      const id = $('#candidate-type-id').value, candidate = importCandidates.find(item => item.id === id);
+      if (!candidate || !cloud?.correctImportCandidateType) throw new Error('候補を開き直して確認してください');
+      button.disabled = true;
+      const patch = await cloud.correctImportCandidateType(id, stripCandidate(candidate), true);
+      importCandidates = importCandidates.map(item => item.id === id ? { ...item, ...patch } : item);
+      closeModal('candidate-type-modal'); renderPage(); showToast('種類を利用へ訂正しました。カード・金額・利用日を確認して取り込んでください');
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
   }
 
   async function acceptCandidate(id, selectedCardId, edits) {
@@ -3751,6 +3779,7 @@
       });
       return;
     }
+    if (name === 'correct-candidate-type') { openCandidateTypeCorrection(action.dataset.id); return; }
     if (name === 'remember-candidate-card') { const row = action.closest('.candidate-row'); rememberCandidateCard(action.dataset.id, row?.querySelector('[data-candidate-card]')?.value || ''); return; }
     if (name === 'forget-candidate-card') { forgetCandidateCard(Number(action.dataset.index)); return; }
     if (name === 'ignore-candidate') { ignoreCandidate(action.dataset.id); return; }
@@ -3800,6 +3829,7 @@
       if (event.target.id === 'recurring-plan-form') { void saveRecurringPlan(event); return; }
       if (event.target.id === 'card-correction-form') { void saveCardCorrection(event); return; }
       if (event.target.id === 'detail-time-form') { void saveDetailTime(event); return; }
+      if (event.target.id === 'candidate-type-form') { void saveCandidateTypeCorrection(event); return; }
       if (event.target.id === 'receipt-form') { saveReceiptForm(event); return; }
       if (event.target.id === 'share-member-form') { addCloudMember(event); return; }
       if (event.target.id === 'workspace-name-form') { renameCloudWorkspace(event); return; }

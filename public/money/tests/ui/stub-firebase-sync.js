@@ -27,6 +27,11 @@ export const firebaseSync = {
   removeMember: async () => {},
   renameWorkspace: async () => {},
   updateImportCandidate: async (id, patch) => { (window.__TEST_CALLS__ ||= []).push({ fn: 'updateImportCandidate', id, patch }); },
+  correctImportCandidateType: async (id, expected, confirmed) => {
+    const patch = globalThis.RedesignSyncCoordinator.purchaseCandidateCorrection(expected, expected, confirmed);
+    (window.__TEST_CALLS__ ||= []).push({ fn: 'correctImportCandidateType', id, expected, confirmed, patch });
+    return patch;
+  },
   deleteImportCandidate: async () => {},
   // レシートの保存は Firestore に行かず、呼ばれた中身を window.__TEST_CALLS__ に残す（テストが中身を見る）
   saveReceipt: async (receipt, items) => { (window.__TEST_CALLS__ ||= []).push({ fn: 'saveReceipt', receipt, items }); return receipt.id || 'r-new'; },

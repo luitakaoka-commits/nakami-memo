@@ -27,11 +27,11 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=80';
-import './redesign-backup-read.js?v=80';
-import './redesign-migration-check.js?v=80';
-import './redesign-restore-plan.js?v=80';
-import './redesign-restore-execute.js?v=80';
+import './redesign-sync-coordinator.js?v=81';
+import './redesign-backup-read.js?v=81';
+import './redesign-migration-check.js?v=81';
+import './redesign-restore-plan.js?v=81';
+import './redesign-restore-execute.js?v=81';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -292,6 +292,21 @@ async function updateImportCandidate(candidateId, patch) {
       throw new Error('メール候補は別の端末で更新されました');
     }
     transaction.update(ref, { status: 'ignored', updatedAt: serverTimestamp() });
+  });
+}
+
+async function correctImportCandidateType(candidateId, expected, confirmed) {
+  if (!currentUser || !currentWorkspace) throw new Error('ログインが必要です');
+  if (typeof candidateId !== 'string' || !candidateId || candidateId.includes('/')) throw new Error('候補IDを確認してください');
+  const uid = currentUser.uid, workspaceId = currentWorkspace.id;
+  const ref = doc(db, 'workspaces', workspaceId, 'importCandidates', candidateId);
+  return runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(ref);
+    if (currentUser?.uid !== uid || currentWorkspace?.id !== workspaceId) throw new Error('家計が切り替わりました。通知を確認し直してください');
+    if (!snapshot.exists()) throw new Error('候補が見つかりません');
+    const patch = globalThis.RedesignSyncCoordinator.purchaseCandidateCorrection(snapshot.data(), expected, confirmed);
+    transaction.update(ref, { ...patch, updatedAt: serverTimestamp() });
+    return patch;
   });
 }
 
@@ -827,6 +842,7 @@ export const firebaseSync = {
   renameWorkspace,
   getSession,
   updateImportCandidate,
+  correctImportCandidateType,
   deleteImportCandidate,
   saveReceipt,
   updateReceiptItem,

@@ -1590,6 +1590,36 @@ const closeModals = page => page.evaluate(() => {
       await page.evaluate(() => { const api = window.__YORYOKU__; Object.assign(api.getState(), window.__TEST_REFUND_STATE__); api.setImportCandidates([]); });
     }
   });
+  await record('candidate_type_correction', async () => {
+    await closeModals(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const before = await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      api.setImportCandidates([{ id: 'wrong-cancel-type', type: 'cancel', status: 'needs_review', amount: 6300, usedDate: '2026-09-01', merchant: '種類訂正の検証店', sourcePackage: '01epos.jp', sourceLabel: 'エポスカード', cardHint: 'エポスカード', fingerprint: 'kind-test', detectedAt: '2026-09-02T00:00:00Z' }]);
+      api.setPage('imports');
+      return { transactions: JSON.stringify(api.getState().transactions), accounts: JSON.stringify(api.getState().accounts), corrections: (window.__TEST_CALLS__ || []).filter(c => c.fn === 'correctImportCandidateType').length };
+    });
+    try {
+      await page.locator('[data-action="correct-candidate-type"][data-id="wrong-cancel-type"]').click();
+      await page.locator('#candidate-type-form [type="submit"]').click();
+      assert(await page.locator('#candidate-type-modal').isVisible(), '通知未確認で訂正した');
+      assert(await page.evaluate(() => (window.__TEST_CALLS__ || []).filter(c => c.fn === 'correctImportCandidateType').length) === before.corrections, '確認なしでAPIを呼んだ');
+      await page.locator('#candidate-type-confirm').check();
+      await page.locator('#candidate-type-confirm').press('Tab');
+      if (process.env.MONEY_KIND_CORRECTION_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_KIND_CORRECTION_SCREENSHOT, fullPage: false });
+      await page.locator('#candidate-type-form [type="submit"]').click();
+      await page.locator('#candidate-type-modal').waitFor({ state: 'hidden' });
+      assert(await page.locator('.candidate-row').getByText('利用', { exact: true }).count() === 1, '種類表示が利用に変わらない');
+      assert(await page.locator('.candidate-row [data-refund-target]').count() === 0, '元の利用の指定を要求し続けた');
+      assert(await page.locator('.candidate-row [data-action="accept-candidate"]').count() === 1, '訂正後の取込操作がない');
+      const after = await page.evaluate(() => ({ transactions: JSON.stringify(window.__YORYOKU__.getState().transactions), accounts: JSON.stringify(window.__YORYOKU__.getState().accounts), call: window.__TEST_CALLS__.filter(c => c.fn === 'correctImportCandidateType').at(-1) }));
+      assert(after.transactions === before.transactions && after.accounts === before.accounts, '種類訂正だけで取引か残高を変更した');
+      assert(after.call.expected.type === 'cancel' && after.call.patch.type === 'purchase' && after.call.confirmed === true, '訂正条件を引き継いでいない');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(() => window.__YORYOKU__.setImportCandidates([]));
+    }
+  });
   await record('absorbed_card_correction', async () => {
     await closeModals(page);
     await page.setViewportSize({ width: 390, height: 844 });
