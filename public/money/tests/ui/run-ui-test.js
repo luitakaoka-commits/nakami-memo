@@ -1590,6 +1590,46 @@ const closeModals = page => page.evaluate(() => {
       await page.evaluate(() => { const api = window.__YORYOKU__; Object.assign(api.getState(), window.__TEST_REFUND_STATE__); api.setImportCandidates([]); });
     }
   });
+  await record('absorbed_card_correction', async () => {
+    await closeModals(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const before = await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_CORRECTION_STATE__ = structuredClone(state);
+      state.cards = ['old', 'right'].map(id => ({ id, name: id === 'old' ? '旧カード' : '通知のカード', accountId: state.accounts[0].id, closingDay: 15, paymentDay: 10, paymentMonthOffset: 1 }));
+      const base = { kind: 'payment', sourceAccountId: state.accounts[0].id, dueDate: '2026-09-10', transactionDate: '2026-09-10', status: 'settled', entryType: 'statement', amount: 2000, category: 'カード' };
+      state.transactions = [{ ...base, id: 'old-bill', cardId: 'old' }, { ...base, id: 'right-bill', cardId: 'right' }, { ...base, id: 'wrong-detail', cardId: 'old', status: 'absorbed', entryType: 'itemized', transactionDate: '2026-08-10', amount: 500, absorbedBy: 'old-bill', memo: 'カード訂正の検証明細' }];
+      state.workEntries = []; state.recurringPlans = [];
+      api.setRecordTab('transactions'); api.setPage('records');
+      return { accounts: state.accounts, bills: state.transactions.slice(0, 2) };
+    });
+    try {
+      await page.locator('[data-action="range-mode"][data-mode="custom"]').click();
+      await page.locator('#record-start').fill('2026-08-01');
+      await page.locator('#record-end').fill('2026-09-30');
+      await page.locator('[data-action="toggle-details"][data-id="old-bill"]').click();
+      await page.locator('[data-action="correct-detail-card"][data-id="wrong-detail"]').click();
+      await page.locator('#card-correction-card').selectOption('right');
+      await page.locator('#card-correction-form [type="submit"]').click();
+      assert(await page.locator('#card-correction-modal').isVisible(), '根拠確認なしで保存した');
+      await page.locator('#card-correction-confirm').check();
+      await page.locator('#card-correction-confirm').press('Tab');
+      if (process.env.MONEY_CORRECTION_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_CORRECTION_SCREENSHOT, fullPage: false });
+      await page.locator('#card-correction-form [type="submit"]').click();
+      await page.locator('#card-correction-modal').waitFor({ state: 'hidden' });
+      const after = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        return { accounts: state.accounts, bills: state.transactions.slice(0, 2), detail: state.transactions[2] };
+      });
+      assert(JSON.stringify(after.accounts) === JSON.stringify(before.accounts), '残高を変更した');
+      assert(JSON.stringify(after.bills) === JSON.stringify(before.bills), '引落済み総額を変更した');
+      assert(after.detail.cardId === 'right' && after.detail.absorbedBy === 'right-bill' && after.detail.status === 'absorbed' && after.detail.amount === 500, '内訳のカード訂正に失敗した');
+      assert(await page.locator('body').evaluate(e => e.scrollWidth <= document.documentElement.clientWidth + 1), '訂正後の画面に横スクロールがある');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(() => { Object.assign(window.__YORYOKU__.getState(), window.__TEST_CORRECTION_STATE__); localStorage.setItem('yoryoku-finance-v2', JSON.stringify(window.__TEST_CORRECTION_STATE__)); });
+    }
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

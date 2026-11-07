@@ -1535,6 +1535,30 @@
     return sortByUsageDesc([...absorbed, ...siblings]);
   }
 
+  /** 引落済み総額は動かさず、通知のカードに合わせて既存の内訳を付け替える。 */
+  function correctAbsorbedCard(id, cardId, transactions = [], cards = [], options = {}) {
+    const matches = transactions.filter(item => item.id === id);
+    const cardMatches = cards.filter(item => item.id === cardId);
+    const current = matches[0], card = cardMatches[0];
+    if (matches.length !== 1 || cardMatches.length !== 1 || !card.accountId || !current
+      || current.kind !== 'payment' || entryTypeOf(current) !== ITEMIZED || current.status !== 'absorbed'
+      || current.cardId === cardId || !current.absorbedBy) throw new Error('訂正する明細とカードを確認してください');
+    if (current.refundEvidence || transactions.some(item => item.refundEvidence?.targetId === id)) throw new Error('返金と紐付いた明細は個別にカードを変更できません');
+    const originals = transactions.filter(item => item.id === current.absorbedBy);
+    const original = originals[0];
+    if (originals.length !== 1 || original.kind !== 'payment' || entryTypeOf(original) !== STATEMENT
+      || original.status !== 'settled' || original.cardId !== current.cardId || original.dueDate !== current.dueDate) throw new Error('元の引落済み請求との紐付けを確認してください');
+    const cycle = cardBillingCycleOf({ ...current, cardId }, card, options);
+    const destinations = transactions.filter(item => item.kind === 'payment' && entryTypeOf(item) === STATEMENT
+      && item.status === 'settled' && item.cardId === cardId && item.sourceAccountId === card.accountId
+      && item.dueDate === current.dueDate && cycle && cardBillingCycleOf(item, card, options) === cycle);
+    if (destinations.length !== 1) throw new Error('同じ請求期間の引落済み総額を1件に特定できません');
+    const includedAmount = detailsOfStatement(destinations[0], transactions, cards, options).reduce((sum, item) => sum + Number(item.amount), 0);
+    if (!Number.isSafeInteger(current.amount) || current.amount <= 0 || !Number.isSafeInteger(includedAmount)
+      || !Number.isSafeInteger(destinations[0].amount) || includedAmount + current.amount > destinations[0].amount) throw new Error('訂正後の明細が請求総額を超えるため確認が必要です');
+    return { ...current, cardId, sourceAccountId: card.accountId, absorbedBy: destinations[0].id };
+  }
+
   /** 記録の集計で「支出」に数える取引か */
   function isExpenseKind(transaction) {
     if (transaction.kind === 'payment') return true;
@@ -2102,7 +2126,7 @@
     previousBusinessDay, nextBusinessDay, holidaysForYear,
     // カード
     calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills, capUnsettledCardCredits,
-    closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement,
+    closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement, correctAbsorbedCard,
     // 記録の集計
     summarizePeriod,
     // 給与

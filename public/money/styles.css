@@ -980,6 +980,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .detail-row:first-child { border-top: 0; }
 .detail-when { color: var(--muted); font-size: .62rem; font-weight: 650; white-space: nowrap; }
 .detail-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-name .mini-button { display: block; margin-top: .35rem; white-space: normal; }
 .detail-flag { margin-left: .3rem; color: var(--muted); font-size: .56rem; }
 .detail-amount { font-weight: 720; white-space: nowrap; }
 

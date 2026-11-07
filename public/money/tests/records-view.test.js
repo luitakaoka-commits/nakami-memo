@@ -223,6 +223,35 @@ test('存在しない日付と不正な利用時刻を保存しない', () => {
   }
 });
 
+function correctionFixture() {
+  const cards = ['old', 'right'].map(id => ({ ...CARD, id, closingDay: 15 }));
+  const detail = tx({ id: 'detail', entryType: 'itemized', amount: 988, transactionDate: '2026-08-10', dueDate: '2026-09-10', status: 'absorbed', cardId: 'old', absorbedBy: 'old-bill' });
+  const bills = cards.map(card => tx({ id: card.id + '-bill', entryType: 'statement', amount: 10000, dueDate: '2026-09-10', transactionDate: '2026-09-10', status: 'settled', cardId: card.id }));
+  return { cards, transactions: [detail, ...bills] };
+}
+test('吸収済み明細のカード訂正は総額や引落状態を変えず内訳だけを移す', () => {
+  const f = correctionFixture(), before = JSON.stringify(f);
+  const next = engine.correctAbsorbedCard('detail', 'right', f.transactions, f.cards);
+  equal(JSON.stringify(next), JSON.stringify({ ...f.transactions[0], cardId: 'right', absorbedBy: 'right-bill' }), '変更範囲');
+  equal(JSON.stringify(f), before, '入力を変更しない');
+  const after = f.transactions.map(t => t.id === next.id ? next : t);
+  equal(engine.detailsOfStatement(after[1], after, f.cards).length, 0, '旧請求から外す');
+  equal(engine.detailsOfStatement(after[2], after, f.cards).length, 1, '正しい請求の内訳');
+  equal(JSON.stringify(engine.summarizePeriod(after)), JSON.stringify(engine.summarizePeriod(f.transactions)), '支出を再計上しない');
+});
+test('訂正先の引落済み請求が不明・重複・別期間なら明細を移さない', () => {
+  for (const change of [f => f.transactions.pop(), f => f.transactions.push({ ...f.transactions[2], id: 'duplicate' }), f => { f.transactions[2].dueDate = '2026-10-13'; }, f => { f.transactions[2].status = 'planned'; }, f => { f.transactions[0].status = 'planned'; }, f => { f.transactions[1].cardId = 'right'; }, f => { f.transactions[2].amount = 1; }]) {
+    const f = correctionFixture(); change(f); const before = JSON.stringify(f);
+    let rejected = false; try { engine.correctAbsorbedCard('detail', 'right', f.transactions, f.cards); } catch (_) { rejected = true; }
+    assert(rejected, '曖昧な訂正を受け入れた'); equal(JSON.stringify(f), before, '拒否時も原本を保持');
+  }
+});
+test('返金と紐付く明細のカードは単独で訂正しない', () => {
+  const f = correctionFixture(); f.transactions.push(tx({ id: 'refund', refundEvidence: { targetId: 'detail' } }));
+  let rejected = false; try { engine.correctAbsorbedCard('detail', 'right', f.transactions, f.cards); } catch (_) { rejected = true; }
+  assert(rejected, '返金との紐付けを壊した');
+});
+
 if (!failures.length) { console.log(JSON.stringify({ suite: 'records-view', total, passed: total, failed: 0 })); process.exit(0); }
 console.log(JSON.stringify({ suite: 'records-view', total, passed: total - failures.length, failed: failures.length, failures }, null, 2));
 process.exit(1);

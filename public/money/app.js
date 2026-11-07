@@ -671,7 +671,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=78" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=79" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2772,7 +2772,7 @@
   function renderStatementDetailPanel(statement, details) {
     const total = details.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const diff = Number(statement.amount || 0) - total;
-    const rows = details.map(item => `<div class="detail-row"><div class="detail-when">${esc(formatUsageMoment(item))}</div><div class="detail-name">${esc(item.memo || 'カード利用')}${item.transactionAt ? '' : '<span class="detail-flag">時刻なし</span>'}</div><div class="detail-amount">${formatAbsoluteYen(Math.abs(Number(item.amount || 0)))}</div></div>`).join('');
+    const rows = details.map(item => `<div class="detail-row"><div class="detail-when">${esc(formatUsageMoment(item))}</div><div class="detail-name">${esc(item.memo || 'カード利用')}${item.transactionAt ? '' : '<span class="detail-flag">時刻なし</span>'}${item.status === 'absorbed' ? `<button type="button" class="mini-button" data-action="correct-detail-card" data-id="${esc(item.id)}">カードを訂正</button>` : ''}</div><div class="detail-amount">${formatAbsoluteYen(Math.abs(Number(item.amount || 0)))}</div></div>`).join('');
     const note = diff === 0
       ? '請求総額と明細の合計が一致しています。'
       : diff > 0
@@ -2940,6 +2940,33 @@
       : isTransfer
         ? (isInternalTransfer ? '自分の別口座へ移動します。使える金額は変わりません。' : '他人口座への振込です。期限までの使える金額から差し引きます。')
         : ['saving', 'nisa'].includes(kind) ? '予定で保存します。確定すると残高に反映します。' : '予定で保存します。確定すると残高に反映します。';
+  }
+
+  function openCardCorrection(id) {
+    if (!$('#card-correction-modal')) { showToast('画面を更新してから、カードの訂正を開き直してください'); return; }
+    const item = state.transactions.find(entry => entry.id === id);
+    if (!item || item.status !== 'absorbed') return;
+    rememberModalEdit('card-correction-modal', () => ({ item: state.transactions.find(entry => entry.id === id), cards: state.cards, transactions: state.transactions, accounts: state.accounts }));
+    $('#card-correction-id').value = id;
+    $('#card-correction-detail').textContent = `${formatDate(item.transactionDate, true)} ${item.memo || 'カード利用'} ${formatAbsoluteYen(item.amount)}`;
+    $('#card-correction-card').innerHTML = '<option value="">選択してください</option>' + state.cards.filter(card => card.id !== item.cardId).map(card => `<option value="${esc(card.id)}">${esc(card.name)}</option>`).join('');
+    $('#card-correction-confirm').checked = false;
+    $('#card-correction-modal').hidden = false;
+  }
+
+  async function saveCardCorrection(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('card-correction-modal') || !$('#card-correction-confirm').checked) return;
+    const button = event.target.querySelector('[type="submit"]');
+    try {
+      const corrected = finance.correctAbsorbedCard($('#card-correction-id').value, $('#card-correction-card').value, state.transactions, state.cards, holidayOptions());
+      button.disabled = true;
+      state.transactions = state.transactions.map(item => item.id === corrected.id ? { ...corrected, updatedAt: nowIso() } : item);
+      if (persist() === false) throw new Error('クラウド保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      closeModal('card-correction-modal'); renderPage(); showToast('明細のカードを訂正しました。請求総額と残高は変更していません');
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
   }
 
   function openEventModal(id = '', presetKind = 'payment', presetStatus = '') {
@@ -3640,6 +3667,7 @@
     if (name === 'close-add-menu') closeAddMenu();
     if (name === 'add-event') { closeAddMenu(); openEventModal('', action.dataset.kind || 'payment'); }
     if (name === 'toggle-details') { toggleStatementDetails(action.dataset.id); return; }
+    if (name === 'correct-detail-card') { openCardCorrection(action.dataset.id); return; }
     if (name === 'edit-event') openEventModal(action.dataset.id);
     if (name === 'delete-event') deleteEvent(action.dataset.id);
     if (name === 'confirm-statement') void confirmStatement(action.dataset.id);
@@ -3736,6 +3764,7 @@
     document.addEventListener('submit', event => {
       if (event.target.id === 'debit-form') { void saveDebit(event); return; }
       if (event.target.id === 'recurring-plan-form') { void saveRecurringPlan(event); return; }
+      if (event.target.id === 'card-correction-form') { void saveCardCorrection(event); return; }
       if (event.target.id === 'receipt-form') { saveReceiptForm(event); return; }
       if (event.target.id === 'share-member-form') { addCloudMember(event); return; }
       if (event.target.id === 'workspace-name-form') { renameCloudWorkspace(event); return; }
