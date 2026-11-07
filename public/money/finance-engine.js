@@ -1536,6 +1536,24 @@
   }
 
   /** 引落済み総額は動かさず、通知のカードに合わせて既存の内訳を付け替える。 */
+  function setUnsettledCardCancellation(id, transactions = [], cards = [], options = {}) {
+    if (options.confirmed !== true || typeof options.cancelled !== 'boolean') throw new Error('取消の原本確認が必要です');
+    const matches = transactions.filter(item => item.id === id);
+    const current = matches[0];
+    const cardMatches = cards.filter(card => card.id === current?.cardId);
+    const card = cardMatches[0];
+    if (matches.length !== 1 || !current || current.kind !== 'payment' || current.entryType !== 'itemized'
+      || !['planned', 'cancelled'].includes(current.status) || current.absorbedBy || current.refundEvidence
+      || !Number.isSafeInteger(current.amount) || current.amount <= 0 || cardMatches.length !== 1
+      || !card?.accountId || card.accountId !== current.sourceAccountId) throw new Error('未引落のカード利用明細だけを取消できます');
+    if (transactions.some(item => item.refundEvidence?.targetId === id && item.status !== 'cancelled')) throw new Error('返金と紐付いているため個別に取消できません');
+    const cycle = cardBillingCycleOf(current, card, options);
+    if (!cycle || transactions.some(item => item.id !== id && item.cardId === card.id && item.kind === 'payment'
+      && item.entryType === 'statement' && ['planned', 'settled'].includes(item.status)
+      && cardBillingCycleOf(item, card, options) === cycle)) throw new Error('請求総額がある期間は明細と請求の対応を確認してください');
+    return { ...current, status: options.cancelled ? 'cancelled' : 'planned' };
+  }
+
   function correctAbsorbedCard(id, cardId, transactions = [], cards = [], options = {}) {
     const matches = transactions.filter(item => item.id === id);
     const cardMatches = cards.filter(item => item.id === cardId);
@@ -2126,7 +2144,7 @@
     previousBusinessDay, nextBusinessDay, holidaysForYear,
     // カード
     calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills, capUnsettledCardCredits,
-    closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement, correctAbsorbedCard,
+    closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement, correctAbsorbedCard, setUnsettledCardCancellation,
     // 記録の集計
     summarizePeriod,
     // 給与

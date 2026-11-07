@@ -1682,6 +1682,53 @@ const closeModals = page => page.evaluate(() => {
       await page.evaluate(() => { Object.assign(window.__YORYOKU__.getState(), window.__TEST_CORRECTION_STATE__); localStorage.setItem('yoryoku-finance-v2', JSON.stringify(window.__TEST_CORRECTION_STATE__)); });
     }
   });
+  await record('unsettled_card_cancellation', async () => {
+    await closeModals(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const before = await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_CANCEL_STATE__ = structuredClone(state);
+      state.cards = [{ id: 'cancel-card', name: '取消検証カード', accountId: state.accounts[0].id, closingDay: 15, paymentDay: 10, paymentMonthOffset: 1 }];
+      state.transactions = [{ id: 'cancel-detail', kind: 'payment', entryType: 'itemized', amount: 9600, status: 'planned', cardId: 'cancel-card', sourceAccountId: state.accounts[0].id, transactionDate: '2026-08-20', dueDate: '2026-09-10', memo: '取消の検証明細', category: 'カード', transactionAt: '', absorbedBy: '', updatedAt: '2026-09-01T00:00:00Z' }];
+      state.workEntries = []; state.recurringPlans = [];
+      api.setRecordTab('transactions'); api.setPage('records');
+      return { accounts: structuredClone(state.accounts), detail: structuredClone(state.transactions[0]) };
+    });
+    try {
+      await page.locator('[data-record-filter="all"]').click();
+      await page.locator('[data-action="range-mode"][data-mode="custom"]').click();
+      await page.locator('#record-start').fill('2026-08-01');
+      await page.locator('#record-end').fill('2026-09-30');
+      await page.locator('[data-action="card-cancellation"][data-id="cancel-detail"]').click();
+      await page.locator('#card-cancel-form [type="submit"]').click();
+      assert(await page.locator('#card-cancel-modal').isVisible(), '原本未確認で取消を保存した');
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions[0].status) === 'planned', '確認前に状態を変えた');
+      await page.locator('#card-cancel-confirm').check();
+      await page.evaluate(() => { window.__YORYOKU__.getState().transactions[0].memo = '他の画面の更新'; });
+      await page.locator('#card-cancel-form [type="submit"]').click();
+      assert(await page.locator('#card-cancel-modal').isVisible(), '古い確認内容を保存した');
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions[0].status) === 'planned', '競合後に取消した');
+      await closeModals(page);
+      await page.evaluate(memo => { window.__YORYOKU__.getState().transactions[0].memo = memo; window.__YORYOKU__.setPage('records'); }, before.detail.memo);
+      await page.locator('[data-action="card-cancellation"][data-id="cancel-detail"]').click();
+      await page.locator('#card-cancel-confirm').check();
+      if (process.env.MONEY_CANCELLATION_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_CANCELLATION_SCREENSHOT, fullPage: false });
+      await page.locator('#card-cancel-form [type="submit"]').click();
+      await page.locator('#card-cancel-modal').waitFor({ state: 'hidden' });
+      const after = await page.evaluate(() => ({ detail: window.__YORYOKU__.getState().transactions[0], accounts: window.__YORYOKU__.getState().accounts }));
+      assert(after.detail.status === 'cancelled', '取消済みにならない');
+      assert(JSON.stringify({ ...after.detail, status: before.detail.status, updatedAt: before.detail.updatedAt }) === JSON.stringify(before.detail), '取消以外の取引内容を変更した');
+      assert(JSON.stringify(after.accounts) === JSON.stringify(before.accounts), '返金の銀行入金を作った');
+      await page.locator('[data-action="card-cancellation"][data-id="cancel-detail"]').click();
+      await page.locator('#card-cancel-confirm').check();
+      await page.locator('#card-cancel-form [type="submit"]').click();
+      await page.locator('#card-cancel-modal').waitFor({ state: 'hidden' });
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions[0].status) === 'planned', '取消を戻せない');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(() => { Object.assign(window.__YORYOKU__.getState(), window.__TEST_CANCEL_STATE__); localStorage.setItem('yoryoku-finance-v2', JSON.stringify(window.__TEST_CANCEL_STATE__)); });
+    }
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];

@@ -671,7 +671,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=81" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=82" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2842,7 +2842,10 @@
         : '';
       const settleButton = transaction.status === 'planned' ? `<button class="mini-button" data-action="settle-event" data-id="${transaction.id}">${statement ? '引落を記録' : '確定'}</button>` : '';
       const detailPanel = expanded ? renderStatementDetailPanel(transaction, details) : '';
-      const actions = transaction.status === 'absorbed' ? '' : `${confirmButton}${settleButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button>`;
+      const cancelButton = transaction.kind === 'payment' && transaction.cardId && transaction.entryType === 'itemized'
+        && ['planned', 'cancelled'].includes(transaction.status) && transaction.amount > 0
+        ? `<button class="mini-button" data-action="card-cancellation" data-id="${esc(transaction.id)}">${transaction.status === 'cancelled' ? '取消を戻す' : '取消を記録'}</button>` : '';
+      const actions = transaction.status === 'absorbed' ? '' : `${confirmButton}${settleButton}${cancelButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button>`;
       const shownDate = dateMode === 'usage' ? formatUsageMoment(transaction) : formatDate(transaction.dueDate);
       return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${esc(shownDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge} ${salaryBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact && actions ? `<div class="list-actions">${actions}</div>` : ''}</div></div>${detailPanel}</div>`;
     }).join('');
@@ -2968,6 +2971,43 @@
       : isTransfer
         ? (isInternalTransfer ? '自分の別口座へ移動します。使える金額は変わりません。' : '他人口座への振込です。期限までの使える金額から差し引きます。')
         : ['saving', 'nisa'].includes(kind) ? '予定で保存します。確定すると残高に反映します。' : '予定で保存します。確定すると残高に反映します。';
+  }
+
+  function openCardCancellation(id) {
+    if (!$('#card-cancel-modal')) { showToast('画面を更新してから取消操作を開き直してください'); return; }
+    const item = state.transactions.find(entry => entry.id === id);
+    const cancelled = item?.status !== 'cancelled';
+    try { finance.setUnsettledCardCancellation(id, state.transactions, state.cards, { ...holidayOptions(), cancelled, confirmed: true }); }
+    catch (error) { showToast(error.message); return; }
+    clearTimeout(toastTimer); $('#toast')?.classList.remove('show');
+    rememberModalEdit('card-cancel-modal', () => ({ item: state.transactions.find(entry => entry.id === id), transactions: state.transactions, accounts: state.accounts, cards: state.cards }));
+    $('#card-cancel-id').value = id;
+    $('#card-cancel-next').value = cancelled ? 'cancelled' : 'planned';
+    $('#card-cancel-description').textContent = `${formatDate(item.transactionDate, true)} ${cardName(item.cardId)} ${item.memo || 'カード利用'} ${formatAbsoluteYen(item.amount)}`;
+    $('#card-cancel-title').textContent = cancelled ? 'カード利用の取消を記録' : 'カード利用の取消を戻す';
+    $('#card-cancel-explanation').textContent = cancelled ? '取消完了を原本で確認した利用を、支払予定から外します。' : '誤って記録した取消を戻し、元の利用を支払予定に復帰させます。';
+    $('#card-cancel-confirm-label').textContent = cancelled ? 'カード会社または加盟店の取消完了を確認しました' : '取消の記録が誤りで、元の支払予定へ戻すことを確認しました';
+    $('#card-cancel-save').textContent = cancelled ? '取消を記録して保存' : '取消を戻して保存';
+    $('#card-cancel-confirm').checked = false;
+    $('#card-cancel-modal').hidden = false;
+  }
+
+  async function saveCardCancellation(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('card-cancel-modal') || !$('#card-cancel-confirm').checked) return;
+    const button = event.target.querySelector('[type="submit"]');
+    try {
+      button.disabled = true;
+      const id = $('#card-cancel-id').value;
+      const cancelled = $('#card-cancel-next').value === 'cancelled';
+      const next = finance.setUnsettledCardCancellation(id, state.transactions, state.cards, { ...holidayOptions(), cancelled, confirmed: true });
+      state.transactions = state.transactions.map(item => item.id === id ? { ...next, updatedAt: nowIso() } : item);
+      if (persist() === false) throw new Error('クラウド保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      closeModal('card-cancel-modal'); renderPage();
+      showToast(cancelled ? '取消を記録しました。元の明細と口座残高は保持しています' : '元の支払予定へ戻しました。口座残高は変更していません');
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
   }
 
   function openDetailTime(id) {
@@ -3730,6 +3770,7 @@
     if (name === 'toggle-details') { toggleStatementDetails(action.dataset.id); return; }
     if (name === 'correct-detail-card') { openCardCorrection(action.dataset.id); return; }
     if (name === 'correct-detail-time') { openDetailTime(action.dataset.id); return; }
+    if (name === 'card-cancellation') { openCardCancellation(action.dataset.id); return; }
     if (name === 'edit-event') openEventModal(action.dataset.id);
     if (name === 'delete-event') deleteEvent(action.dataset.id);
     if (name === 'confirm-statement') void confirmStatement(action.dataset.id);
@@ -3829,6 +3870,7 @@
       if (event.target.id === 'recurring-plan-form') { void saveRecurringPlan(event); return; }
       if (event.target.id === 'card-correction-form') { void saveCardCorrection(event); return; }
       if (event.target.id === 'detail-time-form') { void saveDetailTime(event); return; }
+      if (event.target.id === 'card-cancel-form') { void saveCardCancellation(event); return; }
       if (event.target.id === 'candidate-type-form') { void saveCandidateTypeCorrection(event); return; }
       if (event.target.id === 'receipt-form') { saveReceiptForm(event); return; }
       if (event.target.id === 'share-member-form') { addCloudMember(event); return; }

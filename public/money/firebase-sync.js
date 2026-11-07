@@ -27,11 +27,11 @@ import {
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
-import './redesign-sync-coordinator.js?v=81';
-import './redesign-backup-read.js?v=81';
-import './redesign-migration-check.js?v=81';
-import './redesign-restore-plan.js?v=81';
-import './redesign-restore-execute.js?v=81';
+import './redesign-sync-coordinator.js?v=82';
+import './redesign-backup-read.js?v=82';
+import './redesign-migration-check.js?v=82';
+import './redesign-restore-plan.js?v=82';
+import './redesign-restore-execute.js?v=82';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',

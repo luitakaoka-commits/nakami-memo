@@ -252,6 +252,40 @@ test('返金と紐付く明細のカードは単独で訂正しない', () => {
   assert(rejected, '返金との紐付けを壊した');
 });
 
+test('未引落明細の取消と復帰は原本と金銭項目を保持する', () => {
+  const item = tx({ id: 'cancel-me', amount: 9600, transactionDate: '2026-08-20', dueDate: '2026-09-10', entryType: 'itemized' });
+  const rows = [item], before = JSON.stringify(rows);
+  const cancelled = engine.setUnsettledCardCancellation(item.id, rows, [CARD], { cancelled: true, confirmed: true });
+  equal(JSON.stringify(cancelled), JSON.stringify({ ...item, status: 'cancelled' }), '状態以外を変えた');
+  equal(JSON.stringify(rows), before, '入力原本を変更した');
+  equal(engine.groupCardCharges([cancelled], [CARD]).length, 0, '取消済みを再請求した');
+  const restored = engine.setUnsettledCardCancellation(item.id, [cancelled], [CARD], { cancelled: false, confirmed: true });
+  equal(JSON.stringify(restored), JSON.stringify(item), '元の利用に戻らない');
+});
+
+test('引落済み・請求内訳・不正な明細・不明なカードの単独取消を拒否する', () => {
+  const item = tx({ id: 'cancel-me', amount: 500, transactionDate: '2026-08-20', dueDate: '2026-09-10', entryType: 'itemized' });
+  for (const patch of [{ status: 'settled' }, { status: 'absorbed' }, { entryType: 'statement' }, { amount: -500 }, { absorbedBy: 'bill' }, { sourceAccountId: 'other' }, { cardId: 'missing' }]) {
+    let rejected = false;
+    try { engine.setUnsettledCardCancellation(item.id, [{ ...item, ...patch }], [CARD], { cancelled: true, confirmed: true }); } catch (_) { rejected = true; }
+    assert(rejected, '不正な単独取消を受け入れた');
+  }
+});
+
+test('確認なし・返金連携・請求総額がある期間では単独取消しない', () => {
+  const item = tx({ id: 'cancel-me', amount: 500, transactionDate: '2026-08-20', dueDate: '2026-09-10', entryType: 'itemized' });
+  const cases = [
+    { rows: [item], confirmed: false },
+    { rows: [item, tx({ id: 'refund', refundEvidence: { targetId: item.id } })], confirmed: true },
+    { rows: [item, tx({ id: 'bill', entryType: 'statement', transactionDate: '2026-08-20', dueDate: '2026-09-10', amount: 500 })], confirmed: true },
+    { rows: [item, { ...item }], confirmed: true }
+  ];
+  for (const c of cases) {
+    let rejected = false; try { engine.setUnsettledCardCancellation(item.id, c.rows, [CARD], { cancelled: true, confirmed: c.confirmed }); } catch (_) { rejected = true; }
+    assert(rejected, '照合を要する取消を受け入れた');
+  }
+});
+
 if (!failures.length) { console.log(JSON.stringify({ suite: 'records-view', total, passed: total, failed: 0 })); process.exit(0); }
 console.log(JSON.stringify({ suite: 'records-view', total, passed: total - failures.length, failed: failures.length, failures }, null, 2));
 process.exit(1);
