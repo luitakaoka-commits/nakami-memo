@@ -341,6 +341,16 @@ test('カード会社が送る公演案内の開催日と料金を利用明細�
     'いつもご利用いただきありがとうございます。\n開催日 2027年1月10日\n料金 1名様10,000円\nお早めにお申込みください。'), null, '案内の価格を支出にした');
 });
 
+test('利用取引ラベルの取消を注意書きではなく取引の種類として読む', () => {
+  for (const [operation, expected] of [['取消', 'cancel'], ['返金', 'refund'], ['買物', 'purchase']]) {
+    const result = parse('statement@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+      `◇利用日：2026/10/13 09:31\n◇利用先：テスト店舗\n◇利用金額：1.00USD\n◇利用取引：${operation}\nキャンセルに関する説明です。`);
+    equal(result.type, expected, '取引区分を誤認した');
+    equal(result.amount, null, '外貨を円にした');
+    equal(result.confident, false, '外貨を確定扱いにした');
+  }
+});
+
 if (failures.length === 0) {
   console.log(JSON.stringify({ suite: 'gas-parser', total, passed: total, failed: 0 }));
   process.exit(0);

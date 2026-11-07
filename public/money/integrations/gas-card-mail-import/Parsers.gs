@@ -226,6 +226,9 @@ function findIssuer(sender) {
 function detectType(text, subject) {
   // 通常の利用通知の注意書きにある「キャンセル」は取消の実行を表さない。
   var evidence = subject || '';
+  // 三井住友のテキスト本文は、件名が同じでも「利用取引」で買物と取消を分ける。
+  var operation = text.normalize('NFKC').match(/^[ \t◇◆・]*(?:【[ \t]*)?(?:ご?利用取引|取引区分)[ \t]*(?:】[ \t]*)?[:：][ \t]*(取消|キャンセル|取り消し|返金|買物|購入)[ \t]*$/m);
+  if (operation && /取消|キャンセル|取り消し|返金/.test(operation[1])) evidence += '\n' + operation[1];
   var explicit = text.match(/(?:ご?返金|ご?取消|お取消|取り消し|キャンセル)(?:金額|額|日|日時|完了|処理完了)\s*[：:】]?/g);
   evidence += '\n' + (explicit || []).join('\n');
   for (var i = 0; i < CANCEL_WORDS.length; i += 1) {
