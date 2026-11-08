@@ -13,36 +13,23 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-  <div class="prototype-notice">UI試作 · 架空の金額 / 実データへの接続なし</div>
+  <div class="prototype-notice">UI試作</div>
   <header class="app-header">
     <button class="icon-button" id="menu-open" aria-label="メニューを開く" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <strong id="screen-name">ホーム</strong>
     <span class="header-caption">お金管理</span>
   </header>
   <main id="main" tabindex="-1">
-    <div id="home-screen">
-      <div class="page-heading"><div><p class="eyebrow">11月9日（月）</p><h1 id="slide-title">現残高 − 支払い</h1></div><span id="page-number" aria-live="polite">1 / 2</span></div>
-      <div class="carousel" id="carousel" aria-label="ホーム内の画面" tabindex="0" aria-describedby="carousel-hint">
-        <section class="slide" id="balance-slide" aria-label="現残高と支払い">
-          <div id="balance-content"></div>
-        </section>
-        <section class="slide" id="forecast-slide" aria-label="支払い後の残高予測">
-          <div id="forecast-content"></div>
-        </section>
-      </div>
-      <nav class="carousel-controls" aria-label="ホームの表示切り替え">
-        <button class="page-button active" data-slide="0" aria-current="page">現残高と支払い</button>
-        <button class="page-button" data-slide="1">残高の見通し</button>
-      </nav>
-      <p class="hint" id="carousel-hint">左右にスワイプで切り替え</p>
-    </div>
-    <section id="pending-screen" hidden><p class="eyebrow">これから作成する画面</p><h1 id="pending-title"></h1><p>今回はホームの2画面を作成しています。この画面の配置は次の手書き案で決めます。</p><button class="text-button" data-route="ホーム">ホームに戻る</button></section>
+    <div class="page-heading"><div><p class="eyebrow">11月9日（月）</p><h1 id="page-title">現残高 − 支払い</h1></div></div>
+    <section id="home-screen" aria-label="ホーム"><div id="balance-content"></div></section>
+    <section id="cashflow-screen" aria-label="資金繰り・試算" hidden><div id="cashflow-content"></div></section>
+    <section id="forecast-screen" aria-label="支払いの見通し" hidden><div id="forecast-content"></div></section>
+    <section id="pending-screen" hidden><p>未作成</p></section>
   </main>
-  <details class="preview-tools"><summary>表示状態を試す</summary><div class="tool-content"><label for="preview-state">画面の状態</label><select id="preview-state"><option value="normal">通常（架空データ）</option><option value="shortfall">不足の見込み</option><option value="empty">データなし</option><option value="loading">読み込み中</option><option value="offline">オフライン・保存待ち</option><option value="error">読み込みエラー</option><option value="success">保存完了</option></select><p>試作だけの操作です。実際の残高や記録は変わりません。</p></div></details>
+  <details class="preview-tools"><summary>表示状態</summary><div class="tool-content"><label for="preview-state">状態</label><select id="preview-state"><option value="normal">通常</option><option value="shortfall">不足</option><option value="empty">データなし</option><option value="loading">読込中</option><option value="offline">オフライン</option><option value="error">エラー</option><option value="success">保存完了</option></select></div></details>
   <dialog id="sidebar" class="sidebar" aria-labelledby="sidebar-title">
     <div class="sidebar-heading"><div><p class="eyebrow">お金管理</p><h2 id="sidebar-title">メニュー</h2></div><button id="menu-close" class="icon-button" aria-label="メニューを閉じる">×</button></div>
     <nav id="menu-items" aria-label="メインとサブのメニュー"></nav>
-    <p class="sidebar-note">画面の移動はこのメニューから。<br>横スワイプは同じメニュー内だけです。</p>
   </dialog>
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title"><div class="dialog-heading"><h2 id="detail-title"></h2><button class="icon-button" data-close-detail aria-label="詳細を閉じる">×</button></div><div id="detail-body"></div><button class="primary-button" data-close-detail>閉じる</button></dialog>
   <div id="announcement" class="sr-only" aria-live="polite"></div>
