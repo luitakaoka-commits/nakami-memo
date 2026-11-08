@@ -20,6 +20,9 @@
   --warning-soft: #fff3dc;
   --danger: #a3373b;
   --danger-soft: #fff0ef;
+  --chart-positive: #2873bf;
+  --chart-negative: #c53c45;
+  --chart-zero: #514845;
   --veil: #241b25a3;
   --shadow: #352c2b1a;
   --space-xs: 6px;

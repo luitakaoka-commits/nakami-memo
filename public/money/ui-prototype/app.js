@@ -56,30 +56,37 @@
       <section class="sheet"><h2 class="section-heading">確認事項</h2><button class="check-row" data-detail="account"><span>口座残高<small>確認日 11/8</small></span><span class="check-count">1口座 ›</span></button><button class="check-row" data-detail="bill"><span>請求額<small>12月分 · 見込み</small></span><span class="check-count">1件 ›</span></button><button class="check-row" data-detail="mail"><span>メール</span><span class="check-count">2件 ›</span></button></section>`;
     $('#cashflow-content').innerHTML = blank || banner() + $('#balance-content .amount-sheet').outerHTML + $('#balance-content [data-calculation]').outerHTML;
     $('#forecast-content').innerHTML = blank || `${banner()}
-      <section class="sheet"><p class="date-label">11月9日〜12月10日</p><div class="forecast-head"><p id="forecast-event" class="support">11/9 · 現在の口座残高</p><strong id="forecast-amount">${yen(data.opening)}</strong></div>${chart(data.rows)}<div class="chart-legend"><span>＋ 給与・仕送り</span><span>− 引落・生活費</span></div><div class="play-row">${state === 'shortfall' ? '<span class="status danger">不足</span>' : ''}<button id="play-forecast" class="primary-button small-button" aria-pressed="false">再生</button></div></section>
+      <section class="sheet"><p class="date-label">11月9日〜12月10日</p><div class="forecast-head"><p id="forecast-event" class="support">11/9 · 現在の口座残高</p><strong id="forecast-amount">${yen(data.opening)}</strong></div>${chart(data.rows)}<div class="play-row">${state === 'shortfall' ? '<span class="status danger">不足</span>' : ''}<button id="play-forecast" class="primary-button small-button" aria-pressed="false">再生</button></div></section>
       <section class="sheet"><h2 class="section-heading">入出金と残高</h2><div class="table-wrap"><table><thead><tr><th scope="col">日付 / 内容</th><th scope="col">入出金</th><th scope="col">残高</th></tr></thead><tbody>${data.rows.map((row, index) => `<tr data-event-row="${index}" ${index === 0 ? 'class="highlight"' : ''}><td>${row.date}<br>${row.name}<small>${row.type}</small></td><td class="${row.amount > 0 ? 'income' : ''}">${row.amount ? (row.amount > 0 ? '+' : '') + yen(row.amount) : '—'}</td><td class="${row.balance < 0 ? 'negative' : ''}">${yen(row.balance)}</td></tr>`).join('')}</tbody></table></div></section>`;
     if ($('#play-forecast')) $('#play-forecast').addEventListener('click', playAnimation);
     $('#announcement').textContent = $('#preview-state').selectedOptions[0].textContent;
     menu();
   }
-  function points(rows) {
-    const values = rows.map(row => row.balance);
-    const min = Math.min(0, ...values);
-    const max = Math.max(10000, ...values);
-    return rows.map((row, i) => ({ x: 20 + i * 56, y: 130 - ((row.balance - min) / (max - min)) * 104 }));
-  }
   function chart(rows) {
-    const coordinates = points(rows);
-    return `<svg class="forecast-chart" viewBox="0 0 320 164" role="img" aria-label="口座残高の推移"><path class="chart-grid" d="M20 26H300M20 78H300M20 130H300"/><polyline class="chart-line" points="${coordinates.map(p => `${p.x},${p.y}`).join(' ')}"/>${coordinates.map((p, i) => `<circle class="chart-point" cx="${p.x}" cy="${p.y}" r="4"/><text class="chart-label" x="${p.x}" y="153" text-anchor="${i === 0 ? 'start' : i === 5 ? 'end' : 'middle'}">${rows[i].date}</text>`).join('')}<circle id="chart-cursor" class="chart-cursor" cx="${coordinates[0].x}" cy="${coordinates[0].y}" r="7"/></svg>`;
+    const values = rows.map(row => row.balance);
+    const roughStep = Math.max(10000, Math.max(...values.map(Math.abs)) / 4);
+    const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+    const step = [1, 2, 5, 10].map(n => n * magnitude).find(n => n >= roughStep);
+    const min = Math.floor(Math.min(0, ...values) / step) * step;
+    const max = Math.max(step, Math.ceil(Math.max(0, ...values) / step) * step);
+    const y = value => 202 - (value - min) / (max - min) * 182;
+    const zero = y(0);
+    const ticks = [];
+    for (let value = min; value <= max; value += step) {
+      ticks.push(`<line class="${value === 0 ? 'chart-zero' : 'chart-grid'}" x1="52" x2="334" y1="${y(value)}" y2="${y(value)}"/><text class="chart-label chart-tick" x="46" y="${y(value) + 3}" text-anchor="end">${value === 0 ? '0円' : (value < 0 ? '−' : '') + Math.abs(value / 10000) + '万円'}</text>`);
+    }
+    const bars = rows.map((row, i) => {
+      const x = 52 + (i + .5) * 282 / rows.length;
+      return `<rect class="chart-bar ${row.balance < 0 ? 'negative' : 'positive'}${i === 0 ? ' selected' : ''}" data-bar="${i}" x="${x - 11}" y="${Math.min(zero, y(row.balance))}" width="22" height="${Math.abs(y(row.balance) - zero)}" aria-label="${row.date} ${yen(row.balance)}"/><text class="chart-label" x="${x}" y="225" text-anchor="middle">${row.date}</text>`;
+    });
+    return `<svg class="forecast-chart" viewBox="0 0 340 240" role="img" aria-label="口座残高の棒グラフ">${ticks.join('')}${bars.join('')}</svg>`;
   }
   function showAnimationStep(index) {
     const rows = fixture().rows;
-    const point = points(rows)[index];
     $('#forecast-event').textContent = `${rows[index].date} · ${rows[index].name}`;
     $('#forecast-amount').textContent = yen(rows[index].balance);
     $('#forecast-amount').classList.toggle('negative', rows[index].balance < 0);
-    $('#chart-cursor').setAttribute('cx', point.x);
-    $('#chart-cursor').setAttribute('cy', point.y);
+    document.querySelectorAll('[data-bar]').forEach((bar, i) => bar.classList.toggle('selected', i === index));
     document.querySelectorAll('[data-event-row]').forEach((row, i) => row.classList.toggle('highlight', i === index));
   }
   function playAnimation() {

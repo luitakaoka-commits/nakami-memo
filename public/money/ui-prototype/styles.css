@@ -42,12 +42,13 @@ main { max-width: 600px; margin: 0 auto; padding: var(--space-lg) 20px 0; }
 .check-row:hover { color: var(--brand); }
 .forecast-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .forecast-head strong { font-size: 24px; font-variant-numeric: tabular-nums; }
-.forecast-chart { width: 100%; height: auto; margin-top: 12px; }
+.forecast-chart { width: 100%; height: auto; margin-top: 12px; stroke: none; }
 .chart-grid { stroke: var(--line); stroke-width: 1; }
-.chart-line { stroke: var(--brand); stroke-width: 3; fill: none; }
-.chart-point { stroke: var(--surface); stroke-width: 2; fill: var(--brand); }
-.chart-label { fill: var(--muted); font-size: 11px; font-family: var(--font); }
-.chart-cursor { fill: var(--brand); stroke: var(--surface); stroke-width: 3; transition: cx var(--duration) var(--ease), cy var(--duration) var(--ease); }
+.chart-zero { stroke: var(--chart-zero); stroke-width: 1.5; }
+.chart-bar.positive { fill: var(--chart-positive); }
+.chart-bar.negative { fill: var(--chart-negative); }
+.chart-bar.selected { stroke: var(--ink); stroke-width: 2; }
+.chart-label { fill: var(--muted); font-size: 10px; font-family: var(--font); }
 .chart-legend { display: flex; gap: 18px; font-size: 11px; color: var(--muted); }
 .income { color: var(--income); }
 .play-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
