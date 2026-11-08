@@ -38,6 +38,15 @@ test('unverifiedDataCannotBecomeSafe', () => {
   assert.equal(view.pending, 1); assert.equal(view.unverifiedAccounts, 1);
   assert.notEqual(view.assessment.futureStatus, 'safe'); assert.equal(view.allowance.referenceOnly, true);
 });
+test('displayedBillAndProjectedBalanceIncludeTheSamePossibleCharges', () => {
+  const view = run(seed());
+  const row = view.assessment.timeline.find(t => t.date === '2026-12-10');
+  // 残高10万−口座支払い2万＋予定入金5万−カード明細の見込み3万。
+  assert.equal(row.projectedBalance, 100000);
+  assert.equal(row.cardAmount + row.cardAdditionalPossible, 30000);
+  // この見方でも、請求総額未確定を確認済みには昇格させない。
+  assert.notEqual(row.status, 'safe');
+});
 test('missingOrInvalidInputsFailWithoutLegacyFallback', () => {
   assert.throws(() => run({ accounts: [] }), /口座/);
   const state = seed(); state.accounts[0].currentBalance = NaN; assert.throws(() => run(state));

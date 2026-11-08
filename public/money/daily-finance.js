@@ -18,7 +18,13 @@
     end.setUTCDate(end.getUTCDate() + 89);
     const endDate = end.toISOString().slice(0, 10);
     const { scenario, issues } = adapter.buildLegacyScenario(state, today, endDate, { candidates });
-    const assessment = readiness.calculateReadiness(scenario);
+    // 日常画面で示す引落額と残高の前提を揃える。
+    // 追加の可能額を表示するなら、その支払いを見込んだ残高を示す。
+    // 確認済み扱いにはせず、元のシナリオも書き換えない。
+    const displayScenario = { ...scenario, events: scenario.events.map(event => event.kind === 'expense' ? ({
+      ...event, amount: event.amount + (event.additionalPossible || 0), additionalPossible: 0
+    }) : ({ ...event })) };
+    const assessment = readiness.calculateReadiness(displayScenario);
     const allowance = readiness.spendingAllowance(scenario, { deadline: period.deadline, accountId: primary.id, reserve: Number(state.settings?.defenseLine || 0) });
     const pending = (candidates || []).filter(c => ['pending', 'needs_review'].includes(c.status)).length;
     const unverifiedAccounts = scenario.accounts.filter(a => !a.balanceVerified).length;

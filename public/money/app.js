@@ -671,7 +671,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=86" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=88" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -966,7 +966,7 @@
       <button type="button" class="card cashflow-status-card daily-outlook ${status.tone}" data-page="cashflow">
         <span class="cashflow-status-top"><span class="eyebrow">これから90日の支払い</span><span class="cashflow-status-action">詳しく見る ›</span></span>
         <span class="cashflow-status-title"><span class="status-dot" aria-hidden="true"></span>${status.label}</span>
-        <span class="cashflow-status-detail">${assessment.futureStatus === 'shortfall' ? '予定どおりでも資金が足りなくなる日があります。' : '予定入金への依存や、未確認の記録を含めて確認します。'} ${formatDate(view.endDate)}まで</span>
+        <span class="cashflow-status-detail">${assessment.futureStatus === 'shortfall' ? '登録済みの支払いと追加の可能額を見込むと、足りなくなる日があります。' : '予定入金への依存や、未確認の記録を含めて確認します。'} ${formatDate(view.endDate)}まで</span>
       </button>
       <section class="card daily-next"><div><span class="eyebrow">次のカード引落</span><h2>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '引落予定を確認'}</h2></div><span class="status-pill ${next.tone}">${next.label}</span><p>同じ日の請求は口座ごとにまとめて判定します。予定入金が間に合うかも確認してください。</p><button class="button button-quiet" data-page="cashflow">引落の内訳</button></section>
       ${renderDailyChecks(view)}
@@ -2379,8 +2379,8 @@
     return `<div class="daily-home"><div class="page-heading"><h1>支払いの見通し</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
       <section class="card check-hero daily-details ${status.tone}" data-daily-outlook><span class="eyebrow">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}・90日間</span><h2>${status.label}</h2>
       <div class="summary-strip"><div class="stat-card"><span>最初の不足見込み</span><strong>${shortfall ? formatDate(shortfall.date, true) : '未確認条件を確認'}</strong></div><div class="stat-card"><span>次のカード引落</span><strong>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '未登録'}</strong></div></div>
-      <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul><p>予測残高には予定収入を含みます。ホームの余力は、予定収入を足さない計算です。</p></section>
-      <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2><p>予測残高は、登録した残高と予定入出金からの見込みです。同日の入金が先に届くとは扱いません。</p><div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
+      <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul><p>予測残高には追加請求の可能額と予定収入を含みます。ホームの余力は、予定収入を足さない計算です。</p></section>
+      <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2><p>予測残高は、追加請求の可能額も支払う前提の見込みです。請求確定を意味しません。同日の入金が先に届くとは扱いません。</p><div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
       <section class="card daily-details"><h2>登録済みの入出金予定</h2><div class="daily-events">${events.map(e => `<div><span><strong>${formatDate(e.date, true)}</strong><small>${esc(accountName(e.accountId))}・${e.cardPayment ? 'カード請求' : e.kind === 'income' ? '予定入金' : e.kind === 'transfer' ? '予定振替' : '支払い'}</small></span><strong class="${e.kind === 'income' ? 'value-positive' : 'value-negative'}">${e.kind === 'income' ? '+' : '−'}${formatAbsoluteYen(e.amount + (e.additionalPossible || 0))}</strong></div>`).join('') || '<p>期間内の予定はありません。</p>'}</div><button class="button button-quiet" data-page="plans">予定を確認・修正</button></section>
       ${renderDailyChecks(view)}</div>`;
   }
