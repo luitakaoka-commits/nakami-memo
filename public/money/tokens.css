@@ -31,4 +31,8 @@
   --font-ledger-number: "DM Sans", "Bahnschrift", sans-serif;
   --ledger-ease: cubic-bezier(.2,.75,.2,1);
   --ledger-duration: 240ms;
+  --daily-heading-size: clamp(1.3rem, 4.8vw, 2rem);
+  --daily-amount-size: clamp(2.2rem, 10vw, 4rem);
+  --daily-space: 24px;
+  --daily-rule: 1px solid var(--line);
 }

@@ -671,7 +671,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=82" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=86" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -705,18 +705,18 @@
     $('#onboarding').hidden = true;
     $('#app-shell').hidden = false;
     $('#floating-add').hidden = false;
-    $('#storage-badge').textContent = state.meta.demo ? 'サンプルデータ' : 'この端末に保存';
+    $('#storage-badge').textContent = state.mode === 'cloud' ? 'クラウドの家計' : state.meta.demo ? 'サンプルデータ' : 'この端末に保存';
     $('#today-label').textContent = formatToday();
     renderPage();
   }
 
   function renderPage() {
     detailCache = new Map();
-    const titles = { home: 'ホーム', plans: '予定', records: '記録', accounts: '口座', shift: 'シフト', settings: '設定', spendable: '今使える金額', cashflow: '支払い能力チェック', imports: '取込候補' };
+    const titles = { home: 'ホーム', daily: '余力の内訳', plans: '予定', records: '記録', accounts: '口座', shift: 'シフト', settings: '設定', spendable: '今使える金額', cashflow: '支払い能力チェック', imports: '取込候補' };
     $('#page-title').textContent = titles[currentPage] || titles.home;
     $$('.nav-link[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === currentPage));
-    const renderers = { home: renderHome, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
-    const warning = ['home', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
+    const renderers = { home: renderHome, daily: renderDailyDetails, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
+    const warning = ['home', 'daily', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
     $('#page-container').innerHTML = warning + renderers[currentPage]();
     if (currentPage === 'home') requestAnimationFrame(animateHeroAmount);
     if (currentPage === 'spendable') requestAnimationFrame(() => {
@@ -920,7 +920,74 @@
     return `<section class="card notice-card home-mail-import"><strong>メール取り込み</strong><p>${count ? `未確認の取込候補が${count}件あります。` : '未確認の取込候補は0件です。'}カード利用のお知らせメールの内容を確認して、取り込むか判断できます。取り込むまで金額には反映されません。</p><button class="button button-quiet button-small" data-page="imports">メール取込を確認</button></section>`;
   }
 
+  const DAILY_STATUS = {
+    safe: { label: '支払い可能', tone: 'good' },
+    review: { label: '確認が必要', tone: 'warn' },
+    shortfall: { label: '不足の見込み', tone: 'bad' }
+  };
+
+  function dailyOverview() {
+    if (!window.DailyFinance) throw new Error('更新した画面を読み込めていません。アプリを再読み込みしてください。');
+    return window.DailyFinance.overview({ state, today: today(), candidates: candidatesLoaded ? importCandidates : undefined });
+  }
+
+  function renderDailyError(error) {
+    return `<section class="card daily-error" role="alert"><h1>試算を確認できません</h1><p>${esc(error.message)}</p><p>以前の計算値へ切り替えて表示することはありません。</p><button class="button button-primary" data-page="accounts">口座を確認</button><button class="button button-quiet" data-page="settings">設定を確認</button></section>`;
+  }
+
+  function renderDailyChecks(view) {
+    const rows = [
+      view.unverifiedAccounts && ['accounts', `残高未確認 ${view.unverifiedAccounts}口座`, '銀行で確認した金額と確認日を記録'],
+      view.overdue && ['plans', `期限を過ぎた予定 ${view.overdue}件`, '入出金済みか、予定が変わったかを確認'],
+      view.unconfirmedBills && ['plans', `請求額が未確認 ${view.unconfirmedBills}件`, 'カード会社の請求総額を確認'],
+      ['imports', `メールの未確認候補 ${view.pending}件`, '取り込むまで試算には含まれません'],
+      ['settings', '日付不明・未登録の支払い', '水道代など、記録にない支払いは含まれません']
+    ].filter(Boolean);
+    return `<section class="card daily-checks"><h2>確認すること</h2>${rows.map(([page, title, note]) => `<button class="daily-check" data-page="${page}"><span><strong>${esc(title)}</strong><small>${esc(note)}</small></span><span aria-hidden="true">›</span></button>`).join('')}</section>`;
+  }
+
   function renderHome() {
+    let view;
+    try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
+    const { allowance: amount, assessment, period, primary } = view;
+    const status = DAILY_STATUS[assessment.futureStatus];
+    const next = DAILY_STATUS[assessment.nextStatus];
+    if (typeof window.__appStatus === 'function') window.__appStatus(`資金繰り：${status.label}`);
+    return `<div class="daily-home" data-daily-home>
+      <div class="daily-heading"><span class="eyebrow">日々のお金</span><h1>今日の資金繰り</h1><p>${formatDate(today(), true)}の登録内容から試算</p></div>
+      <section class="card hero-card daily-hero">
+        <span class="eyebrow">${formatDate(period.deadline, true)}の締め日まで</span>
+        <h2>余力の参考額</h2><h1 class="daily-amount ${amount.amount < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(amount.amount)}</h1>
+        <p>${esc(primary.name)}の残高から、${formatDate(view.endDate)}までの登録済み支払いと予備額を確保した金額です。予定収入は足していません。</p>
+        ${amount.amount < 0 ? '<p class="daily-caution">登録済みの支払いをすべて確保すると不足する見込みです。今すぐこの額の支払いがある、という意味ではありません。</p>' : '<p class="daily-caution">未確認の残高・請求や、未登録の生活費があるため、使ってよい額の確定値ではありません。</p>'}
+        <button class="button button-primary" data-page="daily">金額の理由を見る <span aria-hidden="true">↗</span></button>
+        <small>残高の確認日：${view.scenario.accounts.find(a => a.id === primary.id)?.balanceVerified ? formatDate(primary.balanceEvidence.date, true) : '未確認'}<br>基準カード：${view.selectedCards.map(c => esc(c.name)).join('・')}</small>
+      </section>
+      <button type="button" class="card cashflow-status-card daily-outlook ${status.tone}" data-page="cashflow">
+        <span class="cashflow-status-top"><span class="eyebrow">これから90日の支払い</span><span class="cashflow-status-action">詳しく見る ›</span></span>
+        <span class="cashflow-status-title"><span class="status-dot" aria-hidden="true"></span>${status.label}</span>
+        <span class="cashflow-status-detail">${assessment.futureStatus === 'shortfall' ? '予定どおりでも資金が足りなくなる日があります。' : '予定入金への依存や、未確認の記録を含めて確認します。'} ${formatDate(view.endDate)}まで</span>
+      </button>
+      <section class="card daily-next"><div><span class="eyebrow">次のカード引落</span><h2>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '引落予定を確認'}</h2></div><span class="status-pill ${next.tone}">${next.label}</span><p>同じ日の請求は口座ごとにまとめて判定します。予定入金が間に合うかも確認してください。</p><button class="button button-quiet" data-page="cashflow">引落の内訳</button></section>
+      ${renderDailyChecks(view)}
+      <div class="daily-quick"><button class="button button-primary" data-action="add-event" data-kind="payment">支出を記録</button><button class="button button-quiet" data-page="accounts">残高を確認</button></div>
+      ${renderMailImportPrompt()}${renderReviewPrompt()}
+    </div>`;
+  }
+
+  function renderDailyDetails() {
+    let view;
+    try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
+    const a = view.allowance;
+    return `<div class="daily-home"><div class="page-heading"><h1>余力の内訳</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
+      <section class="card daily-details"><span class="eyebrow">${esc(view.primary.name)}・${formatDate(view.period.deadline, true)}まで</span><h2>この金額になる理由</h2>
+      <dl class="daily-formula"><div><dt>登録した口座残高</dt><dd>${formatDisplayedAmount(a.openingBalance)}</dd></div><div><dt>締め日までの支払い</dt><dd>−${formatAbsoluteYen(a.throughDeadline)}</dd></div><div><dt>締め日後〜${formatDate(view.endDate)}の支払い</dt><dd>−${formatAbsoluteYen(a.afterDeadline)}</dd></div><div><dt>最低限残す予備額</dt><dd>−${formatAbsoluteYen(a.reserve)}</dd></div><div class="daily-total"><dt>余力の参考額</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl>
+      <p>未確定の請求に追加額の可能性がある場合、その額も支払いへ含めています。予定の給与・仕送りは、この金額に足していません。</p><button class="button button-quiet" data-page="settings">予備額・基準カードを設定</button></section>
+      <section class="card daily-details"><h2>2つの見方を比べる</h2><dl class="daily-formula"><div><dt>締め日までの支払いだけを確保</dt><dd>${formatDisplayedAmount(view.throughDeadlineOnly)}</dd></div><div><dt>その後の支払いも確保</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl><p>ホームには後者を表示します。前者を使い切ると、締め日後の引落に足りなくなる可能性があります。</p></section>
+      ${renderDailyChecks(view)}</div>`;
+  }
+
+  function renderLegacyHome() {
     const spendable = spendableAmount();
     publishSwitcherStatus(spendable);
     const check = cashflowCheck();
@@ -1420,7 +1487,7 @@
     const visibleIds = new Set(importCandidates.map(item => item.id));
     for (const id of candidateCardSelections.keys()) if (!visibleIds.has(id)) candidateCardSelections.delete(id);
     for (const id of candidateEdits.keys()) if (!visibleIds.has(id)) candidateEdits.delete(id);
-    if (['imports', 'settings', 'home', 'cashflow'].includes(currentPage)) renderPage();
+    if (['imports', 'settings', 'home', 'daily', 'cashflow'].includes(currentPage)) renderPage();
   }
 
   /* ================= レシート明細（買ったものと、その結末） =================
@@ -2293,6 +2360,32 @@
   }
 
   function renderCashflow() {
+    let view;
+    try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
+    const { assessment, scenario } = view;
+    const status = DAILY_STATUS[assessment.futureStatus];
+    const reasons = {
+      incomplete_source_data: '未登録の支払いがないか確認が必要です。',
+      projected_shortfall: '予定どおりでも残高が不足する見込みです。',
+      same_day_income_unconfirmed: '同日の入金が引落に間に合うか未確認です。',
+      depends_on_planned_income: '予定の入金が届かない場合、支払いに足りません。',
+      amount_unconfirmed: '請求額が確定していない支払いがあります。',
+      overdue: '日付が過ぎた未確定の入出金があります。'
+    };
+    const events = scenario.events.filter(e => e.status === 'planned' && e.date >= scenario.today && e.date <= scenario.endDate).sort((a, b) => a.date.localeCompare(b.date));
+    const timeline = assessment.timeline.map(row => `<tr><td>${formatDate(row.date)}</td><td>${esc(accountName(row.accountId))}</td><td class="num">${formatAbsoluteYen(row.cardAmount + row.cardAdditionalPossible)}</td><td class="num">${formatDisplayedAmount(row.projectedBalance)}</td><td>${DAILY_STATUS[row.status].label}</td></tr>`).join('');
+    const reasonsShown = [...new Set(assessment.issues.map(issue => reasons[issue.type]).filter(Boolean))];
+    const shortfall = assessment.issues.find(issue => issue.type === 'projected_shortfall');
+    return `<div class="daily-home"><div class="page-heading"><h1>支払いの見通し</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
+      <section class="card check-hero daily-details ${status.tone}" data-daily-outlook><span class="eyebrow">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}・90日間</span><h2>${status.label}</h2>
+      <div class="summary-strip"><div class="stat-card"><span>最初の不足見込み</span><strong>${shortfall ? formatDate(shortfall.date, true) : '未確認条件を確認'}</strong></div><div class="stat-card"><span>次のカード引落</span><strong>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '未登録'}</strong></div></div>
+      <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul><p>予測残高には予定収入を含みます。ホームの余力は、予定収入を足さない計算です。</p></section>
+      <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2><p>予測残高は、登録した残高と予定入出金からの見込みです。同日の入金が先に届くとは扱いません。</p><div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
+      <section class="card daily-details"><h2>登録済みの入出金予定</h2><div class="daily-events">${events.map(e => `<div><span><strong>${formatDate(e.date, true)}</strong><small>${esc(accountName(e.accountId))}・${e.cardPayment ? 'カード請求' : e.kind === 'income' ? '予定入金' : e.kind === 'transfer' ? '予定振替' : '支払い'}</small></span><strong class="${e.kind === 'income' ? 'value-positive' : 'value-negative'}">${e.kind === 'income' ? '+' : '−'}${formatAbsoluteYen(e.amount + (e.additionalPossible || 0))}</strong></div>`).join('') || '<p>期間内の予定はありません。</p>'}</div><button class="button button-quiet" data-page="plans">予定を確認・修正</button></section>
+      ${renderDailyChecks(view)}</div>`;
+  }
+
+  function renderLegacyCashflow() {
     const check = cashflowCheck();
     if (!check) return '<div class="page-heading"><div><span class="eyebrow">支払い能力チェック</span><h1>支払い能力チェック</h1></div></div><section class="card empty"><div><strong>口座がありません</strong>口座を追加すると計算できます。</div></section>';
 
@@ -2753,7 +2846,7 @@
       <div class="page-heading"><div><span class="eyebrow">設定</span><h1>設定</h1></div></div>
       <div class="settings-grid"><div class="stack">
         <section class="settings-card"><h2>メールからの取込候補</h2><p>カード利用のお知らせメールから作られた候補です。取り込むまで計算には反映されません。</p><div class="settings-inline"><strong>${pendingCandidates().length}件が未確認</strong><button class="button button-quiet button-small" data-page="imports">確認する</button></div></section>
-        <section class="settings-card"><h2>計算設定</h2><p>今使える金額の計算に使う基準です。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>選んだカードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<small>複数選んだ場合は一番早い締め日を使います。対象カードがなくなった場合は毎月14日が期限になります。</small><label><span>支払い能力チェックの期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日先まで</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日先まで</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日先まで</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日先まで</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
+        <section class="settings-card"><h2>計算設定</h2><p>ホームは選択した基準カードの締め日で試算します。未選択なら15日締めのカード、該当カードがなければ全カードが基準です。毎月14日締めは従来方式の詳細だけに適用します。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>従来の試算のみ：毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>基準カードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<small>複数選んだ場合は一番早い締め日を使います。対象カードがなくなった場合は毎月14日が期限になります。</small><label><span>支払い能力チェックの期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日先まで</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日先まで</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日先まで</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日先まで</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
         <section class="settings-card"><h2>給与設定</h2><p>勤務月は1日から末日までの暦月、支給は翌月の給料日です。給料日が土日祝のときは前営業日へ繰り上げます。</p><form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><p class="form-note">同じ給与を通常の「収入」にも登録すると二重計算になるため、どちらか一方を使ってください。</p><button class="button button-primary" type="submit">給与設定を保存</button></form></section>
         ${renderRecurringSettings()}
         ${renderAliasSettings()}

@@ -23,6 +23,43 @@
   --spring: cubic-bezier(.2, .85, .25, 1);
 }
 
+/* Daily finance: utilitarian ledger, one primary amount; hierarchy 5, restraint 4,
+   specificity 4, execution 4, philosophy 4, variety 3. */
+.daily-home { max-width: 800px; margin-inline: auto; min-width: 0; display: grid; gap: 18px; }
+.daily-home > .card { margin: 0; min-width: 0; }
+.daily-heading h1 { font-size: var(--daily-heading-size); font-style: normal; }
+.daily-home > .daily-heading h1, .daily-home > .page-heading h1, .daily-heading > .eyebrow { color: var(--ledger-on-dark); }
+.daily-home > .daily-heading p { color: var(--ledger-muted-dark); }
+.daily-heading p, .daily-home p, .daily-home small { color: var(--muted); line-height: 1.8; }
+.daily-hero, .daily-details, .daily-checks, .daily-next, .daily-error { padding: var(--daily-space); }
+.daily-hero { border-top: 4px solid var(--ledger-brand); background: var(--surface-page); }
+.daily-hero h2 { font-size: 1rem; margin-block: 10px 0; }
+.daily-hero .daily-amount { font-family: var(--font-ledger-number); font-size: var(--daily-amount-size); line-height: 1.2; letter-spacing: -.04em; margin-block: 12px 18px; overflow-wrap: anywhere; }
+.daily-hero .daily-amount.value-negative { color: var(--red-dark); }
+.daily-hero > small { display: block; margin-top: 14px; }
+.daily-caution { border-left: 3px solid var(--amber); padding-left: 12px; font-size: .85rem; }
+.daily-next { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.daily-next p { flex-basis: 100%; margin: 0; }
+.daily-check { appearance: none; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; border: 0; border-bottom: var(--daily-rule); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.daily-check:last-child { border-bottom: 0; }
+.daily-check strong, .daily-check small { display: block; }
+.daily-check strong { font-size: .9rem; }
+.daily-check small { font-size: .78rem; margin-top: 4px; }
+.daily-check:hover { color: var(--ledger-brand); }
+.daily-check:focus-visible { outline: 2px solid var(--ledger-focus); outline-offset: 3px; }
+.daily-quick { display: flex; gap: 10px; flex-wrap: wrap; }
+.daily-quick .button { flex: 1; white-space: nowrap; }
+.daily-formula { margin-block: 20px; }
+.daily-formula > div, .daily-events > div { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding-block: 14px; border-bottom: var(--daily-rule); }
+.daily-formula dt { font-size: .85rem; min-width: 0; }
+.daily-formula dd { margin: 0; white-space: nowrap; font-family: var(--font-ledger-number); font-weight: 600; }
+.daily-formula .daily-total { border-top: 2px solid var(--ink); font-weight: 700; }
+.daily-events small { display: block; }
+.daily-home .button { min-height: 44px; white-space: nowrap; }
+.daily-home .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.daily-home .page-heading h1 { font-size: var(--daily-heading-size); }
+@media (max-width: 375px) { .daily-home { --daily-space: 18px; } .daily-formula > div { flex-wrap: wrap; gap: 5px; } .daily-formula dd { margin-left: auto; } }
+
 * { box-sizing: border-box; }
 html { min-width: 320px; min-height: 100%; background: var(--bg); scroll-behavior: smooth; }
 body {

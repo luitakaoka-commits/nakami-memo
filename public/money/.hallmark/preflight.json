@@ -1,0 +1,16 @@
+{
+  "scope": "money daily use",
+  "audience": "smartphone personal finance",
+  "intent": "understand allowance and upcoming payment risk",
+  "genre": "utilitarian financial ledger",
+  "macrostructure": "one allowance then risk and actions",
+  "preserve": [
+    "routes",
+    "authentication",
+    "recording",
+    "receipt integration"
+  ],
+  "tokens": "../tokens.css",
+  "newModule": "../daily-finance.js",
+  "motion": "existing reduced-motion support; no new background animation"
+}

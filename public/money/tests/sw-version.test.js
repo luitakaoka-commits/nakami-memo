@@ -18,7 +18,7 @@ const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..');
 /* sw.js がキャッシュ優先で抱えるファイル。sw.js の ASSETS と揃える。 */
-const SHELL = ['index.html', 'styles.css', 'finance-engine.js', 'app.js', 'firebase-sync.js', 'icons/app-icon.svg', 'tokens.css', 'redesign-sync-coordinator.js', 'redesign-backup-read.js', 'redesign-legacy-adapter.js', 'redesign-readiness.js', 'redesign-deadline.js', 'redesign-bill-lifecycle.js', 'redesign-refund.js', 'redesign-migration-check.js', 'redesign-restore-plan.js', 'redesign-restore-execute.js'];
+const SHELL = ['index.html', 'styles.css', 'finance-engine.js', 'app.js', 'firebase-sync.js', 'icons/app-icon.svg', 'tokens.css', 'redesign-sync-coordinator.js', 'redesign-backup-read.js', 'redesign-legacy-adapter.js', 'redesign-readiness.js', 'redesign-deadline.js', 'redesign-bill-lifecycle.js', 'redesign-refund.js', 'redesign-migration-check.js', 'redesign-restore-plan.js', 'redesign-restore-execute.js', 'daily-finance.js'];
 
 const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
 const version = (sw.match(/const VERSION = '(\d+)'/) || [])[1];

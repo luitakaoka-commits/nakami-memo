@@ -1,0 +1,24 @@
+[
+  {
+    "scope": "money daily use",
+    "genre": "utilitarian",
+    "macrostructure": "allowance, risk, next debit, actions",
+    "theme": "burgundy ledger",
+    "scores": {
+      "philosophy": 4,
+      "hierarchy": 5,
+      "execution": 4,
+      "specificity": 4,
+      "restraint": 4,
+      "variety": 3
+    },
+    "responsiveWidths": [
+      320,
+      375,
+      414,
+      768
+    ],
+    "visualReview": "mobile heading contrast corrected; final reviewed",
+    "version": 86
+  }
+]

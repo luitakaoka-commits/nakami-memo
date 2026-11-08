@@ -133,6 +133,40 @@ const closeModals = page => page.evaluate(() => {
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
   });
 
+  await record('daily_use_home', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+    assert(await page.locator('[data-daily-home]').count() === 1, '新しい日常画面が表示されていない');
+    assert((await page.locator('.daily-hero').innerText()).includes('9月15日'), '主要カードの15日締めが表示されていない');
+    // 基準口座30万円−家賃8万円−カード8万円−予備15万円。別口座や予定給与は足さない。
+    const dailyShown = (await page.locator('.daily-amount').innerText()).replace(/−/g, '-').replace(/[^0-9-]/g, '');
+    assert(dailyShown === '-10000', `余力が基準口座と保守的な計算に一致しない: ${dailyShown}`);
+    await page.locator('[data-page="daily"]').click();
+    assert((await page.locator('.daily-formula').first().innerText()).includes('締め日後'), '後日の引落を確保する理由がない');
+    assert((await page.locator('#page-title').innerText()) === '余力の内訳', '余力の内訳を開けない');
+    try {
+      await page.evaluate(() => window.__YORYOKU__.setImportCandidates([{ id: 'daily-live', status: 'pending', type: 'purchase', amount: 1000, usedDate: '2026-09-02' }]));
+      assert((await page.locator('.daily-checks').innerText()).includes('メールの未確認候補 1件'), '内訳画面でメール候補の更新が即時反映されない');
+    } finally {
+      await page.evaluate(() => window.__YORYOKU__.setImportCandidates([]));
+    }
+    for (const width of [320, 375, 414, 768]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const target of ['home', 'daily', 'cashflow']) {
+        await page.evaluate(p => window.__YORYOKU__.setPage(p), target);
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${target}が${width}pxで横にはみ出す`);
+        assert(await page.locator('.daily-home').isVisible(), `${target}の表示がない`);
+      }
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+    if (process.env.MONEY_DAILY_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_DAILY_SCREENSHOT, fullPage: true });
+    if (process.env.MONEY_DAILY_DESKTOP_SCREENSHOT) {
+      await page.setViewportSize({ width: 768, height: 1024 });
+      await page.screenshot({ path: process.env.MONEY_DAILY_DESKTOP_SCREENSHOT, fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
+  });
+
   await record('spendable_amount', async () => {
     const result = await page.evaluate(() => window.__YORYOKU__.spendableAmount());
     assert(typeof result.total === 'number', '今使える金額が数値でない');
