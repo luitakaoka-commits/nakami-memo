@@ -5,6 +5,10 @@
   const adapter = node ? require('./redesign-legacy-adapter.js') : root.RedesignLegacyAdapter;
   const readiness = node ? require('./redesign-readiness.js') : root.RedesignReadiness;
   const deadline = node ? require('./redesign-deadline.js') : root.RedesignDeadline;
+  function forecastDays(settings = {}) {
+    const days = Number(settings.cashflowHorizonDays);
+    return [30, 60, 90, 180].includes(days) ? days : 90;
+  }
   function overview({ state, today, candidates }) {
     const primary = state?.accounts?.find(a => a.isPrimary) || state?.accounts?.find(a => a.role === 'primary') || state?.accounts?.[0];
     if (!primary) throw new Error('口座を登録すると余力を試算できます。');
@@ -14,8 +18,9 @@
     const selectedCardIds = selected.length ? selected : (defaults.length ? defaults : cards).map(c => c.id);
     if (!selectedCardIds.length) throw new Error('カードの締め日を登録してください。');
     const period = deadline.periodForCards({ today, cards, selectedCardIds });
+    const horizonDays = forecastDays(state.settings);
     const end = new Date(`${today}T00:00:00Z`);
-    end.setUTCDate(end.getUTCDate() + 89);
+    end.setUTCDate(end.getUTCDate() + horizonDays - 1);
     const endDate = end.toISOString().slice(0, 10);
     const { scenario, issues } = adapter.buildLegacyScenario(state, today, endDate, { candidates });
     // 日常画面で示す引落額と残高の前提を揃える。
@@ -25,17 +30,20 @@
       ...event, amount: event.amount + (event.additionalPossible || 0), additionalPossible: 0
     }) : ({ ...event })) };
     const assessment = readiness.calculateReadiness(displayScenario);
-    const allowance = readiness.spendingAllowance(scenario, { deadline: period.deadline, accountId: primary.id, reserve: Number(state.settings?.defenseLine || 0) });
+    // 30日間の末日より締め日が1日後になる月でも、締め日までの支払いを落とさない。
+    const allowanceEndDate = endDate < period.deadline ? period.deadline : endDate;
+    const allowanceScenario = allowanceEndDate === endDate ? scenario : adapter.buildLegacyScenario(state, today, allowanceEndDate, { candidates }).scenario;
+    const allowance = readiness.spendingAllowance(allowanceScenario, { deadline: period.deadline, accountId: primary.id, reserve: Number(state.settings?.defenseLine || 0) });
     const pending = (candidates || []).filter(c => ['pending', 'needs_review'].includes(c.status)).length;
     const unverifiedAccountIds = scenario.accounts.filter(a => !a.balanceVerified).map(a => a.id);
     const overdueEvents = scenario.events.filter(e => e.status === 'planned' && e.date < today);
     const unconfirmedEvents = scenario.events.filter(e => e.cardPayment && (!e.amountConfirmed || e.additionalPossible));
     const unverifiedAccounts = unverifiedAccountIds.length, overdue = overdueEvents.length, unconfirmedBills = unconfirmedEvents.length;
-    return { primary, period, endDate, scenario, issues, assessment, allowance, pending, unverifiedAccounts, overdue, unconfirmedBills, unverifiedAccountIds, overdueEvents, unconfirmedEvents,
+    return { primary, period, endDate, horizonDays, scenario, issues, assessment, allowance, pending, unverifiedAccounts, overdue, unconfirmedBills, unverifiedAccountIds, overdueEvents, unconfirmedEvents,
       selectedCards: cards.filter(c => selectedCardIds.includes(c.id)),
       throughDeadlineOnly: allowance.openingBalance - allowance.throughDeadline - allowance.reserve };
   }
-  const api = { overview };
+  const api = { overview, forecastDays };
   if (node) module.exports = api;
   root.DailyFinance = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

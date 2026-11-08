@@ -230,6 +230,39 @@ const closeModals = page => page.evaluate(() => {
     }
   });
 
+  await record('daily_horizon_setting', async () => {
+    const snapshot = await page.evaluate(() => structuredClone(window.__YORYOKU__.getState()));
+    try {
+      await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+      await page.locator('#settings-horizon').selectOption('30');
+      await page.locator('#settings-form [type="submit"]').click();
+      await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+      assert((await page.locator('.cashflow-status-card').innerText()).includes('30日の支払い'), 'ホームに30日の設定が反映されない');
+      // 30日では10/13のカード5万円を期間外とし、基準口座30万−家賃8万−9月カード3万−予備15万。
+      const shown = (await page.locator('.daily-amount').innerText()).replace(/−/g, '-').replace(/[^0-9-]/g, '');
+      assert(shown === '40000', `期間外の支払いが余力に残っている: ${shown}`);
+      await page.locator('.cashflow-status-card').click();
+      assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('9/2〜10/1・30日間'), '予測終了日と日数が設定に一致しない');
+      assert(!(await page.locator('.timeline-table tbody').innerText()).includes('10/13'), '期間外の引落が残高表に残っている');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForFunction(() => Boolean(window.__YORYOKU__));
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().settings.cashflowHorizonDays) === 30, '再読込で期間設定が失われる');
+      await page.evaluate(() => window.__YORYOKU__.setPage('cashflow'));
+      assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('30日間'), '再読込後の画面が90日へ戻る');
+      await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+      await page.locator('#settings-horizon').selectOption('90');
+      await page.locator('#settings-form [type="submit"]').click();
+      await page.evaluate(() => window.__YORYOKU__.setPage('cashflow'));
+      assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('9/2〜11/30・90日間'), '90日に戻しても反映されない');
+    } finally {
+      await page.evaluate(s => {
+        Object.assign(window.__YORYOKU__.getState(), s);
+        localStorage.setItem('yoryoku-finance-v2', JSON.stringify(s));
+        window.__YORYOKU__.setPage('home');
+      }, snapshot);
+    }
+  });
+
   await record('spendable_amount', async () => {
     const result = await page.evaluate(() => window.__YORYOKU__.spendableAmount());
     assert(typeof result.total === 'number', '今使える金額が数値でない');

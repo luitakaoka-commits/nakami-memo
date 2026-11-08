@@ -51,6 +51,27 @@ test('missingOrInvalidInputsFailWithoutLegacyFallback', () => {
   assert.throws(() => run({ accounts: [] }), /口座/);
   const state = seed(); state.accounts[0].currentBalance = NaN; assert.throws(() => run(state));
 });
+test('configuredHorizonChangesDatesAndReservedPayments', () => {
+  const expected = [[30, '2026-11-29'], [60, '2026-12-29'], [90, '2027-01-28'], [180, '2027-04-28']];
+  for (const [days, endDate] of expected) {
+    const state = seed(); state.settings.cashflowHorizonDays = days;
+    const view = run(state);
+    assert.equal(view.horizonDays, days);
+    assert.equal(view.endDate, endDate);
+    assert.equal(view.allowance.endDate, endDate);
+    assert.equal(view.allowance.amount, days === 30 ? 75000 : 45000);
+    assert.ok(view.assessment.timeline.every(row => row.date <= endDate));
+  }
+});
+test('shortHorizonStillReservesPaymentsThroughClosingDate', () => {
+  const state = seed(); state.settings.cashflowHorizonDays = 30;
+  state.transactions.push({ id: 'closing-day', kind: 'payment', status: 'planned', sourceAccountId: 'bank', amount: 8000, dueDate: '2027-01-15' });
+  const view = overview({ state, today: '2026-12-16', candidates: [] });
+  assert.equal(view.endDate, '2027-01-14');
+  assert.equal(view.period.deadline, '2027-01-15');
+  assert.equal(view.allowance.endDate, '2027-01-15');
+  assert.equal(view.allowance.amount, 87000);
+});
 const failures = checks.filter(c => !c.pass);
 console.log(JSON.stringify({ suite: 'daily-finance', total: checks.length, passed: checks.length - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
 if (failures.length) process.exitCode = 1;

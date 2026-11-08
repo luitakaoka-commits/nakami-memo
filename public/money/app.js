@@ -672,7 +672,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=89" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=90" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -979,14 +979,15 @@
       <section class="card hero-card daily-hero">
         <span class="eyebrow">今日ある残高だけで試算</span>
         <h2>先の支払いを確保した後の残り</h2><h1 class="daily-amount ${amount.amount < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(amount.amount)}</h1>
-        <dl class="daily-periods"><div><dt>使う期間</dt><dd>今日〜${formatDate(period.deadline, true)}の締め日</dd></div><div><dt>確保する支払い</dt><dd>今日〜${formatDate(view.endDate, true)}</dd></div></dl>
+        <dl class="daily-periods"><div><dt>使う期間</dt><dd>今日〜${formatDate(period.deadline, true)}の締め日</dd></div><div><dt>確保する支払い</dt><dd>今日〜${formatDate(amount.endDate, true)}</dd></div></dl>
+        ${amount.endDate !== view.endDate ? '<p class="form-note">設定した予測期間より締め日が後のため、余力は締め日までの支払いを確保しています。</p>' : ''}
         <p>${esc(primary.name)}の残高から、上の期間の登録済み支払いと予備額を引いた参考額です。予定の給料や仕送りは足していません。</p>
         ${amount.amount < 0 ? '<p class="daily-caution">登録済みの支払いをすべて確保すると不足する見込みです。今すぐこの額の支払いがある、という意味ではありません。</p>' : '<p class="daily-caution">未確認の残高・請求や、未登録の生活費があるため、使ってよい額の確定値ではありません。</p>'}
         <button class="button button-primary" data-page="daily">金額の理由を見る <span aria-hidden="true">↗</span></button>
         <small>残高の確認日：${view.scenario.accounts.find(a => a.id === primary.id)?.balanceVerified ? formatDate(primary.balanceEvidence.date, true) : '未確認'}<br>基準カード：${view.selectedCards.map(c => esc(c.name)).join('・')}</small>
       </section>
       <button type="button" class="card cashflow-status-card daily-outlook ${status.tone}" data-page="cashflow">
-        <span class="cashflow-status-top"><span class="eyebrow">これから90日の支払い</span><span class="cashflow-status-action">詳しく見る ›</span></span>
+        <span class="cashflow-status-top"><span class="eyebrow">これから${view.horizonDays}日の支払い</span><span class="cashflow-status-action">詳しく見る ›</span></span>
         <span class="cashflow-status-title"><span class="status-dot" aria-hidden="true"></span>${status.label}</span>
         <span class="cashflow-status-detail">${assessment.futureStatus === 'shortfall' ? '登録済みの支払いと追加の可能額を見込むと、足りなくなる日があります。' : '予定入金への依存や、未確認の記録を含めて確認します。'} ${formatDate(view.endDate)}まで</span>
       </button>
@@ -1002,8 +1003,8 @@
     try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
     const a = view.allowance;
     return `<div class="daily-home"><div class="page-heading"><h1>余力の内訳</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
-      <section class="card daily-details"><span class="eyebrow">${esc(view.primary.name)}・${formatDate(view.endDate, true)}までの支払いを確保</span><h2>この金額になる理由</h2>
-      <dl class="daily-formula"><div><dt>登録した口座残高</dt><dd>${formatDisplayedAmount(a.openingBalance)}</dd></div><div><dt>締め日までの支払い</dt><dd>−${formatAbsoluteYen(a.throughDeadline)}</dd></div><div><dt>締め日後〜${formatDate(view.endDate)}の支払い</dt><dd>−${formatAbsoluteYen(a.afterDeadline)}</dd></div><div><dt>最低限残す予備額</dt><dd>−${formatAbsoluteYen(a.reserve)}</dd></div><div class="daily-total"><dt>余力の参考額</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl>
+      <section class="card daily-details"><span class="eyebrow">${esc(view.primary.name)}・${formatDate(a.endDate, true)}までの支払いを確保</span><h2>この金額になる理由</h2>
+      <dl class="daily-formula"><div><dt>登録した口座残高</dt><dd>${formatDisplayedAmount(a.openingBalance)}</dd></div><div><dt>締め日までの支払い</dt><dd>−${formatAbsoluteYen(a.throughDeadline)}</dd></div><div><dt>締め日後〜${formatDate(a.endDate)}の支払い</dt><dd>−${formatAbsoluteYen(a.afterDeadline)}</dd></div><div><dt>最低限残す予備額</dt><dd>−${formatAbsoluteYen(a.reserve)}</dd></div><div class="daily-total"><dt>余力の参考額</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl>
       <p>未確定の請求に追加額の可能性がある場合、その額も支払いへ含めています。予定の給与・仕送りは、この金額に足していません。</p><button class="button button-quiet" data-page="settings">予備額・基準カードを設定</button></section>
       <section class="card daily-details"><h2>2つの見方を比べる</h2><dl class="daily-formula"><div><dt>締め日までの支払いだけを確保</dt><dd>${formatDisplayedAmount(view.throughDeadlineOnly)}</dd></div><div><dt>その後の支払いも確保</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl><p>ホームには後者を表示します。前者を使い切ると、締め日後の引落に足りなくなる可能性があります。</p></section>
       ${renderDailyChecks(view)}</div>`;
@@ -1121,7 +1122,7 @@
     if (!selectedDeadlinePeriod()) return '';
     const funding = primaryAccount();
     try {
-      const { scenario } = savedPaymentScenario();
+      const { scenario } = savedPaymentScenario(deadline);
       const result = window.RedesignReadiness.spendingAllowance(scenario, {
         deadline, accountId: funding.id, reserve: Number(state.settings.defenseLine || 0)
       });
@@ -2347,9 +2348,10 @@
 
   /* ================= 機能A｜支払い能力チェック（詳細） ================= */
 
-  function savedPaymentScenario() {
+  function savedPaymentScenario(minimumEndDate = '') {
     const start = today();
-    return window.RedesignLegacyAdapter.buildLegacyScenario(state, start, dateAdd(start, 89), {
+    const configuredEnd = dateAdd(start, window.DailyFinance.forecastDays(state.settings) - 1);
+    return window.RedesignLegacyAdapter.buildLegacyScenario(state, start, configuredEnd < minimumEndDate ? minimumEndDate : configuredEnd, {
       candidates: candidatesLoaded ? importCandidates : undefined
     });
   }
@@ -2373,7 +2375,7 @@
         <h2>次回カード引落の確認</h2>
         <p>${result.nextDate ? formatDate(result.nextDate, true) + '・' : ''}<strong>${labels[result.nextStatus]}</strong></p>
         ${rows || '<p>次回引落の記録を確認してください。</p>'}
-        <p>今後90日間の支払い <strong>${labels[result.futureStatus]}</strong></p>
+        <p>今後${window.DailyFinance.forecastDays(state.settings)}日間の支払い <strong>${labels[result.futureStatus]}</strong></p>
         <p class="check-detail">保存済みの記録から試算しています。口座残高、請求額、未確認の取込候補を照合してください。</p>
       </section>`;
     } catch (_) {
@@ -2399,7 +2401,7 @@
     const reasonsShown = [...new Set(assessment.issues.map(issue => reasons[issue.type]).filter(Boolean))];
     const shortfall = assessment.issues.find(issue => issue.type === 'projected_shortfall');
     return `<div class="daily-home"><div class="page-heading"><h1>支払いの見通し</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
-      <section class="card check-hero daily-details ${status.tone}" data-daily-outlook><span class="eyebrow">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}・90日間</span><h2>${status.label}</h2>
+      <section class="card check-hero daily-details ${status.tone}" data-daily-outlook><span class="eyebrow">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}・${view.horizonDays}日間</span><h2>${status.label}</h2>
       <div class="summary-strip"><div class="stat-card"><span>最初の不足見込み</span><strong>${shortfall ? formatDate(shortfall.date, true) : '未確認条件を確認'}</strong></div><div class="stat-card"><span>次のカード引落</span><strong>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '未登録'}</strong></div></div>
       <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul><p>予測残高には追加請求の可能額と予定収入を含みます。ホームの余力は、予定収入を足さない計算です。</p></section>
       <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2><p>予測残高は、追加請求の可能額も支払う前提の見込みです。請求確定を意味しません。同日の入金が先に届くとは扱いません。</p><div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
@@ -2868,7 +2870,7 @@
       <div class="page-heading"><div><span class="eyebrow">設定</span><h1>設定</h1></div></div>
       <div class="settings-grid"><div class="stack">
         <section class="settings-card"><h2>メールからの取込候補</h2><p>カード利用のお知らせメールから作られた候補です。取り込むまで計算には反映されません。</p><div class="settings-inline"><strong>${pendingCandidates().length}件が未確認</strong><button class="button button-quiet button-small" data-page="imports">確認する</button></div></section>
-        <section class="settings-card"><h2>計算設定</h2><p>ホームは選択した基準カードの締め日で試算します。未選択なら15日締めのカード、該当カードがなければ全カードが基準です。毎月14日締めは従来方式の詳細だけに適用します。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>従来の試算のみ：毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>基準カードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<small>複数選んだ場合は一番早い締め日を使います。対象カードがなくなった場合は毎月14日が期限になります。</small><label><span>支払い能力チェックの期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日先まで</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日先まで</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日先まで</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日先まで</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
+        <section class="settings-card"><h2>計算設定</h2><p>ホームは選択した基準カードの締め日で試算します。未選択なら15日締めのカード、該当カードがなければ全カードが基準です。毎月14日締めは従来方式の詳細だけに適用します。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>従来の試算のみ：毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>基準カードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<small>複数選んだ場合は一番早い締め日を使います。対象カードがなくなった場合は毎月14日が期限になります。</small><label><span>支払いの予測期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日間</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日間</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日間</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日間</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
         <section class="settings-card"><h2>給与設定</h2><p>勤務月は1日から末日までの暦月、支給は翌月の給料日です。給料日が土日祝のときは前営業日へ繰り上げます。</p><form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><p class="form-note">同じ給与を通常の「収入」にも登録すると二重計算になるため、どちらか一方を使ってください。</p><button class="button button-primary" type="submit">給与設定を保存</button></form></section>
         ${renderRecurringSettings()}
         ${renderAliasSettings()}
