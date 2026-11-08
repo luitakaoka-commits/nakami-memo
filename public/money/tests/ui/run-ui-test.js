@@ -159,10 +159,73 @@ const closeModals = page => page.evaluate(() => {
     }
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
-    if (process.env.MONEY_DAILY_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_DAILY_SCREENSHOT, fullPage: true });
+    if (process.env.MONEY_DAILY_SCREENSHOT) {
+      await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+      await page.screenshot({ path: process.env.MONEY_DAILY_SCREENSHOT, fullPage: true });
+    }
     if (process.env.MONEY_DAILY_DESKTOP_SCREENSHOT) {
       await page.setViewportSize({ width: 768, height: 1024 });
       await page.screenshot({ path: process.env.MONEY_DAILY_DESKTOP_SCREENSHOT, fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
+  });
+
+  await record('daily_confirmation_routes', async () => {
+    const snapshot = await page.evaluate(() => structuredClone(window.__YORYOKU__.getState()));
+    try {
+      await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+      assert(await page.locator('.daily-checks [data-check="imports"]').count() === 0, '未確認0件を確認待ちとして表示している');
+      assert(await page.locator('.daily-checks [data-page="settings"]').count() === 0, '未検出の支払いを確認待ちとして表示している');
+      assert((await page.locator('.daily-periods').innerText()).includes('確保する支払い'), '使う期限と支払いを確保する期限が分離されていない');
+      await page.locator('[data-check="accounts"]').click();
+      assert(await page.evaluate(() => window.scrollY) === 0, '移動先が元のスクロール位置のままで見出しが隠れる');
+      assert(await page.locator('[data-check-item="account"]').count() === 3, '未確認の口座だけを表示できない');
+      await page.locator('[data-check-item="account"] [data-action="edit-account"]').first().click();
+      assert(await page.locator('#account-name').inputValue() === '生活費口座', '対象口座の編集へ直接つながらない');
+      await closeModals(page);
+      await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+      await page.locator('[data-check="bills"]').click();
+      assert(await page.locator('[data-check-item="bill"]').count() === 2, '未確認の請求だけを表示できない');
+      assert((await page.locator('[data-check-item="bill"]').first().innerText()).includes('引落'), '請求の対象日が分からない');
+      const selectedId = await page.locator('[data-check-item="bill"] [data-action="edit-event"]').first().getAttribute('data-id');
+      await page.locator('[data-check-item="bill"] [data-action="edit-event"]').first().click();
+      assert(await page.locator('#event-id').inputValue() === selectedId, '対象請求の編集へ直接つながらない');
+      await closeModals(page);
+      // 旧形式の移行で両取引が総額になるfixtureとは別に、総額がない明細だけの状態を作る。
+      const itemizedTransactions = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        state.transactions.find(t => t.id === 't2').entryType = 'itemized';
+        window.__YORYOKU__.setPage('checks');
+        return JSON.stringify(state.transactions);
+      });
+      await page.locator('[data-action="daily-add-statement"]').first().click();
+      assert(await page.locator('#event-card').inputValue() === 'c1', '請求登録に対象カードが引き継がれない');
+      assert(await page.locator('#event-entry-type').inputValue() === 'statement', '請求総額として開いていない');
+      assert(await page.locator('#event-amount').inputValue() === '', '未確認の総額を勝手に確定入力している');
+      await closeModals(page);
+      for (const width of [320, 375, 414, 768]) {
+        await page.setViewportSize({ width, height: 844 });
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `請求確認が${width}pxで横にはみ出す`);
+      }
+      if (process.env.MONEY_CHECKS_SCREENSHOT) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+        await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
+        await page.screenshot({ path: process.env.MONEY_CHECKS_SCREENSHOT, fullPage: true });
+      }
+      const after = await page.evaluate(() => window.__YORYOKU__.getState());
+      assert(JSON.stringify(after.transactions) === itemizedTransactions, '確認画面を開いただけで取引を変更した');
+      await page.evaluate(() => {
+        const s = window.__YORYOKU__.getState();
+        s.accounts.forEach(a => { a.balanceEvidence = { source: 'bank-manual', amount: a.currentBalance, date: '2026-09-02' }; });
+        s.transactions = []; s.workEntries = []; s.recurringPlans = [];
+        window.__YORYOKU__.setPage('home');
+      });
+      assert(await page.locator('.daily-checks .daily-check').count() === 0, '確認待ちがないのにリンクを作っている');
+      assert((await page.locator('.daily-checks').innerText()).includes('確認待ちの項目はありません'), '確認完了後の説明がない');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(s => { Object.assign(window.__YORYOKU__.getState(), s); window.__YORYOKU__.setPage('home'); }, snapshot);
       await page.setViewportSize({ width: 390, height: 844 });
     }
   });

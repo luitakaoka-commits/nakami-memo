@@ -27,10 +27,11 @@
     const assessment = readiness.calculateReadiness(displayScenario);
     const allowance = readiness.spendingAllowance(scenario, { deadline: period.deadline, accountId: primary.id, reserve: Number(state.settings?.defenseLine || 0) });
     const pending = (candidates || []).filter(c => ['pending', 'needs_review'].includes(c.status)).length;
-    const unverifiedAccounts = scenario.accounts.filter(a => !a.balanceVerified).length;
-    const overdue = scenario.events.filter(e => e.status === 'planned' && e.date < today).length;
-    const unconfirmedBills = scenario.events.filter(e => e.cardPayment && (!e.amountConfirmed || e.additionalPossible)).length;
-    return { primary, period, endDate, scenario, issues, assessment, allowance, pending, unverifiedAccounts, overdue, unconfirmedBills,
+    const unverifiedAccountIds = scenario.accounts.filter(a => !a.balanceVerified).map(a => a.id);
+    const overdueEvents = scenario.events.filter(e => e.status === 'planned' && e.date < today);
+    const unconfirmedEvents = scenario.events.filter(e => e.cardPayment && (!e.amountConfirmed || e.additionalPossible));
+    const unverifiedAccounts = unverifiedAccountIds.length, overdue = overdueEvents.length, unconfirmedBills = unconfirmedEvents.length;
+    return { primary, period, endDate, scenario, issues, assessment, allowance, pending, unverifiedAccounts, overdue, unconfirmedBills, unverifiedAccountIds, overdueEvents, unconfirmedEvents,
       selectedCards: cards.filter(c => selectedCardIds.includes(c.id)),
       throughDeadlineOnly: allowance.openingBalance - allowance.throughDeadline - allowance.reserve };
   }

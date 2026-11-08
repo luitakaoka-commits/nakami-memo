@@ -37,6 +37,10 @@
 .daily-hero .daily-amount { font-family: var(--font-ledger-number); font-size: var(--daily-amount-size); line-height: 1.2; letter-spacing: -.04em; margin-block: 12px 18px; overflow-wrap: anywhere; }
 .daily-hero .daily-amount.value-negative { color: var(--red-dark); }
 .daily-hero > small { display: block; margin-top: 14px; }
+.daily-periods { margin-block: 16px; font-size: .8rem; }
+.daily-periods > div { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-block: 6px; }
+.daily-periods dt { color: var(--muted); }
+.daily-periods dd { margin: 0; font-weight: 600; }
 .daily-caution { border-left: 3px solid var(--amber); padding-left: 12px; font-size: .85rem; }
 .daily-next { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .daily-next p { flex-basis: 100%; margin: 0; }

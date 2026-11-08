@@ -72,6 +72,7 @@
   let cloud = null;
   let syncStatus = 'saved';
   let currentPage = 'home';
+  let dailyCheckScope = 'all';
   let planFilter = 'all';
   let planDetailCardFilter = '';
   let recordFilter = 'settled';
@@ -671,7 +672,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=88" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=89" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -712,11 +713,11 @@
 
   function renderPage() {
     detailCache = new Map();
-    const titles = { home: 'ホーム', daily: '余力の内訳', plans: '予定', records: '記録', accounts: '口座', shift: 'シフト', settings: '設定', spendable: '今使える金額', cashflow: '支払い能力チェック', imports: '取込候補' };
+    const titles = { home: 'ホーム', daily: '余力の内訳', checks: '確認すること', plans: '予定', records: '記録', accounts: '口座', shift: 'シフト', settings: '設定', spendable: '今使える金額', cashflow: '支払い能力チェック', imports: '取込候補' };
     $('#page-title').textContent = titles[currentPage] || titles.home;
     $$('.nav-link[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === currentPage));
-    const renderers = { home: renderHome, daily: renderDailyDetails, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
-    const warning = ['home', 'daily', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
+    const renderers = { home: renderHome, daily: renderDailyDetails, checks: renderDailyCheckDetails, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
+    const warning = ['home', 'daily', 'checks', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
     $('#page-container').innerHTML = warning + renderers[currentPage]();
     if (currentPage === 'home') requestAnimationFrame(animateHeroAmount);
     if (currentPage === 'spendable') requestAnimationFrame(() => {
@@ -937,13 +938,33 @@
 
   function renderDailyChecks(view) {
     const rows = [
-      view.unverifiedAccounts && ['accounts', `残高未確認 ${view.unverifiedAccounts}口座`, '銀行で確認した金額と確認日を記録'],
-      view.overdue && ['plans', `期限を過ぎた予定 ${view.overdue}件`, '入出金済みか、予定が変わったかを確認'],
-      view.unconfirmedBills && ['plans', `請求額が未確認 ${view.unconfirmedBills}件`, 'カード会社の請求総額を確認'],
-      ['imports', `メールの未確認候補 ${view.pending}件`, '取り込むまで試算には含まれません'],
-      ['settings', '日付不明・未登録の支払い', '水道代など、記録にない支払いは含まれません']
+      view.unverifiedAccounts && ['accounts', `残高未確認 ${view.unverifiedAccounts}口座`, '対象の口座を開いて、銀行で見た残高を記録'],
+      view.overdue && ['overdue', `期限を過ぎた予定 ${view.overdue}件`, '該当する予定を開いて、実行済みかを確認'],
+      view.unconfirmedBills && ['bills', `請求額が未確認 ${view.unconfirmedBills}件`, '対象のカード・引落日ごとに総額を確認'],
+      view.pending && ['imports', `メールの未確認候補 ${view.pending}件`, '取り込むまで試算には含まれません']
     ].filter(Boolean);
-    return `<section class="card daily-checks"><h2>確認すること</h2>${rows.map(([page, title, note]) => `<button class="daily-check" data-page="${page}"><span><strong>${esc(title)}</strong><small>${esc(note)}</small></span><span aria-hidden="true">›</span></button>`).join('')}</section>`;
+    return `<section class="card daily-checks"><h2>確認すること</h2>${rows.map(([scope, title, note]) => `<button class="daily-check" data-page="${scope === 'imports' ? 'imports' : 'checks'}" data-check="${scope}"><span><strong>${esc(title)}</strong><small>${esc(note)}</small></span><span aria-hidden="true">›</span></button>`).join('') || '<p>現在の記録に確認待ちの項目はありません。</p>'}<p class="form-note">登録していない支払いは自動検出できず、試算にも含まれません。</p></section>`;
+  }
+
+  function renderDailyCheckDetails() {
+    let view;
+    try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
+    const show = scope => dailyCheckScope === 'all' || dailyCheckScope === scope;
+    const accounts = show('accounts') ? state.accounts.filter(a => view.unverifiedAccountIds.includes(a.id)).map(a => `<article class="card daily-details" data-check-item="account"><h2>${esc(a.name)}</h2><p>登録残高 ${formatDisplayedAmount(a.currentBalance)}。銀行で確認した額と一致するか、まだ記録されていません。</p><p>銀行アプリの残高を見てから、金額を入力し「今日の銀行明細と一致」にチェックして保存してください。</p><button class="button button-primary" data-action="edit-account" data-id="${esc(a.id)}">残高を確認・修正</button></article>`).join('') : '';
+    const groups = finance.groupCardCharges(state.transactions, state.cards, holidayOptions());
+    const bills = show('bills') ? view.unconfirmedEvents.map(event => {
+      const group = groups.find(g => `legacy-card:${g.key}` === event.id);
+      const card = group ? creditCard(group.cardId) : state.cards.find(c => event.id.startsWith(`legacy-card:${c.id}:`));
+      const statements = group?.statements || [];
+      const bill = statements.length === 1 ? statements[0] : null;
+      return `<article class="card daily-details" data-check-item="bill"><h2>${esc(card?.name || 'カード請求')}・${formatDate(event.date, true)}引落</h2><p>${esc(accountName(event.accountId))}からの支払い</p><p>${bill ? `登録した請求総額 ${formatAbsoluteYen(bill.amount)}` : `利用明細からの見込み ${formatAbsoluteYen(event.amount + (event.additionalPossible || 0))}。請求総額はまだ登録されていません。`}</p><p>カード会社の明細で、この引落日の総額を確認してください。請求額の確認だけでは口座残高は減りません。</p><div class="daily-quick">${bill ? `<button class="button button-primary" data-action="confirm-statement" data-id="${esc(bill.id)}">請求額を確認済みに</button><button class="button button-quiet" data-action="edit-event" data-id="${esc(bill.id)}">金額を修正</button>` : card ? `<button class="button button-primary" data-action="daily-add-statement" data-card="${esc(card.id)}" data-date="${esc(event.date)}">請求総額を登録</button>` : '<button class="button button-quiet" data-page="accounts">カードの設定を確認</button>'}</div></article>`;
+    }).join('') : '';
+    const overdue = show('overdue') ? view.overdueEvents.map(event => {
+      const transaction = state.transactions.find(t => `legacy:${t.id}` === event.id);
+      return `<article class="card daily-details" data-check-item="overdue"><h2>${formatDate(event.date, true)}・${esc(transaction?.memo || '未確定の予定')}</h2><p>${esc(accountName(event.accountId))}・${formatAbsoluteYen(event.amount)}</p><p>この日を過ぎていますが、実行済みになっていません。実際の入出金を確認してから修正してください。</p>${transaction ? `<button class="button button-primary" data-action="edit-event" data-id="${esc(transaction.id)}">この予定を確認・修正</button>` : '<button class="button button-quiet" data-page="plans">関連する予定を確認</button>'}</article>`;
+    }).join('') : '';
+    const names = { accounts: '残高を確認する口座', bills: '請求額を確認する支払い', overdue: '期限を過ぎた予定', all: '確認すること' };
+    return `<div class="daily-home"><div class="page-heading"><h1>${names[dailyCheckScope] || names.all}</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>${accounts}${bills}${overdue}${accounts || bills || overdue ? '' : '<section class="card daily-details"><p>この項目に確認待ちの記録はありません。</p></section>'}</div>`;
   }
 
   function renderHome() {
@@ -956,9 +977,10 @@
     return `<div class="daily-home" data-daily-home>
       <div class="daily-heading"><span class="eyebrow">日々のお金</span><h1>今日の資金繰り</h1><p>${formatDate(today(), true)}の登録内容から試算</p></div>
       <section class="card hero-card daily-hero">
-        <span class="eyebrow">${formatDate(period.deadline, true)}の締め日まで</span>
-        <h2>余力の参考額</h2><h1 class="daily-amount ${amount.amount < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(amount.amount)}</h1>
-        <p>${esc(primary.name)}の残高から、${formatDate(view.endDate)}までの登録済み支払いと予備額を確保した金額です。予定収入は足していません。</p>
+        <span class="eyebrow">今日ある残高だけで試算</span>
+        <h2>先の支払いを確保した後の残り</h2><h1 class="daily-amount ${amount.amount < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(amount.amount)}</h1>
+        <dl class="daily-periods"><div><dt>使う期間</dt><dd>今日〜${formatDate(period.deadline, true)}の締め日</dd></div><div><dt>確保する支払い</dt><dd>今日〜${formatDate(view.endDate, true)}</dd></div></dl>
+        <p>${esc(primary.name)}の残高から、上の期間の登録済み支払いと予備額を引いた参考額です。予定の給料や仕送りは足していません。</p>
         ${amount.amount < 0 ? '<p class="daily-caution">登録済みの支払いをすべて確保すると不足する見込みです。今すぐこの額の支払いがある、という意味ではありません。</p>' : '<p class="daily-caution">未確認の残高・請求や、未登録の生活費があるため、使ってよい額の確定値ではありません。</p>'}
         <button class="button button-primary" data-page="daily">金額の理由を見る <span aria-hidden="true">↗</span></button>
         <small>残高の確認日：${view.scenario.accounts.find(a => a.id === primary.id)?.balanceVerified ? formatDate(primary.balanceEvidence.date, true) : '未確認'}<br>基準カード：${view.selectedCards.map(c => esc(c.name)).join('・')}</small>
@@ -980,7 +1002,7 @@
     try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
     const a = view.allowance;
     return `<div class="daily-home"><div class="page-heading"><h1>余力の内訳</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
-      <section class="card daily-details"><span class="eyebrow">${esc(view.primary.name)}・${formatDate(view.period.deadline, true)}まで</span><h2>この金額になる理由</h2>
+      <section class="card daily-details"><span class="eyebrow">${esc(view.primary.name)}・${formatDate(view.endDate, true)}までの支払いを確保</span><h2>この金額になる理由</h2>
       <dl class="daily-formula"><div><dt>登録した口座残高</dt><dd>${formatDisplayedAmount(a.openingBalance)}</dd></div><div><dt>締め日までの支払い</dt><dd>−${formatAbsoluteYen(a.throughDeadline)}</dd></div><div><dt>締め日後〜${formatDate(view.endDate)}の支払い</dt><dd>−${formatAbsoluteYen(a.afterDeadline)}</dd></div><div><dt>最低限残す予備額</dt><dd>−${formatAbsoluteYen(a.reserve)}</dd></div><div class="daily-total"><dt>余力の参考額</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl>
       <p>未確定の請求に追加額の可能性がある場合、その額も支払いへ含めています。予定の給与・仕送りは、この金額に足していません。</p><button class="button button-quiet" data-page="settings">予備額・基準カードを設定</button></section>
       <section class="card daily-details"><h2>2つの見方を比べる</h2><dl class="daily-formula"><div><dt>締め日までの支払いだけを確保</dt><dd>${formatDisplayedAmount(view.throughDeadlineOnly)}</dd></div><div><dt>その後の支払いも確保</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl><p>ホームには後者を表示します。前者を使い切ると、締め日後の引落に足りなくなる可能性があります。</p></section>
@@ -1487,7 +1509,7 @@
     const visibleIds = new Set(importCandidates.map(item => item.id));
     for (const id of candidateCardSelections.keys()) if (!visibleIds.has(id)) candidateCardSelections.delete(id);
     for (const id of candidateEdits.keys()) if (!visibleIds.has(id)) candidateEdits.delete(id);
-    if (['imports', 'settings', 'home', 'daily', 'cashflow'].includes(currentPage)) renderPage();
+    if (['imports', 'settings', 'home', 'daily', 'checks', 'cashflow'].includes(currentPage)) renderPage();
   }
 
   /* ================= レシート明細（買ったものと、その結末） =================
@@ -3163,6 +3185,21 @@
     finally { button.disabled = false; }
   }
 
+  function openDailyStatement(cardId, dueDate) {
+    const card = creditCard(cardId);
+    if (!card || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate || '')) return;
+    openEventModal();
+    $('#event-card').value = card.id;
+    $('#event-entry-type').value = 'statement';
+    syncCardSourceAccount(false);
+    $('#event-date').value = dueDate;
+    $('#event-usage-date').value = dueDate;
+    $('#event-amount').value = '';
+    $('#event-memo').value = `${card.name}の請求総額`;
+    updateEntryTypeNote();
+    $('#event-form-note').textContent = 'カード会社で確認した、この引落日の請求総額を入力してください。利用明細の合計を確定額として自動入力はしません。';
+  }
+
   function openEventModal(id = '', presetKind = 'payment', presetStatus = '') {
     rememberModalEdit('event-modal', () => ({ transaction: id ? state.transactions.find(item => item.id === id) || null : null, cards: state.cards }));
     const modal = $('#event-modal');
@@ -3838,7 +3875,7 @@
 
   function handleClick(event) {
     const pageButton = event.target.closest('[data-page]');
-    if (pageButton) { currentPage = pageButton.dataset.page; $('#sidebar').classList.remove('open'); renderPage(); return; }
+    if (pageButton) { currentPage = pageButton.dataset.page; if (currentPage === 'checks') dailyCheckScope = pageButton.dataset.check || 'all'; $('#sidebar').classList.remove('open'); renderPage(); window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); return; }
     const planButton = event.target.closest('[data-plan-filter]');
     if (planButton) { planFilter = planButton.dataset.planFilter; renderPage(); return; }
     const planCardButton = event.target.closest('[data-plan-detail-card]');
@@ -3848,6 +3885,7 @@
     const action = event.target.closest('[data-action]');
     if (!action) return;
     const name = action.dataset.action;
+    if (name === 'daily-add-statement') { openDailyStatement(action.dataset.card, action.dataset.date); return; }
     if (name === 'record-tab') { recordTab = action.dataset.tab === 'receipts' ? 'receipts' : 'transactions'; renderPage(); return; }
     if (name === 'range-mode') { setRecordRangeMode(action.dataset.mode); return; }
     if (name === 'range-month') { stepRecordMonth(Number(action.dataset.step || 0)); return; }
