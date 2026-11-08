@@ -1,0 +1,33 @@
+/* Handwritten brief: mobile ledger, two sheets within Home, sidebar for routes.
+   Hallmark: utilitarian / ledger sheets / ivory + burgundy.
+   Critique: philosophy 4, hierarchy 4, execution 4, specificity 5, restraint 4, variety 3. */
+:root {
+  color-scheme: light;
+  --font: "Kiwi Maru", "Yu Gothic", sans-serif;
+  --weight-body: 400;
+  --weight-label: 500;
+  --paper: #fffdf8;
+  --surface: #ffffff;
+  --soft: #f4efe6;
+  --ink: #352c2b;
+  --muted: #71645f;
+  --line: #dfd6c9;
+  --brand: #713745;
+  --on-brand: #ffffff;
+  --income: #276457;
+  --income-soft: #edf5f1;
+  --warning: #865316;
+  --warning-soft: #fff3dc;
+  --danger: #a3373b;
+  --danger-soft: #fff0ef;
+  --veil: #241b25a3;
+  --shadow: #352c2b1a;
+  --space-xs: 6px;
+  --space-sm: 12px;
+  --space-md: 20px;
+  --space-lg: 28px;
+  --radius: 20px;
+  --radius-control: 10px;
+  --duration: 240ms;
+  --ease: cubic-bezier(.2,.75,.2,1);
+}
