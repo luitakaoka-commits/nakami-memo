@@ -672,7 +672,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=90" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=91" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -967,6 +967,13 @@
     return `<div class="daily-home"><div class="page-heading"><h1>${names[dailyCheckScope] || names.all}</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>${accounts}${bills}${overdue}${accounts || bills || overdue ? '' : '<section class="card daily-details"><p>この項目に確認待ちの記録はありません。</p></section>'}</div>`;
   }
 
+  function renderGuidance(label, message) {
+    return `<details class="operation-note">
+      <summary class="note-toggle"><span class="note-mark" aria-hidden="true">!</span>${esc(label)}</summary>
+      <p class="note-glass">${esc(message)}</p>
+    </details>`;
+  }
+
   function renderHome() {
     let view;
     try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
@@ -981,8 +988,7 @@
         <h2>先の支払いを確保した後の残り</h2><h1 class="daily-amount ${amount.amount < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(amount.amount)}</h1>
         <dl class="daily-periods"><div><dt>使う期間</dt><dd>今日〜${formatDate(period.deadline, true)}の締め日</dd></div><div><dt>確保する支払い</dt><dd>今日〜${formatDate(amount.endDate, true)}</dd></div></dl>
         ${amount.endDate !== view.endDate ? '<p class="form-note">設定した予測期間より締め日が後のため、余力は締め日までの支払いを確保しています。</p>' : ''}
-        <p>${esc(primary.name)}の残高から、上の期間の登録済み支払いと予備額を引いた参考額です。予定の給料や仕送りは足していません。</p>
-        ${amount.amount < 0 ? '<p class="daily-caution">登録済みの支払いをすべて確保すると不足する見込みです。今すぐこの額の支払いがある、という意味ではありません。</p>' : '<p class="daily-caution">未確認の残高・請求や、未登録の生活費があるため、使ってよい額の確定値ではありません。</p>'}
+        ${amount.amount < 0 ? `<p class="daily-caution">支払い額と予備額を確保すると、${formatAbsoluteYen(amount.amount)}不足する見込みです。</p>` : ''}
         <button class="button button-primary" data-page="daily">金額の理由を見る <span aria-hidden="true">↗</span></button>
         <small>残高の確認日：${view.scenario.accounts.find(a => a.id === primary.id)?.balanceVerified ? formatDate(primary.balanceEvidence.date, true) : '未確認'}<br>基準カード：${view.selectedCards.map(c => esc(c.name)).join('・')}</small>
       </section>
@@ -1005,7 +1011,7 @@
     return `<div class="daily-home"><div class="page-heading"><h1>余力の内訳</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
       <section class="card daily-details"><span class="eyebrow">${esc(view.primary.name)}・${formatDate(a.endDate, true)}までの支払いを確保</span><h2>この金額になる理由</h2>
       <dl class="daily-formula"><div><dt>登録した口座残高</dt><dd>${formatDisplayedAmount(a.openingBalance)}</dd></div><div><dt>締め日までの支払い</dt><dd>−${formatAbsoluteYen(a.throughDeadline)}</dd></div><div><dt>締め日後〜${formatDate(a.endDate)}の支払い</dt><dd>−${formatAbsoluteYen(a.afterDeadline)}</dd></div><div><dt>最低限残す予備額</dt><dd>−${formatAbsoluteYen(a.reserve)}</dd></div><div class="daily-total"><dt>余力の参考額</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl>
-      <p>未確定の請求に追加額の可能性がある場合、その額も支払いへ含めています。予定の給与・仕送りは、この金額に足していません。</p><button class="button button-quiet" data-page="settings">予備額・基準カードを設定</button></section>
+      ${renderGuidance('使える額の計算', `${formatDate(view.period.deadline)}までに使える額の目安です。${formatDate(a.endDate)}までの支払い額と予備額は差し引いてあります。入金予定額は含みません。`)}<button class="button button-quiet" data-page="settings">予備額・基準カードを設定</button></section>
       <section class="card daily-details"><h2>2つの見方を比べる</h2><dl class="daily-formula"><div><dt>締め日までの支払いだけを確保</dt><dd>${formatDisplayedAmount(view.throughDeadlineOnly)}</dd></div><div><dt>その後の支払いも確保</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl><p>ホームには後者を表示します。前者を使い切ると、締め日後の引落に足りなくなる可能性があります。</p></section>
       ${renderDailyChecks(view)}</div>`;
   }
@@ -2403,8 +2409,8 @@
     return `<div class="daily-home"><div class="page-heading"><h1>支払いの見通し</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
       <section class="card check-hero daily-details ${status.tone}" data-daily-outlook><span class="eyebrow">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}・${view.horizonDays}日間</span><h2>${status.label}</h2>
       <div class="summary-strip"><div class="stat-card"><span>最初の不足見込み</span><strong>${shortfall ? formatDate(shortfall.date, true) : '未確認条件を確認'}</strong></div><div class="stat-card"><span>次のカード引落</span><strong>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '未登録'}</strong></div></div>
-      <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul><p>予測残高には追加請求の可能額と予定収入を含みます。ホームの余力は、予定収入を足さない計算です。</p></section>
-      <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2><p>予測残高は、追加請求の可能額も支払う前提の見込みです。請求確定を意味しません。同日の入金が先に届くとは扱いません。</p><div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
+      <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></section>
+      <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2>${renderGuidance('予測残高について', '登録した入出金がすべて予定どおりに行われた場合の残高です。')}${assessment.issues.some(issue => issue.type === 'same_day_income_unconfirmed') ? renderGuidance('同日の入金と引落', '引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。') : ''}<div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
       <section class="card daily-details"><h2>登録済みの入出金予定</h2><div class="daily-events">${events.map(e => `<div><span><strong>${formatDate(e.date, true)}</strong><small>${esc(accountName(e.accountId))}・${e.cardPayment ? 'カード請求' : e.kind === 'income' ? '予定入金' : e.kind === 'transfer' ? '予定振替' : '支払い'}</small></span><strong class="${e.kind === 'income' ? 'value-positive' : 'value-negative'}">${e.kind === 'income' ? '+' : '−'}${formatAbsoluteYen(e.amount + (e.additionalPossible || 0))}</strong></div>`).join('') || '<p>期間内の予定はありません。</p>'}</div><button class="button button-quiet" data-page="plans">予定を確認・修正</button></section>
       ${renderDailyChecks(view)}</div>`;
   }

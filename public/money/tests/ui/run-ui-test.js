@@ -143,6 +143,13 @@ const closeModals = page => page.evaluate(() => {
     await page.locator('[data-page="daily"]').click();
     assert((await page.locator('.daily-formula').first().innerText()).includes('締め日後'), '後日の引落を確保する理由がない');
     assert((await page.locator('#page-title').innerText()) === '余力の内訳', '余力の内訳を開けない');
+    const guidance = page.locator('.operation-note');
+    const note = guidance.locator('.note-glass');
+    assert(!(await note.isVisible()), '使える額の説明が初期状態で開いている');
+    await guidance.locator('.note-mark').click();
+    assert(await note.isVisible() && (await note.innerText()).includes('9/15まで'), '丸い注意マークから締め日の説明を開けない');
+    await guidance.locator('summary').press('Enter');
+    assert(!(await note.isVisible()), 'キーボードで説明を閉じられない');
     try {
       await page.evaluate(() => window.__YORYOKU__.setImportCandidates([{ id: 'daily-live', status: 'pending', type: 'purchase', amount: 1000, usedDate: '2026-09-02' }]));
       assert((await page.locator('.daily-checks').innerText()).includes('メールの未確認候補 1件'), '内訳画面でメール候補の更新が即時反映されない');
