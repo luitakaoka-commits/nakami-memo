@@ -9,12 +9,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="styles.css?v=plan-icons">
-  <script src="mail.js?v=plans" defer></script>
-  <script src="plans.js?v=plan-icons" defer></script>
-  <script src="overview.js?v=edit-parity" defer></script>
-  <script src="extras.js?v=remaining-screens" defer></script>
-  <script src="app.js?v=remaining-screens" defer></script>
+  <link rel="stylesheet" href="styles.css?v=operation-notes">
+  <script src="notices.js?v=operation-notes" defer></script>
+  <script src="mail.js?v=operation-notes" defer></script>
+  <script src="plans.js?v=operation-notes" defer></script>
+  <script src="overview.js?v=operation-notes" defer></script>
+  <script src="extras.js?v=operation-notes" defer></script>
+  <script src="app.js?v=operation-notes" defer></script>
 </head>
 <body>
   <div class="prototype-notice">UI試作</div>
@@ -55,6 +56,7 @@
       <label>うち立替（任意）<input name="lending" type="number" min="0" step="1" inputmode="numeric"></label>
       <label class="asset-check"><input name="exclude" type="checkbox">使える額の計算から除外</label>
       <button class="text-button" type="button" data-plan-close>キャンセル</button>
+      <div id="plan-operation-note"></div>
       <button class="primary-button" type="submit">保存</button>
     </form>
   </dialog>
@@ -78,6 +80,15 @@
   <dialog id="extra-editor" class="detail-dialog" aria-labelledby="extra-editor-title">
     <div class="dialog-heading"><h2 id="extra-editor-title"></h2><button type="button" class="icon-button" data-extra-close aria-label="閉じる">×</button></div>
     <form class="mail-fields"></form>
+  </dialog>
+  <dialog id="operation-dialog" class="detail-dialog" aria-labelledby="operation-title">
+    <h2 id="operation-title"></h2>
+    <form class="mail-fields">
+      <div class="operation-note"><span class="note-mark" aria-hidden="true">!</span><p></p></div>
+      <label hidden>残高への反映<select name="reflected" required></select></label>
+      <button class="primary-button" type="submit">確認</button>
+      <button class="text-button" type="button" data-operation-cancel>キャンセル</button>
+    </form>
   </dialog>
   <div id="toast" class="toast" role="status"></div>
   <div id="announcement" class="sr-only" aria-live="polite"></div>

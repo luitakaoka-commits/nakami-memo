@@ -6,8 +6,11 @@
   const form = editor.querySelector('form');
   const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const yen = value => '¥' + value.toLocaleString('ja-JP');
+  const { box: note, confirm: confirmOperation, date: formatDate, yen: yenText } = window.moneyNotice;
   const toast = message => document.dispatchEvent(new CustomEvent('money-toast', { detail: message }));
-  const settings = { reserve: 10000, horizon: 90, reviewDay: 0, rate: 1250, payday: 15, deposit: '基準口座' };
+  const defaultSettings = { reserve: 10000, horizon: 90, reviewDay: 0, rate: 1250, payday: 15, deposit: '基準口座' };
+  const settingsBySpace = { family: { ...defaultSettings }, personal: { ...defaultSettings } };
+  let settings = settingsBySpace.family;
   const receipts = [
     { id: 1, store: 'スーパー', date: '2026-11-09', method: 'カード', status: 'pending', lines: [{ name: '野菜', amount: 480 }, { name: '牛乳', amount: 260 }] },
     { id: 2, store: '青果店', date: '2026-11-07', method: '現金', status: 'accepted', lines: [{ name: 'りんご', amount: 390 }, { name: '葉物野菜', amount: 180, outcome: '期限切れ' }] }
@@ -20,19 +23,24 @@
   const reasons = ['期限切れ', '使わなかった', '買いすぎ', '好みでなかった'];
   const methods = ['現金', 'カード', '電子マネー', '不明'];
   const spaces = { personal: ['あなた（所有者）'], family: ['あなた（所有者）', '家族（サンプル）'] };
+  const spaceNames = { family: '家族の家計', personal: '個人の家計' };
+  let restoreCount = 0;
   let space = 'family';
   let receiptStatus = 'pending';
   let reviewMonth = '2026-11';
   let nextReceipt = 3;
   let nextRecurring = 3;
   let submitEditor;
+  let previewEditor;
   const options = (values, current) => values.map(value =>
     `<option value="${esc(value)}" ${String(value) === String(current) ? 'selected' : ''}>${esc(value)}</option>`).join('');
 
-  function openEditor(title, fields, save) {
+  function openEditor(title, fields, save, preview) {
     editor.querySelector('h2').textContent = title;
     form.innerHTML = fields + '<button class="primary-button" type="submit">保存</button><button class="text-button" type="button" data-extra-close>キャンセル</button>';
     submitEditor = save;
+    previewEditor = preview;
+    previewEditor?.();
     editor.showModal();
   }
   editor.addEventListener('click', event => {
@@ -44,6 +52,7 @@
     editor.close();
     toast('保存しました');
   });
+  form.addEventListener('input', () => previewEditor?.());
 
   function renderReceipts() {
     const rows = receipts.filter(item => item.status === receiptStatus).sort((a,b) => b.date.localeCompare(a.date));
@@ -91,16 +100,17 @@
       renderReceipts();
       toast('削除しました');
     } else if (action === 'accept') {
-      item.status = 'accepted';
-      renderReceipts();
-      toast('確認済みにしました');
+      confirmOperation({
+        title: 'レシートを確認', message: 'レシートを確認済みにしても、資金繰りの支出には追加されません。', action: '確認済みにする',
+        commit() { item.status = 'accepted'; renderReceipts(); toast('確認済みにしました'); }
+      });
     } else if (action === 'inventory') {
       const eligible = item.lines.filter(line => line.amount > 0 && !line.inventory);
       if (!eligible.length) return toast('追加できる商品はありません');
-      openEditor('在庫に入れる', `<label>商品<select name="product">${eligible.map((line, i) => `<option value="${i}">${esc(line.name)}</option>`).join('')}</select></label><label>保管場所<select name="location">${options(['冷蔵庫','冷凍庫','棚'])}</select></label>`, data => {
+      openEditor('在庫に入れる', `<label>商品<select name="product">${eligible.map((line, i) => `<option value="${i}">${esc(line.name)}</option>`).join('')}</select></label><label>保管場所<select name="location">${options(['冷蔵庫','冷凍庫','棚'])}</select></label><div data-editor-note></div>`, data => {
         eligible[Number(data.get('product'))].inventory = data.get('location');
         renderReceipts();
-      });
+      }, () => { form.querySelector('[data-editor-note]').innerHTML = note('選んだ1品を' + form.elements.location.value + 'に追加します。'); });
     }
   });
 
@@ -121,9 +131,18 @@
     const line = receipts.find(item => item.id === Number(select.dataset.reviewId)).lines[Number(select.dataset.line)];
     if (select.value === '捨てた') {
       renderReview();
-      openEditor('捨てた理由', `<label>理由<select name="reason">${options(reasons, line.outcome)}</select></label>`, data => {
+      openEditor('捨てた理由', `<label>理由<select name="reason">${options(reasons, line.outcome)}</select></label><div data-editor-note></div>`, data => {
         line.outcome = data.get('reason');
         renderReview();
+      }, () => { form.querySelector('[data-editor-note]').innerHTML = form.elements.reason.value === '買いすぎ'
+        ? note('買いすぎ：購入額' + yenText(line.amount) + 'のうち' + yenText(Math.floor(line.amount / 2)) + 'をムダ支出として計上します。') : ''; });
+      return;
+    }
+    if (select.value === 'まだある') {
+      renderReview();
+      confirmOperation({
+        title: 'まだある', message: '「まだある」を選ぶと、次回も確認対象になります。', action: '保存',
+        commit() { line.outcome = 'まだある'; renderReview(); toast('保存しました'); }
       });
       return;
     }
@@ -133,6 +152,21 @@
   });
 
   const intervalLabel = n => n === 1 ? '毎月' : n === 2 ? '隔月' : n + 'か月ごと';
+  function nextOccurrence(start, interval) {
+    const [year, month, day] = start.split('-').map(Number);
+    const today = '2026-11-09';
+    let offset = 0;
+    if (start < today) {
+      const [currentYear, currentMonth] = today.split('-').map(Number);
+      offset = Math.floor(((currentYear - year) * 12 + currentMonth - month) / interval) * interval;
+    }
+    const occurrence = months => {
+      const last = new Date(Date.UTC(year, month + months, 0)).getUTCDate();
+      return new Date(Date.UTC(year, month + months - 1, Math.min(last, day))).toISOString().slice(0, 10);
+    };
+    const candidate = occurrence(offset);
+    return candidate < today ? occurrence(offset + interval) : candidate;
+  }
   function renderRecurring() {
     $('#recurring-screen').innerHTML = `<div class="extra-toolbar"><button type="button" class="primary-button" data-repeat="add">定期支払いを追加</button></div>
       ${recurring.map(item => `<article class="sheet"><div class="plan-toolbar"><h2>${esc(item.name)}</h2><strong>${yen(item.amount)}</strong></div><p class="support">${intervalLabel(item.interval)} · ${esc(item.method)}${item.active ? '' : ' · 停止中'}</p>
@@ -149,14 +183,21 @@
       return;
     }
     openEditor(item ? '定期支払いを編集' : '定期支払いを追加', `<label>名前<input name="name" required maxlength="40" value="${esc(item?.name ?? '')}"></label><label>見込み金額<input name="amount" type="number" min="1" step="1" inputmode="numeric" required value="${item?.amount ?? ''}"></label>
-      <label>支払い方法<select name="method">${options(['基準口座','JCB W','三井住友','MUFG'], item?.method)}</select></label><label>開始日<input name="start" type="date" required value="${item?.start ?? '2026-11-09'}"></label>
-      <label>間隔<select name="interval">${Array.from({length:12}, (_, i) => `<option value="${i + 1}" ${item?.interval === i + 1 ? 'selected' : ''}>${intervalLabel(i + 1)}</option>`).join('')}</select></label>`, data => {
+      <label>支払い方法<select name="method">${options(['基準口座','JCB W','三井住友','MUFG'], item?.method)}</select></label><label><span data-start-label></span><input name="start" type="date" required value="${item?.start ?? '2026-11-09'}"></label>
+      <label>間隔<select name="interval">${Array.from({length:12}, (_, i) => `<option value="${i + 1}" ${item?.interval === i + 1 ? 'selected' : ''}>${intervalLabel(i + 1)}</option>`).join('')}</select></label><div data-editor-note></div>`, data => {
       const name = data.get('name').trim();
       if (!name) return false;
       const values = { name, amount: Number(data.get('amount')), method: data.get('method'), start: data.get('start'), interval: Number(data.get('interval')) };
       if (item) Object.assign(item, values);
       else recurring.push({ id: nextRecurring++, active: true, ...values });
       renderRecurring();
+    }, () => {
+      const event = form.elements.method.value === '基準口座' ? '支払日' : '利用日';
+      const start = form.elements.start.value;
+      const interval = Number(form.elements.interval.value);
+      form.querySelector('[data-start-label]').textContent = '最初の' + event;
+      form.querySelector('[data-editor-note]').innerHTML = start && form.elements.start.validity.valid
+        ? note(intervalLabel(interval) + '払いです。次回の' + event + 'は' + formatDate(nextOccurrence(start, interval)) + 'です。') : '';
     });
   });
 
@@ -165,8 +206,8 @@
     $('#settings-screen').innerHTML = `
       <details class="sheet" data-section="calculation" ${opened.has('calculation') ? 'open' : ''}><summary>計算設定</summary><form class="mail-fields" data-settings="calculation"><label>最低限残す金額<input name="reserve" type="number" min="0" step="1" required value="${settings.reserve}"></label><label>支払いの予測期間<select name="horizon">${[30,60,90,180].map(days => `<option value="${days}" ${days === settings.horizon ? 'selected' : ''}>${days}日間</option>`).join('')}</select></label><label>ふりかえりを始める曜日<select name="reviewDay">${[...'日月火水木金土'].map((day, i) => `<option value="${i}" ${i === settings.reviewDay ? 'selected' : ''}>${day}曜日</option>`).join('')}</select></label><button class="primary-button">保存</button></form></details>
       <details class="sheet" data-section="wage" ${opened.has('wage') ? 'open' : ''}><summary>給与設定</summary><form class="mail-fields" data-settings="wage"><label>基本時給<input name="rate" type="number" min="0" step="1" required value="${settings.rate}"></label><label>給料日<input name="payday" type="number" min="1" max="31" step="1" required value="${settings.payday}"></label><label>給与の入金口座<select name="deposit">${options(['基準口座','貯蓄口座'], settings.deposit)}</select></label><button class="primary-button">保存</button></form></details>
-      <details class="sheet" data-section="sharing" ${opened.has('sharing') ? 'open' : ''}><summary>家計共有</summary><div class="mail-fields"><label>共有スペース<select id="preview-space"><option value="family" ${space === 'family' ? 'selected' : ''}>家族の家計</option><option value="personal" ${space === 'personal' ? 'selected' : ''}>個人の家計</option></select></label><ul class="extra-members">${spaces[space].map((member, i) => `<li class="plan-toolbar"><span>${esc(member)}</span>${i ? `<button type="button" class="text-button" data-remove-member="${i}">削除</button>` : ''}</li>`).join('')}</ul><button type="button" class="text-button" data-add-member>メンバーを追加</button></div></details>
-      <details class="sheet" data-section="backup" ${opened.has('backup') ? 'open' : ''}><summary>バックアップ・復元</summary><div class="mail-fields"><button type="button" class="text-button" data-export-settings>試作の設定を書き出す</button><label>試作の設定を復元<input type="file" id="settings-import" accept=".json,application/json"></label></div></details>`;
+      <details class="sheet" data-section="sharing" ${opened.has('sharing') ? 'open' : ''}><summary>家計共有</summary><div class="mail-fields"><label>共有スペース<select id="preview-space">${Object.entries(spaceNames).map(([id, name]) => `<option value="${id}" ${space === id ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label><ul class="extra-members">${spaces[space].map((member, i) => `<li class="plan-toolbar"><span>${esc(member)}</span>${i ? `<button type="button" class="text-button" data-remove-member="${i}">削除</button>` : ''}</li>`).join('')}</ul><button type="button" class="text-button" data-add-member>メンバーを追加</button></div></details>
+      <details class="sheet" data-section="backup" ${opened.has('backup') ? 'open' : ''}><summary>バックアップ・復元</summary><div class="mail-fields">${note('操作する家計：' + spaceNames[space] + '。書き出す内容：試作の設定。復元先：新しい家計。')}<button type="button" class="text-button" data-export-settings>試作の設定を書き出す</button><label>試作の設定を復元<input type="file" id="settings-import" accept=".json,application/json"></label></div></details>`;
   }
   const settingsScreen = $('#settings-screen');
   function settingsChanged() { document.dispatchEvent(new Event('preview-settings-change')); }
@@ -179,13 +220,13 @@
   });
   settingsScreen.addEventListener('click', event => {
     const remove = event.target.closest('[data-remove-member]');
-    if (remove && window.confirm('メンバーを削除しますか？')) {
+    if (remove && window.confirm('操作する家計：' + spaceNames[space] + '\nメンバーを削除しますか？')) {
       spaces[space].splice(Number(remove.dataset.removeMember), 1);
       renderSettings();
       toast('削除しました');
     }
     if (event.target.closest('[data-add-member]')) {
-      openEditor('メンバーを追加', '<label>メンバーID<input name="member" maxlength="40" required></label>', data => {
+      openEditor('メンバーを追加', note('操作する家計：' + spaceNames[space]) + '<label>メンバーID<input name="member" maxlength="40" required></label>', data => {
         const member = data.get('member').trim();
         if (!member || spaces[space].includes(member)) return false;
         spaces[space].push(member);
@@ -203,7 +244,13 @@
     }
   });
   settingsScreen.addEventListener('change', async event => {
-    if (event.target.id === 'preview-space') { space = event.target.value; renderSettings(); return; }
+    if (event.target.id === 'preview-space') {
+      space = event.target.value;
+      settings = settingsBySpace[space];
+      renderSettings();
+      settingsChanged();
+      return;
+    }
     if (event.target.id !== 'settings-import' || !event.target.files.length) return;
     try {
       const file = event.target.files[0];
@@ -216,11 +263,18 @@
           !Number.isSafeInteger(values.rate) || values.rate < 0 ||
           !Number.isInteger(values.payday) || values.payday < 1 || values.payday > 31 ||
           !['基準口座','貯蓄口座'].includes(values.deposit)) throw new Error();
-      if (!window.confirm('試作の設定を復元しますか？')) { event.target.value = ''; return; }
-      for (const key of Object.keys(settings)) settings[key] = values[key];
-      renderSettings();
-      settingsChanged();
-      toast('復元しました');
+      event.target.value = '';
+      confirmOperation({ title: 'バックアップを復元', message: '復元先：新しい家計。試作の設定を復元します。', action: '復元する', commit() {
+        restoreCount++;
+        space = 'restored-' + restoreCount;
+        spaceNames[space] = '復元した家計 ' + restoreCount;
+        spaces[space] = ['あなた（所有者）'];
+        settingsBySpace[space] = Object.fromEntries(Object.keys(defaultSettings).map(key => [key, values[key]]));
+        settings = settingsBySpace[space];
+        renderSettings();
+        settingsChanged();
+        toast('復元しました');
+      } });
     } catch {
       event.target.value = '';
       toast('試作の設定ファイルを読み込めません');

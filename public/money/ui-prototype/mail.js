@@ -13,12 +13,13 @@
   const cards = ['JCB W', '三井住友', 'MUFG'];
   const cardMappings = new Map();
   let selected = 0;
+  const dateLabel = type => type === 'statement' ? '引落日' : type === 'itemized' ? '利用日' : '利用日／引落日';
 
   function candidateRow(item) {
     const fields = pending(item) ? `
       <div class="mail-fields">
         <label>金額<input name="amount" type="number" min="1" step="1" required value="${item.amount}"></label>
-        <label>利用日／引落日<input name="date" type="date" required value="${escape(item.date)}"></label>
+        <label><span data-mail-date-label>${dateLabel(item.type)}</span><input name="date" type="date" required value="${escape(item.date)}"></label>
         <label>内容の種類<select name="type" required><option value="">種類を選択</option><option value="itemized" ${item.type === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${item.type === 'statement' ? 'selected' : ''}>請求総額</option></select></label>
         <label>利用先・メモ<input name="merchant" maxlength="40" value="${escape(item.merchant)}"></label>
         <label>取り込むカード<select name="card" required><option value="">カードを選択</option>${cards.map(card => `<option ${card === item.card ? 'selected' : ''}>${card}</option>`).join('')}</select></label>
@@ -45,7 +46,7 @@
       `<button type="button" data-mail-tab="${i}">${label}</button>`).join('')}</div>
       <div class="mail-track">${tabs.map(([status, label]) => {
         const rows = candidates.filter(item => status === 'pending' ? pending(item) : item.status === status);
-        return `<section class="mail-panel" aria-label="${label}">${rows.map(candidateRow).join('') || '<p class="sheet">0件</p>'}</section>`;
+        return `<section class="mail-panel" aria-label="${label}">${status === 'pending' && rows.length ? window.moneyNotice.box('まだ取り込んでいない候補は試算に含まれていません。カード、金額、日付と内容を確認してください。') : ''}${rows.map(candidateRow).join('') || '<p class="sheet">0件</p>'}</section>`;
       }).join('')}</div>${cardMappings.size ? `<div class="sheet"><h2>メールとカードの対応</h2>${[...cardMappings].map(([id, card]) => `<div class="mail-actions"><span>${escape(card)}</span><button type="button" class="text-button" data-forget-card="${id}">対応を解除</button></div>`).join('')}</div>` : ''}`;
     const track = screen.querySelector('.mail-track');
     track.scrollLeft = index * track.clientWidth;
@@ -61,6 +62,7 @@
     const item = candidates.find(candidate => candidate.id === Number(form.dataset.candidate));
     if (event.target.name === 'amount') item.amount = Number(event.target.value);
     else if (['date', 'merchant', 'card', 'type'].includes(event.target.name)) item[event.target.name] = event.target.value;
+    if (event.target.name === 'type') form.querySelector('[data-mail-date-label]').textContent = dateLabel(item.type);
   });
   function changed(message) {
     document.dispatchEvent(new CustomEvent('money-toast', { detail: message }));

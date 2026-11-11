@@ -10,6 +10,7 @@
   const assetForm = assetEditor.querySelector('form');
   const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   const yen = amount => (amount < 0 ? '−' : '') + '¥' + Math.abs(amount).toLocaleString('ja-JP');
+  const { box: note, date: formatDate, yen: yenText } = window.moneyNotice;
   const monthLabel = month => Number(month.slice(0, 4)) + '年' + Number(month.slice(5)) + '月';
   const changeMonth = (month, offset) => {
     const [year, number] = month.split('-').map(Number);
@@ -26,7 +27,7 @@
   const work = [['2026-11-10', 6], ['2026-11-13', 5], ['2026-11-18', 7], ['2026-12-03', 6]]
     .map(([date, hours]) => ({ date, hours, status: 'planned', rate: 0, memo: '' }));
   const bankAccounts = [
-    { id: 1, name: '三菱UFJ銀行', balance: 180000, role: 'primary', spendable: true },
+    { id: 1, name: '三菱UFJ銀行', balance: 180000, role: 'primary', spendable: true, verifiedDate: '2026-11-08' },
     { id: 2, name: '貯蓄口座', balance: 60000, role: 'savings', spendable: false }
   ];
   const bankCards = [
@@ -75,13 +76,26 @@
   }
 
   function renderAccounts() {
-    const primary = bankAccounts.find(item => item.role === 'primary');
+    const primary = primaryAccount();
     accounts.innerHTML = `<div class="plan-toolbar"><button type="button" class="text-button" data-edit="account">口座を追加</button></div>
-      <section class="sheet"><h2>基準口座</h2><p class="support">${escape(primary.name)}</p><p class="amount">${yen(primary.balance)}</p>${primary.verified ? '<p class="support">銀行残高確認済み</p>' : ''}${actions('account', primary.id)}</section>
-      <details class="sheet" id="subaccounts" ${subaccountsOpen ? 'open' : ''}><summary>サブ口座</summary>${bankAccounts.filter(item => item !== primary).map(item => `<article class="plan-row"><div class="plan-toolbar"><strong>${escape(item.name)}</strong><strong>${yen(item.balance)}</strong></div>${actions('account', item.id)}</article>`).join('') || '<p class="support">口座なし</p>'}</details>
+      <section class="sheet"><h2>基準口座</h2><p class="support">${escape(primary.name)}</p>${note(balanceText(primary))}${actions('account', primary.id)}</section>
+      <details class="sheet" id="subaccounts" ${subaccountsOpen ? 'open' : ''}><summary>サブ口座</summary>${bankAccounts.filter(item => item !== primary).map(item => `<article class="plan-row"><strong>${escape(item.name)}</strong>${note(balanceText(item))}${actions('account', item.id)}</article>`).join('') || '<p class="support">口座なし</p>'}</details>
       <div class="plan-toolbar"><h2 class="section-heading">クレジットカード</h2><button type="button" class="text-button" data-edit="card">カードを追加</button></div>
       <div class="account-card-grid">${bankCards.map(item => `<section><article class="account-card ${item.style || 'jcb'}"><strong>${escape(item.name)}</strong><span aria-hidden="true">▣</span><small>${item.number || ''}</small></article><p class="support">${item.closing ? item.closing + '日' : '月末'}締め · ${item.payment ? item.payment + '日' : '月末'}払い</p>${actions('card', item.id)}</section>`).join('')}</div>`;
     accounts.querySelector('#subaccounts').addEventListener('toggle', event => { subaccountsOpen = event.target.open; });
+  }
+  function primaryAccount() { return bankAccounts.find(item => item.role === 'primary'); }
+  function balanceText(item) {
+    const amount = (item.balance < 0 ? '−' : '') + yenText(item.balance);
+    return item.verifiedDate ? '銀行で確認した残高：' + amount + '（' + formatDate(item.verifiedDate) + '確認）'
+      : '登録した残高：' + amount + '（銀行の残高は未確認です）';
+  }
+  function adjustBalance(delta) {
+    if (!delta) return;
+    const item = primaryAccount();
+    item.balance += delta;
+    delete item.verifiedDate;
+    document.dispatchEvent(new Event('preview-accounts-change'));
   }
 
   function openAsset(type, item) {
@@ -130,9 +144,9 @@
       const balance = Number(data.get('balance'));
       if (!Number.isSafeInteger(balance)) return;
       const role = data.get('role');
-      const verified = data.has('verified') || (item?.verified && item.balance === balance);
+      const verifiedDate = data.has('verified') ? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date()) : item?.balance === balance ? item.verifiedDate : undefined;
       if (role === 'primary') bankAccounts.filter(account => account !== item && account.role === 'primary').forEach(account => { account.role = 'spending'; });
-      const values = { name, balance, role, verified, spendable: data.has('spendable') && !['savings', 'investment'].includes(role) };
+      const values = { name, balance, role, verifiedDate, spendable: data.has('spendable') && !['savings', 'investment'].includes(role) };
       if (item) Object.assign(item, values);
       else bankAccounts.push({ id: nextAssetId++, ...values });
       if (!bankAccounts.some(account => account.role === 'primary')) bankAccounts[0].role = 'primary';
@@ -176,15 +190,18 @@
     const item = history[index];
     if (action.dataset.delete) {
       if (!window.confirm(item.name + 'を削除しますか？')) return;
+      adjustBalance(-item.amount);
       history.splice(index, 1);
       renderRecords();
       toast('削除しました');
       return;
     }
     window.moneyPlans.editTransaction({
-      ...item, kind: item.kind ?? (item.amount >= 0 ? 'income' : 'payment'), amount: Math.abs(item.amount)
+      ...item, settled: true, kind: item.kind ?? (item.amount >= 0 ? 'income' : 'payment'), amount: Math.abs(item.amount)
     }, '取引を編集', values => {
-      Object.assign(item, values, { amount: values.kind === 'income' || values.kind === 'reimbursement' ? values.amount : -values.amount });
+      const amount = values.kind === 'income' || values.kind === 'reimbursement' ? values.amount : -values.amount;
+      adjustBalance(amount - item.amount);
+      Object.assign(item, values, { amount });
       recordMonth = item.date.slice(0, 7);
       renderRecords();
     });
@@ -263,6 +280,6 @@
   editor.querySelector('[data-shift-delete]').addEventListener('click', () => deleteWork(editingWork));
   window.moneyOverview = {
     records: renderRecords, accounts: renderAccounts, shift: renderShifts,
-    primaryBalance: () => bankAccounts.find(item => item.role === 'primary').balance
+    primaryBalance: () => primaryAccount().balance, primaryAccount, balanceText, adjustBalance
   };
 })();

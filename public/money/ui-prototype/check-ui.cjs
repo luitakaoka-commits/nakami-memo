@@ -31,7 +31,7 @@ const server = http.createServer((req, res) => {
     page.on('request', req => { if (/firebase|firestore|googleapis.com\/(?!css)|gmail|identitytoolkit/.test(req.url())) external.push(req.url()); });
     await page.goto(base);
     await page.evaluate(() => document.fonts.ready);
-    await test('initial_cashflow_balance_50000', async () => await page.locator('#cashflow-screen').isVisible() && await page.locator('#balance-content .amount').innerText() === '¥50,000');
+    await test('initial_cashflow_reserves_later_payments', async () => await page.locator('#cashflow-screen').isVisible() && await page.locator('#balance-content .amount').innerText() === '−¥70,000');
     await test('kiwi_maru_loaded', () => page.evaluate(() => document.fonts.check('500 15px "Kiwi Maru"')));
     await test('bold_labels_500', () => page.locator('#page-title').evaluate(el => getComputedStyle(el).fontWeight === '500'));
     await test('forecast_hidden_on_cashflow', () => page.locator('#forecast-screen').isHidden());
@@ -63,7 +63,7 @@ const server = http.createServer((req, res) => {
     const openRoute = async label => { await page.getByRole('button', { name: 'メニューを開く' }).click(); await page.locator('.menu-link').filter({ hasText: label }).click(); };
     await openRoute('資金繰り・試算');
     await page.getByRole('button', { name: '口座残高 確認日 11/8 1口座 ›' }).click();
-    await test('confirmation_opens_real_detail', () => page.locator('#detail-dialog').innerText().then(t => t.includes('¥180,000') && t.includes('11/8')));
+    await test('confirmation_opens_real_detail', () => page.locator('#detail-dialog').innerText().then(t => t.includes('180,000円') && t.includes('11月8日確認')));
     await page.getByRole('button', { name: '詳細を閉じる' }).click();
     await openRoute('資金繰り・試算');
     await test('cashflow_independent_route', () => page.evaluate(() => location.hash === '#cashflow' && !document.querySelector('#cashflow-screen').hidden && document.querySelector('#forecast-screen').hidden));
@@ -96,7 +96,7 @@ const server = http.createServer((req, res) => {
     await test('requested_copy_removed', () => page.locator('body').textContent().then(text => removed.every(fragment => !text.includes(fragment))));
     await test('no_carousel_controls', () => page.locator('[data-slide], #carousel, #page-number').count().then(n => n === 0));
     await page.locator('summary').click();
-    for (const [value, expected] of Object.entries({ shortfall: '−¥70,000', empty: '口座未登録', loading: '読込中', offline: 'オフライン', error: '読込エラー', success: '保存完了' })) {
+    for (const [value, expected] of Object.entries({ shortfall: '−¥190,000', empty: '口座未登録', loading: '読込中', offline: 'オフライン', error: '読込エラー', success: '保存完了' })) {
       await page.locator('#preview-state').selectOption(value);
       await test('state_' + value, () => page.locator('#balance-content').innerText().then(t => t.includes(expected)));
       if (value === 'shortfall') {
@@ -115,7 +115,7 @@ const server = http.createServer((req, res) => {
     }
     await page.locator('#preview-state').selectOption('error');
     await page.locator('#balance-content [data-retry]').click();
-    await test('retry_restores_data', () => page.locator('#balance-content .amount').innerText().then(t => t === '¥50,000'));
+    await test('retry_restores_data', () => page.locator('#balance-content .amount').innerText().then(t => t === '−¥70,000'));
     await page.locator('summary').click();
     for (const width of [320, 375, 414, 768]) {
       await page.setViewportSize({ width, height: 844 });
@@ -232,7 +232,7 @@ const server = http.createServer((req, res) => {
     await page.locator('#asset-editor [name="balance"]').fill('181000');
     await page.locator('#asset-editor [name="verified"]').check();
     await page.locator('#asset-editor').getByRole('button', { name: '保存', exact: true }).click();
-    await test('account_edit_updates_balance', () => page.locator('#accounts-screen').innerText().then(t => t.includes('181,000') && t.includes('銀行残高確認済み')));
+    await test('account_edit_updates_balance', () => page.locator('#accounts-screen').innerText().then(t => t.includes('181,000') && t.includes('銀行で確認した残高')));
     await page.locator('[data-delete="account"][data-id="1"]').click();
     await test('primary_account_delete_protected', () => page.locator('#toast.visible').textContent().then(t => t === '基準口座は削除できません'));
     await page.locator('[data-edit="card"][data-id="5"]').click();
@@ -270,6 +270,7 @@ const server = http.createServer((req, res) => {
     await page.locator('#extra-editor').getByRole('button', { name: '保存', exact: true }).click();
     await test('receipt_edit_recalculates_total', () => page.locator('#receipts-screen').innerText().then(t => t.includes('760')));
     await page.locator('[data-receipt="accept"]').click();
+    await page.locator('#operation-dialog').getByRole('button', { name: '確認済みにする', exact: true }).click();
     await page.locator('#receipt-status').selectOption('accepted');
     await test('receipt_confirmation_moves_to_accepted', () => page.locator('#receipts-screen').innerText().then(t => t.includes('スーパー') && t.includes('青果店')));
     await page.screenshot({ path: path.join(output, 'レシート_スマホ.png'), fullPage: true });
@@ -291,9 +292,26 @@ const server = http.createServer((req, res) => {
     await page.locator('[data-settings="calculation"]').getByRole('button', { name: '保存', exact: true }).click();
     await page.screenshot({ path: path.join(output, '設定_スマホ.png'), fullPage: true });
     await openRoute('資金繰り・試算');
-    await test('reserve_setting_updates_cashflow', () => page.locator('#balance-content .amount').innerText().then(t => t === '¥49,000'));
+    await test('reserve_setting_updates_cashflow', () => page.locator('#balance-content .amount').innerText().then(t => t === '¥52,200'));
     await openRoute('支払いの見通し');
     await test('horizon_setting_filters_forecast', () => page.locator('#forecast-content tbody').innerText().then(t => t.includes('12/5') && !t.includes('12/10')));
+    await test('same_day_note_absent_without_matching_debit', () => page.locator('#forecast-content').innerText().then(t => !t.includes('入金が引落に間に合うか')));
+    await openRoute('予定');
+    await page.locator('[data-plan-day="2026-11-10"]').click();
+    await page.getByRole('button', { name: '予定を追加', exact: true }).click();
+    await page.locator('#plan-editor [name="name"]').fill('同日の入金');
+    await page.locator('#plan-editor [name="amount"]').fill('1500');
+    await page.locator('#plan-editor [name="kind"]').selectOption('income');
+    await page.locator('#plan-editor').getByRole('button', { name: '保存', exact: true }).click();
+    await openRoute('支払いの見通し');
+    await test('same_day_note_and_new_plan_show_in_forecast', () => page.locator('#forecast-content').innerText().then(t => t.includes('同日の入金') && t.includes('入金が引落に間に合うか')));
+    await openRoute('予定');
+    await page.locator('[data-plan-day="2026-11-10"]').click();
+    await page.getByRole('button', { name: '引落を記録', exact: true }).click();
+    await page.locator('#operation-dialog [name="reflected"]').selectOption('yes');
+    await page.locator('#operation-dialog').getByRole('button', { name: '記録する', exact: true }).click();
+    await openRoute('口座・カード');
+    await test('reflected_debit_does_not_reduce_balance_again', () => page.locator('#accounts-screen').innerText().then(t => t.includes('184,200円')));
     await test('no_private_data_connections', () => external.length === 0);
     await test('console_errors', () => errors.length === 0);
   } catch (error) { checks.execution = 'fail'; errors.push(error.stack); const pages = browser?.contexts()[0]?.pages(); if (pages?.[0]) { await pages[0].screenshot({ path: path.join(output, '失敗箇所.png') }); errors.push(JSON.stringify(await pages[0].evaluate(() => ({ scroll: scrollY, route: location.hash, hit: document.elementFromPoint(340, 350)?.outerHTML.slice(0, 200) })))); } }
