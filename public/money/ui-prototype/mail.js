@@ -4,7 +4,7 @@
   const tabs = [['pending', '未取り込み'], ['accepted', '取り込み済み'], ['ignored', '無視']];
   const candidates = [
     { id: 1, status: 'pending', amount: 2480, merchant: 'スーパー', date: '2026-11-09', card: 'JCB W', type: 'itemized' },
-    { id: 2, status: 'needs_review', amount: 9800, merchant: 'カード請求', date: '2026-12-10', card: '', type: 'statement' },
+    { id: 2, status: 'needs_review', amount: 9800, merchant: 'カード請求', date: '2026-12-10', card: '', type: '' },
     { id: 3, status: 'accepted', amount: 1200, merchant: '書店', date: '2026-11-08', card: 'JCB W', type: 'itemized' },
     { id: 4, status: 'ignored', amount: 500, merchant: 'コンビニ', date: '2026-11-07', card: '三井住友', type: 'itemized' },
   ];
@@ -19,7 +19,7 @@
       <div class="mail-fields">
         <label>金額<input name="amount" type="number" min="1" step="1" required value="${item.amount}"></label>
         <label>利用日／引落日<input name="date" type="date" required value="${escape(item.date)}"></label>
-        <label>内容の種類<select name="type"><option value="itemized" ${item.type === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${item.type === 'statement' ? 'selected' : ''}>請求総額</option></select></label>
+        <label>内容の種類<select name="type" required><option value="">種類を選択</option><option value="itemized" ${item.type === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${item.type === 'statement' ? 'selected' : ''}>請求総額</option></select></label>
         <label>利用先・メモ<input name="merchant" maxlength="40" value="${escape(item.merchant)}"></label>
         <label>取り込むカード<select name="card" required><option value="">カードを選択</option>${cards.map(card => `<option ${card === item.card ? 'selected' : ''}>${card}</option>`).join('')}</select></label>
       </div>

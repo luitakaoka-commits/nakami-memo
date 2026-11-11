@@ -151,6 +151,11 @@ const server = http.createServer((req, res) => {
     await openRoute('資金繰り・試算');
     await openRoute('メール確認');
     await test('mail_reopens_pending', () => activeMail().getAttribute('aria-label').then(t => t === '未取り込み'));
+    const bill = activeMail().locator('[data-candidate="2"]');
+    await bill.locator('select[name="card"]').selectOption('JCB W');
+    await bill.getByRole('button', { name: '取り込む', exact: true }).click();
+    await test('mail_requires_explicit_bill_type', async () =>
+      await bill.isVisible() && await bill.locator('select[name="type"]').evaluate(select => select.validity.valueMissing));
     await activeMail().locator('[data-candidate="1"] input[name="amount"]').fill('2500');
     await activeMail().getByRole('button', { name: '取り込む', exact: true }).first().click();
     await activeMail().getByRole('button', { name: '無視', exact: true }).click();
