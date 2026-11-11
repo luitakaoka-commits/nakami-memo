@@ -10,20 +10,21 @@
   <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="styles.css">
+  <script src="mail.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <div class="prototype-notice">UI試作</div>
   <header class="app-header">
     <button class="icon-button" id="menu-open" aria-label="メニューを開く" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-    <strong id="screen-name">ホーム</strong>
+    <strong id="screen-name">資金繰り・試算</strong>
     <span class="header-caption">お金管理</span>
   </header>
   <main id="main" tabindex="-1">
-    <div class="page-heading"><div><p class="eyebrow">11月9日（月）</p><h1 id="page-title">現残高 − 支払い</h1></div></div>
-    <section id="home-screen" aria-label="ホーム"><div id="balance-content"></div></section>
-    <section id="cashflow-screen" aria-label="資金繰り・試算" hidden><div id="cashflow-content"></div></section>
+    <div class="page-heading"><div><p class="eyebrow">11月9日（月）</p><h1 id="page-title">資金繰り・試算</h1></div></div>
+    <section id="cashflow-screen" aria-label="資金繰り・試算"><div id="balance-content"></div></section>
     <section id="forecast-screen" aria-label="支払いの見通し" hidden><div id="forecast-content"></div></section>
+    <section id="mail-screen" aria-label="メール確認" hidden></section>
     <section id="pending-screen" hidden><p>未作成</p></section>
   </main>
   <details class="preview-tools"><summary>表示状態</summary><div class="tool-content"><label for="preview-state">状態</label><select id="preview-state"><option value="normal">通常</option><option value="shortfall">不足</option><option value="empty">データなし</option><option value="loading">読込中</option><option value="offline">オフライン</option><option value="error">エラー</option><option value="success">保存完了</option></select></div></details>
