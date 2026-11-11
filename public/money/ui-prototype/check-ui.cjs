@@ -53,7 +53,7 @@ const server = http.createServer((req, res) => {
     await test('plans_open_calendar', async () => await page.locator('.plan-calendar').isVisible() && (await page.locator('.plan-grid button').count()) === 30);
     await page.screenshot({ path: path.join(output, '予定_スマホ.png'), fullPage: true });
     await page.getByRole('button', { name: '翌月' }).click();
-    await page.getByRole('button', { name: '12月5日、1件' }).click();
+    await page.getByRole('button', { name: '12月5日、1件、収入1件' }).click();
     await test('calendar_selects_month_and_day', () => page.locator('#plans-screen .plan-row').innerText().then(t => t.includes('仕送り')));
     await page.getByRole('button', { name: '予定を追加', exact: true }).click();
     await page.locator('#plan-editor input[name="name"]').fill('検査用予定');
@@ -169,6 +169,48 @@ const server = http.createServer((req, res) => {
     await test('mail_accepted_keeps_edits', () => activeMail().innerText().then(t => t.includes('2,500') && t.includes('スーパー')));
     await page.locator('[data-mail-tab="2"]').click();
     await test('mail_ignore_moves_candidate', () => activeMail().innerText().then(t => t.includes('カード請求')));
+    await openRoute('予定');
+    await test('calendar_shows_income_and_expense', async () => {
+      return await page.locator('[data-plan-day="2026-11-10"] .plan-mark.out').textContent() === '−' &&
+        await page.locator('[data-plan-day="2026-11-13"] .plan-mark.in').textContent() === '+';
+    });
+    await test('calendar_has_no_filter_or_card_navigation', () => page.locator('#plan-filter, .detail-card-nav').count().then(n => n === 0));
+    await page.getByRole('button', { name: '明細', exact: true }).click();
+    const detail = () => page.locator('.detail-card-panel:not([inert])');
+    await test('detail_period_filters_rows', async () => {
+      await page.locator('#detail-period').selectOption('1');
+      const older = await detail().innerText();
+      await page.locator('#detail-period').selectOption('0');
+      return older.includes('食品') && !older.includes('スーパー') && (await detail().innerText()).includes('スーパー');
+    });
+    const detailBox = await page.locator('.detail-track').boundingBox();
+    const detailY = Math.round(detailBox.y + 45);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 340, y: detailY }] });
+    for (const x of [285, 230, 175, 120, 65]) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: detailY }] });
+      await page.waitForTimeout(30);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => document.querySelector('[data-detail-card="1"]').getAttribute('aria-pressed') === 'true');
+    await test('detail_swipe_selects_card', () => detail().innerText().then(t => t.includes('書店')));
+    await page.locator('.detail-card-nav').getByRole('button', { name: 'MUFG' }).click();
+    await test('detail_bottom_navigation_selects_card', () => detail().innerText().then(t => t.includes('日用品')));
+    await page.screenshot({ path: path.join(output, 'カード明細_スマホ.png'), fullPage: true });
+    await openRoute('記録');
+    await test('card_navigation_hidden_outside_details', () => page.locator('.detail-card-nav').isHidden());
+    await page.getByRole('button', { name: '前月', exact: true }).click();
+    await test('records_month_changes_history', () => page.locator('#records-screen').innerText().then(t => t.includes('10月の履歴') && t.includes('交通費')));
+    await page.screenshot({ path: path.join(output, '記録_スマホ.png'), fullPage: true });
+    await openRoute('口座・カード');
+    await page.locator('#subaccounts summary').click();
+    await test('subaccounts_and_cards', async () => await page.getByText('貯蓄口座', { exact: true }).isVisible() && await page.locator('.account-card').count() === 3);
+    await page.screenshot({ path: path.join(output, '口座カード_スマホ.png'), fullPage: true });
+    await openRoute('シフト・給与');
+    await page.locator('[data-shift-day="2026-11-10"]').click();
+    await page.locator('#shift-editor input[name="hours"]').fill('8');
+    await page.locator('#shift-editor').getByRole('button', { name: '保存' }).click();
+    await test('shift_calendar_edit_updates_totals', () => page.locator('.shift-totals').innerText().then(t => t.includes('20時間') && t.includes('25,000')));
+    await page.screenshot({ path: path.join(output, 'シフト_スマホ.png'), fullPage: true });
     await test('no_private_data_connections', () => external.length === 0);
     await test('console_errors', () => errors.length === 0);
   } catch (error) { checks.execution = 'fail'; errors.push(error.stack); const pages = browser?.contexts()[0]?.pages(); if (pages?.[0]) { await pages[0].screenshot({ path: path.join(output, '失敗箇所.png') }); errors.push(JSON.stringify(await pages[0].evaluate(() => ({ scroll: scrollY, route: location.hash, hit: document.elementFromPoint(340, 350)?.outerHTML.slice(0, 200) })))); } }

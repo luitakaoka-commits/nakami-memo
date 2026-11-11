@@ -107,13 +107,39 @@ body.modal-open { overflow: hidden; }
 .toast.visible { opacity: 1; }
 .plan-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 #plans-screen > .plan-toolbar { margin-bottom: 12px; }
-.plan-toolbar select, .plan-card-filter select { border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 4px 8px; }
-.plan-card-filter { display: block; margin-bottom: 12px; }
 .plan-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; text-align: center; }
 .plan-grid > span { padding: 6px 0; font-size: 12px; }
 .plan-grid button { position: relative; padding: 0 0 4px; border: 1px solid transparent; background: transparent; border-radius: 8px; }
 .plan-grid button[aria-pressed="true"] { border-color: var(--brand); color: var(--brand); }
-.plan-dot { position: absolute; bottom: 5px; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: var(--brand); }
+.plan-marks { display: flex; justify-content: center; min-height: 15px; gap: 1px; font-size: 13px; line-height: 1; }
+.plan-marks .plan-mark { display: grid; place-items: center; width: 12px; min-height: 15px; border-radius: 3px; background: var(--soft); }
+.plan-mark.in { color: var(--chart-positive); }
+.plan-mark.out { color: var(--chart-negative); }
+.plan-mark.move { color: var(--muted); }
+.plan-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; }
+.detail-period { display: grid; gap: 4px; margin: 12px 0; }
+.detail-period select { width: 100%; min-width: 0; border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 4px 8px; }
+.detail-card-panel { flex: 0 0 100%; min-width: 0; scroll-snap-align: start; scroll-snap-stop: always; }
+.detail-track { min-height: 240px; }
+.showing-card-details { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+.detail-card-nav { position: fixed; inset: auto 0 0; z-index: 2; display: flex; justify-content: center; border-top: 1px solid var(--line); background: var(--paper); padding-bottom: env(safe-area-inset-bottom); }
+.detail-card-nav button { flex: 1; max-width: 180px; border: 0; border-top: 2px solid transparent; background: transparent; }
+.detail-card-nav button[aria-pressed="true"] { border-top-color: var(--brand); color: var(--brand); background: var(--soft); }
 .plan-row { padding: 12px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .plan-row:last-child { border-bottom: 0; }
 .plan-row .mail-actions { flex-wrap: wrap; }
+.overview-pager { margin-bottom: 12px; }
+.record-summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 14px; }
+.record-summary dd { font-size: clamp(12px, 3.6vw, 17px); }
+.record-summary select { max-width: 100%; border: 1px solid var(--line); background: var(--paper); border-radius: 8px; }
+.record-donut { width: min(100%, 150px); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; margin: 0 auto 10px; }
+.record-donut::after { content: ''; width: 62%; aspect-ratio: 1; border-radius: 50%; background: var(--surface); }
+.record-legend { grid-column: 1 / -1; display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; list-style: none; padding: 0; margin: 0; }
+.account-card-grid, .shift-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.account-card { display: flex; flex-direction: column; justify-content: space-between; gap: 4px; padding: 12px; min-height: 105px; aspect-ratio: 1.58; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); }
+.account-card.smbc { color: var(--paper); background: #21574d; }
+.account-card.mufg { color: var(--paper); background: #883644; }
+.account-card span { font-size: 20px; line-height: 1; }
+.shift-hours { display: block; font-size: 10px; line-height: 1.2; color: var(--chart-positive); }
+.shift-totals h2 { font-size: 13px; margin-bottom: 4px; }
+.shift-totals strong { font-size: clamp(16px, 4.5vw, 24px); }

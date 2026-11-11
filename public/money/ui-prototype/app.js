@@ -19,7 +19,7 @@
     'シフト・給与': '<path d="M4 13V6c4-4 10-4 14 0v5M4 13h8m-6 0v7h6"/><circle cx="17" cy="17" r="5"/><path d="M17 14v3h2"/>',
     'レシート': '<path d="M5 3h14v18l-3-2-4 2-4-2-3 2zM8 8h8m-8 4h8m-8 4h5"/>',
     'ふりかえり・ムダ支出': '<path d="M12 8C9 5 6 5 2 7v13c4-2 7-2 10 1 3-3 6-3 10-1v-7M12 8v13m1-8 6-9 3 2-6 9-4 2z"/>',
-    '定期支払い': '<rect x="2" y="5" width="17" height="14" rx="2"/><path d="M2 10h17M6 3v4m8-4v4"/><circle cx="18" cy="16" r="4"/><path d="M18 14v2l2 1"/>',
+    '定期支払い': '<path d="M2 12h14v9H2a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zM16 15h-5v3h5m-4-8 3-7 8 3-3 7-3-1m1-5 2 1M3 8h5M5 5h4"/>',
     '設定': '<path d="m10 2 4 0 1 3 3-1 3 3-1 3 2 1v3l-3 1 1 3-3 3-3-1-1 2h-4l-1-3-3 1-3-3 1-3-2-1v-3l3-1-1-3 3-3 3 1z"/><circle cx="12" cy="12" r="3"/>'
   };
   const events = [
@@ -83,22 +83,25 @@
     });
     return `<svg class="forecast-chart" viewBox="0 0 340 240" role="img" aria-label="口座残高の棒グラフ">${ticks.join('')}${bars.join('')}</svg>`;
   }
-  const routeKeys = { '資金繰り・試算': 'cashflow', '支払いの見通し': 'forecast', 'メール確認': 'mail', '予定': 'plans' };
+  const routeKeys = { '資金繰り・試算': 'cashflow', '支払いの見通し': 'forecast', 'メール確認': 'mail', '予定': 'plans', '記録': 'records', '口座・カード': 'accounts', 'シフト・給与': 'shift' };
   function closeSidebar() { $('#sidebar').close(); }
   function applyRoute() {
+    $('#toast').classList.remove('visible');
     const key = decodeURIComponent(location.hash.slice(1)) || 'cashflow';
     route = Object.keys(routeKeys).find(label => routeKeys[label] === key) || Object.values(groups).flat().find(label => label === key) || '資金繰り・試算';
     $('#screen-name').textContent = route;
     $('#page-title').textContent = route;
-    for (const name of ['cashflow', 'forecast', 'mail', 'plans']) $('#' + name + '-screen').hidden = routeKeys[route] !== name;
+    for (const name of Object.values(routeKeys)) $('#' + name + '-screen').hidden = routeKeys[route] !== name;
     $('#pending-screen').hidden = Boolean(routeKeys[route]);
     if (routeKeys[route] === 'mail') window.moneyMail.open();
     if (routeKeys[route] === 'plans') window.moneyPlans.open();
+    window.moneyOverview[routeKeys[route]]?.();
     closeSidebar(); menu();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function navigate(label) {
-    location.hash = routeKeys[label] || label;
+    const hash = '#' + encodeURIComponent(routeKeys[label] || label);
+    if (location.hash !== hash) history.pushState(null, '', hash);
     applyRoute();
     $('#main').focus({ preventScroll: true });
   }

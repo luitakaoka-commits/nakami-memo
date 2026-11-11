@@ -9,10 +9,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="styles.css?v=plans">
+  <link rel="stylesheet" href="styles.css?v=calendar-details">
   <script src="mail.js?v=plans" defer></script>
-  <script src="plans.js?v=plans" defer></script>
-  <script src="app.js?v=plans" defer></script>
+  <script src="plans.js?v=calendar-details" defer></script>
+  <script src="overview.js?v=calendar-details" defer></script>
+  <script src="app.js?v=calendar-details" defer></script>
 </head>
 <body>
   <div class="prototype-notice">UI試作</div>
@@ -27,6 +28,9 @@
     <section id="forecast-screen" aria-label="支払いの見通し" hidden><div id="forecast-content"></div></section>
     <section id="mail-screen" aria-label="メール確認" hidden></section>
     <section id="plans-screen" aria-label="予定" hidden></section>
+    <section id="records-screen" aria-label="記録" hidden></section>
+    <section id="accounts-screen" aria-label="口座・カード" hidden></section>
+    <section id="shift-screen" aria-label="シフト・給与" hidden></section>
     <section id="pending-screen" hidden><p>未作成</p></section>
   </main>
   <details class="preview-tools"><summary>表示状態</summary><div class="tool-content"><label for="preview-state">状態</label><select id="preview-state"><option value="normal">通常</option><option value="shortfall">不足</option><option value="empty">データなし</option><option value="loading">読込中</option><option value="offline">オフライン</option><option value="error">エラー</option><option value="success">保存完了</option></select></div></details>
@@ -44,6 +48,15 @@
       <label>種類<select name="kind"><option value="payment">支払い</option><option value="income">収入</option><option value="saving">貯金</option><option value="nisa">NISA</option><option value="transfer">振込</option></select></label>
       <label>金額<input name="amount" type="number" min="1" step="1" inputmode="numeric" required></label>
       <button class="primary-button" type="submit">保存</button>
+    </form>
+  </dialog>
+  <dialog id="shift-editor" class="detail-dialog" aria-labelledby="shift-editor-title">
+    <div class="dialog-heading"><h2 id="shift-editor-title">シフト</h2><button type="button" class="icon-button" data-shift-close aria-label="閉じる">×</button></div>
+    <form class="mail-fields">
+      <input type="hidden" name="date">
+      <label>勤務時間<input type="number" name="hours" min="0.25" max="24" step="0.25" inputmode="decimal" required></label>
+      <button class="primary-button" type="submit">保存</button>
+      <button class="text-button" type="button" data-shift-delete>削除</button>
     </form>
   </dialog>
   <div id="toast" class="toast" role="status"></div>
