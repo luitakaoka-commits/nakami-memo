@@ -52,6 +52,21 @@
     adjustment: { label: '残高調整', badge: 'badge-income', icon: 'adjustment' }
   };
 
+  const PLAN_MARKS = {
+    income: { style: 'in', icon: '+' },
+    payment: { style: 'out', icon: '−' },
+    saving: { style: 'saving', icon: '<path d="M5 9a6 6 0 0 1 5-3l3-3v3h2a5 5 0 0 1 5 4h2v5h-3l-2 4h-3v-3H9v3H6l-2-4a5 5 0 0 1 1-6zM3 11c-2 0-2-3 0-3m7 1h4m3 1h.1"/>' },
+    nisa: { style: 'nisa', icon: '<path d="M3 3v18h18M7 15l5-5 4 3 5-7m-5 0h5v5"/>' },
+    reimbursement: { style: 'reimbursement', icon: '<path d="M4 8h11a5 5 0 0 1 0 10H9M8 4 4 8l4 4"/><path d="M5 15v6m-2-4h4m-4 2h4"/>' },
+    transfer: { style: 'transfer', icon: '<path d="M3 8h17m-4-4 4 4-4 4M21 16H4m4-4-4 4 4 4"/>' }
+  };
+
+  function planMark(kind) {
+    const mark = PLAN_MARKS[kind];
+    if (!mark) return '';
+    return `<span class="plan-mark ${mark.style}" data-kind="${kind}" aria-hidden="true">${mark.icon.startsWith('<') ? `<svg viewBox="0 0 24 24" focusable="false">${mark.icon}</svg>` : mark.icon}</span>`;
+  }
+
   const ICON_PATHS = {
     payment: '<path d="m5 5 13 13M18 18H9M18 18V9"/>',
     income: '<path d="M19 19 6 6M6 6h9M6 6v9"/>',
@@ -71,10 +86,16 @@
   let state = null;
   let cloud = null;
   let syncStatus = 'saved';
-  let currentPage = 'home';
+  const MENU_ROUTES = { cashflow: 'home', forecast: 'cashflow', plans: 'plans', records: 'records', mail: 'imports', accounts: 'accounts', shift: 'shift', receipts: 'receipts', review: 'review', recurring: 'recurring', settings: 'settings' };
+  function pageFromHash() {
+    const route = (location.hash || '').slice(1);
+    return Object.hasOwn(MENU_ROUTES, route) ? MENU_ROUTES[route] : 'home';
+  }
+  let currentPage = pageFromHash();
   let mailSection = 'pending';
   let planMonth = '';
   let planDate = '';
+  let recordChartType = 'expense';
   let detailPeriod = '';
   let dailyCheckScope = 'all';
   let planFilter = 'all';
@@ -88,7 +109,6 @@
   let recordBasis = 'real';
   let recordCategory = '';
   // 記録ページの中のタブ。'transactions'（取引）と 'receipts'（レシート）。永続化はしない。
-  let recordTab = 'transactions';
   let searchQuery = '';
   let whatIfAmount = 0;
   let importCandidates = [];
@@ -676,7 +696,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=93" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=94" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -717,20 +737,18 @@
 
   function renderPage() {
     detailCache = new Map();
-    const titles = { home: '資金繰り・試算', daily: '余力の内訳', checks: '確認すること', plans: '予定', records: recordTab === 'receipts' ? 'レシート' : '記録', accounts: '口座・カード', shift: 'シフト・給与', settings: '設定', spendable: '今使える金額', cashflow: '支払いの見通し', imports: 'メール確認' };
+    const titles = { home: '資金繰り・試算', daily: '余力の内訳', checks: '確認すること', plans: '予定', records: '記録', receipts: 'レシート', review: 'ふりかえり・ムダ支出', recurring: '定期支払い', accounts: '口座・カード', shift: 'シフト・給与', settings: '設定', spendable: '今使える金額', cashflow: '支払いの見通し', imports: 'メール確認' };
     $('#page-title').textContent = titles[currentPage] || titles.home;
     const pending = pendingCandidates().length;
     $('#money-mail-count').hidden = pending === 0;
     $('#money-mail-count').textContent = `${pending}件`;
     $$('.nav-link[data-page]').forEach(button => {
-      const active = button.dataset.page === currentPage && !button.dataset.sectionTarget
-        && (currentPage !== 'plans' || (button.dataset.planSection || 'all') === planFilter)
-        && (currentPage !== 'records' || (button.dataset.recordSection || 'transactions') === recordTab);
+      const active = button.dataset.page === currentPage;
       button.classList.toggle('active', active);
       if (active) button.setAttribute('aria-current', 'page');
       else button.removeAttribute('aria-current');
     });
-    const renderers = { home: renderHome, daily: renderDailyDetails, checks: renderDailyCheckDetails, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
+    const renderers = { home: renderHome, daily: renderDailyDetails, checks: renderDailyCheckDetails, plans: renderPlans, records: renderRecords, receipts: renderReceiptPage, review: renderReviewPage, recurring: renderRecurringPage, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
     const warning = ['home', 'daily', 'checks', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
     $('#page-container').innerHTML = warning + renderers[currentPage]();
     if (currentPage === 'spendable') requestAnimationFrame(() => {
@@ -1662,7 +1680,7 @@
 
   /* ---------- レシート一覧 ---------- */
 
-  /** 記録ページ「レシート」タブの中身。専用ページは持たない。 */
+  /** レシートの未確認・確認済み一覧。 */
   function renderReceipts() {
     if (!receiptsAvailable()) {
       return '<section class="card empty"><div><strong>共有スペースに接続すると使えます</strong>レシートの明細は端末ではなく共有スペースに保存します。設定からGoogleでログインし、共有スペースを選んでください。</div></section>';
@@ -1704,7 +1722,6 @@
     }).join('');
 
     return `
-      ${renderReviewPrompt()}
       <section class="card info-card"><p class="check-detail">レシートの明細は<strong>共有スペースにだけ</strong>保存します。今使える金額や支払い能力チェックには影響しません。捨てた記録は、「取引」タブの「ムダ支出」に集計されます。</p></section>
       <section class="card list-card">
         <div class="list-card-header"><div><span class="eyebrow">${currentTab.label} ${counts[currentTab.key]}件</span><h2>レシート一覧</h2></div><button class="button button-quiet button-small" data-action="add-receipt">レシートを追加</button></div>
@@ -2292,17 +2309,17 @@
 
   function handleReceipts(items) {
     receipts = Array.isArray(items) ? items : [];
-    if (['home', 'records'].includes(currentPage)) renderPage();
+    if (['receipts', 'review'].includes(currentPage)) renderPage();
   }
 
   function handleReceiptItems(items) {
     receiptItems = Array.isArray(items) ? items : [];
-    if (['home', 'records'].includes(currentPage)) renderPage();
+    if (['receipts', 'review'].includes(currentPage)) renderPage();
   }
 
   function handleItemAliases(items) {
     itemAliases = Array.isArray(items) ? items : [];
-    if (['records', 'settings'].includes(currentPage)) renderPage();
+    if (['receipts', 'review', 'settings'].includes(currentPage)) renderPage();
     if (mergeSource && !$('#merge-modal')?.hidden) renderMergeCard();
   }
 
@@ -2578,10 +2595,10 @@
     const cells = Array.from({ length: Number(endDate.slice(-2)) }, (_, index) => {
       const day = index + 1;
       const date = `${month}-${String(day).padStart(2, '0')}`;
-      const kinds = [...(plansByDate.get(date) || [])];
-      return `<button type="button" data-plan-day="${date}" aria-pressed="${date === planDate}" aria-label="${formatDate(date, true)}${kinds.length ? '、' + kinds.map(kind => kindMeta(kind).label).join('、') : ''}">${day}<span class="plan-markers" aria-hidden="true">${kinds.map(kind => `<span class="plan-marker" data-kind="${esc(kind)}">${icon(kindMeta(kind).icon)}</span>`).join('')}</span></button>`;
+      const kinds = Object.keys(PLAN_MARKS).filter(kind => plansByDate.get(date)?.has(kind));
+      return `<button type="button" data-plan-day="${date}" aria-pressed="${date === (planDate || today())}" aria-label="${formatDate(date, true)}${kinds.length ? '、' + kinds.map(kind => kindMeta(kind).label).join('、') : ''}"><span>${day}</span><span class="plan-marks" aria-hidden="true">${kinds.map(planMark).join('')}</span></button>`;
     });
-    return `<section class="card daily-details plan-calendar"><div class="list-card-header"><button type="button" class="mini-button" data-plan-month-step="-1" aria-label="前の月">‹</button><h2>${month.replace('-', '年')}月</h2><button type="button" class="mini-button" data-plan-month-step="1" aria-label="次の月">›</button></div><div class="plan-grid">${[...'日月火水木金土'].map(day => `<span aria-hidden="true">${day}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(firstWeekday)}${cells.join('')}</div></section>`;
+    return `<section class="sheet plan-calendar" data-plan-month="${month}" aria-label="予定カレンダー"><div class="plan-view-toolbar"><button type="button" class="mini-button" data-plan-month-step="-1" aria-label="前の月">‹</button><h2>${month.replace('-', '年')}月</h2><button type="button" class="mini-button" data-plan-month-step="1" aria-label="次の月">›</button></div><div class="plan-grid">${[...'日月火水木金土'].map(day => `<span aria-hidden="true">${day}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(firstWeekday)}${cells.join('')}</div><p class="plan-legend">${Object.keys(PLAN_MARKS).map(kind => `<span>${planMark(kind)}${kind === 'payment' ? '支出' : kindMeta(kind).label}</span>`).join('')}</p></section>`;
   }
 
   function renderPlans() {
@@ -2589,21 +2606,14 @@
     const mainPlans = planned.filter(transaction => transaction.entryType !== 'itemized');
     const details = state.transactions.filter(transaction => transaction.kind === 'payment'
       && transaction.entryType === 'itemized' && ['planned', 'absorbed'].includes(transaction.status));
-    const filtered = mainPlans.filter(transaction => !planDate || transaction.dueDate === planDate);
-    const deadline = getNextDeadline();
-    const within = effectivePlannedTransactions().filter(transaction => transaction.dueDate <= deadline && transaction.dueDate >= today());
-    const spendableIds = new Set(state.accounts.filter(item => !['savings', 'investment'].includes(item.role)
-      && item.includeInSpendable !== false).map(item => item.id));
-    const withinAmount = within.reduce((sum, transaction) => sum + finance.accountDeltasFor(transaction)
-      .filter(delta => spendableIds.has(delta.accountId))
-      .reduce((amount, delta) => amount + delta.delta, 0), 0);
-    return `
+    const selectedDate = planDate || today();
+    const filtered = mainPlans.filter(transaction => transaction.dueDate === selectedDate);
+    return `<div class="prototype-flow">
       <div class="page-heading"><h1>${planFilter === 'details' ? '明細' : '予定'}</h1></div>
       <div class="plan-view-toolbar">${planFilter === 'details' ? '<button type="button" class="button button-quiet" data-page="plans">予定</button>' : '<button type="button" class="button button-quiet" data-page="plans" data-plan-section="details">明細</button><button type="button" class="button button-primary" data-action="add-event">予定を追加</button>'}</div>
       ${planFilter === 'details' ? renderPlanDetails(details) : `
         ${renderPlanCalendar(mainPlans)}
-        <div class="summary-strip"><div class="stat-card"><span>${formatDate(deadline)}までの計算対象</span><strong>${within.length}件</strong></div><div class="stat-card"><span>期限内の収支見込み</span><strong class="${withinAmount >= 0 ? 'value-positive' : 'value-negative'}">${formatSigned(withinAmount)}</strong></div><div class="stat-card"><span>登録済みの予定</span><strong>${mainPlans.length}件</strong></div></div>
-        <section class="card list-card"><div class="list-card-header"><h2>予定一覧</h2><small class="muted">確定すると残高に反映</small></div><div class="list">${renderTransactionRows(filtered, false) || emptyBlock('この種類の予定はありません', 'ホームの「予定を追加」から登録できます。')}</div></section>`}`;
+        <section class="sheet"><h2>${formatDate(selectedDate, true)}の予定</h2><div class="list">${renderTransactionRows(filtered, false) || '<p>0件</p>'}</div></section>`}</div>`;
   }
 
   /* ==========================================================
@@ -2717,15 +2727,18 @@
     renderPage();
   }
 
-  /** 記録ページの中のタブ。範囲指定の .filter-button と同じ見た目を使い回す。 */
-  function renderRecordTabs() {
-    const receiptTab = recordTab === 'receipts';
-    return `<section class="card range-card"><div class="range-tabs"><button type="button" class="filter-button ${receiptTab ? '' : 'active'}" data-action="record-tab" data-tab="transactions">取引</button><button type="button" class="filter-button ${receiptTab ? 'active' : ''}" data-action="record-tab" data-tab="receipts">レシート</button></div></section>`;
+  function renderReceiptPage() {
+    return `<div class="prototype-flow"><div class="page-heading"><h1>レシート</h1></div>${renderReceipts()}</div>`;
+  }
+
+  function renderReviewPage() {
+    const range = recordRange();
+    const summary = finance.summarizePeriod(state.transactions, range, { basis: recordBasis });
+    return `<div class="prototype-flow"><div class="page-heading"><h1>ふりかえり・ムダ支出</h1></div>${renderReviewPrompt()}${renderRangeControl(range)}${renderWasteCard(range, summary) || '<section class="sheet">0件</section>'}${renderAliasSettings()}</div>`;
   }
 
   function renderRecords() {
-    const heading = '<div class="page-heading"><div><span class="eyebrow">記録</span><h1>支出と収入</h1></div></div>';
-    if (recordTab === 'receipts') return `${heading}${renderRecordTabs()}${renderReceipts()}`;
+    const heading = '<div class="page-heading"><h1>記録</h1></div>';
 
     const range = recordRange();
     const summary = finance.summarizePeriod(state.transactions, range, { basis: recordBasis });
@@ -2739,30 +2752,28 @@
     records = sortedTransactions(records).reverse();
 
     const netClass = summary.net >= 0 ? 'value-positive' : 'value-negative';
-    return `
+    const chart = recordChartType === 'income' ? renderChartCard('収入', summary.income, 'income') : renderChartCard('支出', summary.expense, 'expense');
+    return `<div class="prototype-flow">
       ${heading}
-      ${renderRecordTabs()}
       ${renderRangeControl(range)}
-      ${renderWasteCard(range, summary)}
-      <div class="summary-strip"><div class="stat-card"><span>収入</span><strong class="value-positive">${formatFlowAmount(summary.income.total, 'in')}</strong></div><div class="stat-card"><span>支出</span><strong class="value-negative">${formatFlowAmount(summary.expense.total, 'out')}</strong></div><div class="stat-card"><span>差引</span><strong class="${netClass}">${formatSigned(summary.net)}</strong></div></div>
+      <section class="sheet record-summary"><dl class="ledger summary-strip"><div class="stat-card"><dt><span>収入</span></dt><dd><strong class="value-positive">${formatFlowAmount(summary.income.total, 'in')}</strong></dd></div><div class="stat-card"><dt><span>支出</span></dt><dd><strong class="value-negative">${formatFlowAmount(summary.expense.total, 'out')}</strong></dd></div><div class="stat-card ledger-total"><dt><span>収支</span></dt><dd><strong class="${netClass}">${formatSigned(summary.net)}</strong></dd></div></dl>
+      <label class="record-chart-type">内訳<select id="record-chart-type"><option value="expense" ${recordChartType === 'expense' ? 'selected' : ''}>支出</option><option value="income" ${recordChartType === 'income' ? 'selected' : ''}>収入</option></select></label><div class="record-chart">${chart}</div></section>
       <section class="card info-card record-extra"><div class="formula-row"><span>貯蓄・投資（支出とは別枠）</span><strong>${formatAbsoluteYen(summary.saving.total)}</strong></div><div class="formula-row"><span>立替した分</span><strong>${formatAbsoluteYen(summary.lendingTotal)}</strong></div><p class="form-note">${esc(rangeLabel(range))}の確定済みの記録から集計しています。${recordBasis === 'real' ? '支出は立替分を差し引いた実質負担です。' : '支出は立替分を含む総額です。'}カードの明細は請求総額の内訳なので、二重に数えていません。</p></section>
-      <div class="chart-grid">${renderChartCard('支出', summary.expense, 'expense')}${renderChartCard('収入', summary.income, 'income')}</div>
       <div class="filters"><input class="search" id="record-search" value="${esc(searchQuery)}" placeholder="メモ・カテゴリ・口座を検索">${filters.map(([value, label]) => `<button class="filter-button ${recordFilter === value ? 'active' : ''}" data-record-filter="${value}">${label}</button>`).join('')}</div>
       ${recordCategory ? `<div class="active-filter"><span>「${esc(recordCategory)}」で絞り込み中</span><button type="button" class="mini-button" data-action="filter-category" data-category="">解除</button></div>` : ''}
-      <section class="card list-card"><div class="list-card-header"><h2>取引一覧</h2><small class="muted">${records.length}件</small></div><div class="list">${renderTransactionRows(records, false) || emptyBlock('記録がありません', '予定を確定するとここに残ります。')}</div></section>`;
+      <section class="card list-card"><div class="list-card-header"><h2>${esc(rangeLabel(range))}の履歴</h2><small class="muted">${records.length}件</small></div><div class="list">${renderTransactionRows(records, false) || '<p>履歴なし</p>'}</div></section></div>`;
   }
 
   function renderAccounts() {
-    const accounts = state.accounts;
-    const cards = state.cards;
-    return `
-      <div class="page-heading"><div><span class="eyebrow">口座</span><h1>口座</h1></div></div>
-      <section class="accounts-grid">${accounts.map(item => {
-        const protectedAccount = ['savings', 'investment'].includes(item.role);
-        const pending = pendingExp(item.id);
-        return `<article class="account-card ${protectedAccount ? 'account-protected' : ''}"><div class="account-top"><div><div class="account-role">${roleLabel(item.role)}</div><div class="account-name">${esc(item.name)}${item.isPrimary ? ' <span class="badge badge-settled">基準</span>' : ''}</div></div><div class="list-actions"><button class="mini-button" data-action="edit-account" data-id="${item.id}" aria-label="${esc(item.name)}を編集">編集</button><button class="mini-button danger" data-action="delete-account" data-id="${item.id}" aria-label="${esc(item.name)}を削除">削除</button></div></div><div class="account-balance">${formatDisplayedAmount(item.currentBalance)}</div>${accountBalanceNote(item)}<div class="account-bottom"><span>${protectedAccount ? '計算に含めない' : item.includeInSpendable ? '計算に含める' : '計算から除外'}</span><span>${pending ? `予定 ${formatFlowAmount(pending, 'out')}` : '予定なし'}</span></div></article>`;
-      }).join('') || '<div class="card empty" style="grid-column:1/-1"><div><strong>口座を追加してください</strong>口座を登録すると計算できます。</div></div>'}</section>
-      <section class="card cards-section"><div class="list-card-header"><div><span class="eyebrow">支払い方法</span><h2>クレジットカード</h2></div><button class="button button-quiet button-small" data-action="add-card">カードを追加</button></div><div class="credit-card-grid">${cards.map(item => `<article class="credit-card-item"><div class="credit-card-mark">${icon('card')}</div><div class="credit-card-main"><strong>${esc(item.name)}</strong><small>${esc(accountName(item.accountId))}から引落し</small><span>${item.closingDay ? `${item.closingDay}日締め` : '月末締め'} ・ ${item.paymentDay ? `${item.paymentDay}日払い` : '支払日未設定'}</span></div><div class="list-actions"><button class="mini-button" data-action="edit-card" data-id="${item.id}">編集</button><button class="mini-button danger" data-action="delete-card" data-id="${item.id}">削除</button></div></article>`).join('') || emptyBlock('カードは未登録です', '追加すると、支払いをカード別に記録できます。')}</div></section>`;
+    const primary = state.accounts.find(item => item.isPrimary) || state.accounts.find(item => item.role === 'primary') || state.accounts[0];
+    const subaccountsOpen = Boolean($('#subaccounts')?.open);
+    const actions = (type, item) => `<div class="plan-view-toolbar account-actions"><button type="button" class="button button-quiet" data-action="edit-${type}" data-id="${esc(item.id)}">編集</button><button type="button" class="button button-quiet" data-action="delete-${type}" data-id="${esc(item.id)}">削除</button></div>`;
+    return `<div class="prototype-flow"><div class="page-heading"><h1>口座・カード</h1></div>
+      <div class="plan-view-toolbar"><button type="button" class="button button-quiet" data-action="add-account">口座を追加</button></div>
+      ${primary ? `<section class="sheet"><h2>基準口座</h2><p>${esc(primary.name)}</p><p class="amount">${formatDisplayedAmount(primary.currentBalance)}</p>${accountBalanceNote(primary)}${actions('account', primary)}</section>` : ''}
+      <details class="sheet" id="subaccounts" ${subaccountsOpen ? 'open' : ''}><summary>サブ口座</summary>${state.accounts.filter(item => item !== primary).map(item => `<article class="account-summary-row"><div class="plan-view-toolbar"><strong>${esc(item.name)}</strong><strong>${formatDisplayedAmount(item.currentBalance)}</strong></div>${accountBalanceNote(item)}${actions('account', item)}</article>`).join('') || '<p>口座なし</p>'}</details>
+      <div class="plan-view-toolbar"><h2>クレジットカード</h2><button type="button" class="button button-quiet" data-action="add-card">カードを追加</button></div>
+      <div class="account-card-grid">${state.cards.map((item, index) => `<section><article class="money-credit-card" data-style="${index % 3}"><strong>${esc(item.name)}</strong>${icon('card')}</article><p>${item.closingDay ? `${item.closingDay}日締め` : '月末締め'} · ${item.paymentDay ? `${item.paymentDay}日払い` : '月末払い'}</p>${actions('card', item)}</section>`).join('')}</div></div>`;
   }
 
   function renderCloudSettings() {
@@ -2949,29 +2960,26 @@
     renderPage();
   }
 
-  function renderSettings() {
-    const wage = state.settings.wage;
-    return `
-      <div class="page-heading"><div><span class="eyebrow">設定</span><h1>設定</h1></div></div>
-      <div class="settings-grid"><div class="stack">
-        <section class="settings-card"><h2>メールからの取込候補</h2><p>カード利用のお知らせメールから作られた候補です。取り込むまで計算には反映されません。</p><div class="settings-inline"><strong>${pendingCandidates().length}件が未確認</strong><button class="button button-quiet button-small" data-page="imports">確認する</button></div></section>
-        <section class="settings-card"><h2>計算設定</h2><p>ホームは選択した基準カードの締め日で試算します。未選択なら15日締めのカード、該当カードがなければ全カードが基準です。毎月14日締めは従来方式の詳細だけに適用します。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>従来の試算のみ：毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>基準カードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<small>複数選んだ場合は一番早い締め日を使います。対象カードがなくなった場合は毎月14日が期限になります。</small><label><span>支払いの予測期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日間</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日間</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日間</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日間</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
-        <section class="settings-card"><h2>給与設定</h2><p>勤務月は1日から末日までの暦月、支給は翌月の給料日です。給料日が土日祝のときは前営業日へ繰り上げます。</p><form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><p class="form-note">同じ給与を通常の「収入」にも登録すると二重計算になるため、どちらか一方を使ってください。</p><button class="button button-primary" type="submit">給与設定を保存</button></form></section>
-        ${renderRecurringSettings()}
-        ${renderAliasSettings()}
-        <section class="settings-card"><h2>バックアップ</h2><p>Firestoreへ自動保存します。手元にも残したい場合はJSONを書き出せます。</p><div class="field-grid field-grid-2"><button class="button button-quiet" data-action="export">JSONを書き出す</button><button class="button button-quiet" data-action="import">JSONを読み込む</button></div><button class="button button-quiet" data-action="export-cloud" ${cloud?.readCloudBackup ? '' : 'disabled'}>クラウドの原本を書き出す</button><button class="button button-quiet" data-action="restore-cloud" ${cloud?.restoreCloudBackup ? '' : 'disabled'}>クラウド原本から新しい家計へ復元</button><button class="button button-quiet" data-action="resume-cloud-restore" ${cloud?.restoreCloudBackup ? '' : 'disabled'}>復元を確認・再開</button><button class="button button-quiet" data-action="export-recovery" ${cloud?.readUnsavedRecovery ? '' : 'disabled'}>未保存データを書き出す</button></section>
-      </div><div class="stack">${renderCloudSettings()}<section class="settings-card"><h2>データ</h2><p>端末内にもキャッシュを残し、通信復帰後に同期します。</p><div class="formula-box"><div class="formula-row"><span>保存場所</span><strong>Cloud Firestore</strong></div><div class="formula-row"><span>最終更新</span><strong>${new Date(state.meta.updatedAt).toLocaleString('ja-JP')}</strong></div></div></section><section class="settings-card danger-zone"><h2>データをリセット</h2><p>この共有スペースの口座・予定・記録を削除して、初期設定に戻します。</p><button class="button button-danger button-full" data-action="reset">すべて削除</button></section></div></div>`;
+  function renderRecurringPage() {
+    return `<div class="prototype-flow"><div class="page-heading"><h1>定期支払い</h1></div>${renderRecurringSettings()}</div>`;
   }
 
-  /* ==========================================================
-   * 請求総額の明細展開
-   * 予定・記録のどちらの一覧でも同じ表示になる。
-   * ========================================================== */
+  function renderSettings() {
+    const wage = state.settings.wage;
+    const open = new Set($$('#page-container details[data-settings-section][open]').map(item => item.dataset.settingsSection));
+    const section = (key, label) => `<details class="sheet" data-settings-section="${key}" ${open.has(key) ? 'open' : ''}><summary>${label}</summary>`;
+
+    return `
+      <div class="prototype-flow settings-flow"><div class="page-heading"><h1>設定</h1></div>
+      ${section('calculation', '計算設定')}<form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>従来の試算のみ：毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>基準カードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<label><span>支払いの予測期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日間</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日間</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日間</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日間</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select></label><button class="button button-primary" type="submit">保存</button></form></details>
+      ${section('wage', '給与設定')}<form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><button class="button button-primary" type="submit">給与設定を保存</button></form></details>
+      ${section('sharing', '家計共有')}${renderCloudSettings()}</details>
+      ${section('backup', 'バックアップ・復元')}<div class="field-grid field-grid-2"><button class="button button-quiet" data-action="export">JSONを書き出す</button><button class="button button-quiet" data-action="import">JSONを読み込む</button></div><button class="button button-quiet" data-action="export-cloud" ${cloud?.readCloudBackup ? '' : 'disabled'}>クラウドの原本を書き出す</button><button class="button button-quiet" data-action="restore-cloud" ${cloud?.restoreCloudBackup ? '' : 'disabled'}>クラウド原本から新しい家計へ復元</button><button class="button button-quiet" data-action="resume-cloud-restore" ${cloud?.restoreCloudBackup ? '' : 'disabled'}>復元を確認・再開</button><button class="button button-quiet" data-action="export-recovery" ${cloud?.readUnsavedRecovery ? '' : 'disabled'}>未保存データを書き出す</button><button class="button button-danger button-full" data-action="reset">すべて削除</button></details></div>`;
+  }
 
   const expandedStatements = new Set();
   let detailCache = new Map();
 
-  /** 1回の描画のあいだだけ結果を使い回す */
   function statementDetails(statement) {
     if (!statement || statement.entryType !== 'statement' || !statement.cardId) return [];
     if (detailCache.has(statement.id)) return detailCache.get(statement.id);
@@ -3049,7 +3057,7 @@
         ? `<button class="mini-button" data-action="card-cancellation" data-id="${esc(transaction.id)}">${transaction.status === 'cancelled' ? '取消を戻す' : '取消を記録'}</button>` : '';
       const actions = transaction.status === 'absorbed' ? '' : `${confirmButton}${settleButton}${cancelButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button>`;
       const shownDate = dateMode === 'usage' ? formatUsageMoment(transaction) : formatDate(transaction.dueDate);
-      return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${esc(shownDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge} ${salaryBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact && actions ? `<div class="list-actions">${actions}</div>` : ''}</div></div>${detailPanel}</div>`;
+      return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${esc(shownDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${currentPage === 'plans' ? planMark(transaction.kind) : icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge} ${salaryBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact && actions ? `<div class="list-actions">${actions}</div>` : ''}</div></div>${detailPanel}</div>`;
     }).join('');
   }
 
@@ -3966,16 +3974,15 @@
     const pageButton = event.target.closest('[data-page]');
     if (pageButton) {
       currentPage = pageButton.dataset.page;
+      const route = Object.keys(MENU_ROUTES).find(key => MENU_ROUTES[key] === currentPage);
+      if (route && location.hash !== '#' + route) history.pushState(null, '', '#' + route);
       if (currentPage === 'checks') dailyCheckScope = pageButton.dataset.check || 'all';
       if (currentPage === 'plans') planFilter = pageButton.dataset.planSection || 'all';
-      if (currentPage === 'records') recordTab = pageButton.dataset.recordSection || 'transactions';
       if (currentPage === 'imports') mailSection = 'pending';
       if ($('#sidebar').open) $('#sidebar').close();
       if ($('#money-flow-dialog').open) $('#money-flow-dialog').close();
       renderPage();
-      const section = document.getElementById(pageButton.dataset.sectionTarget || '');
-      if (section) section.scrollIntoView();
-      else window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
       return;
     }
     const mailButton = event.target.closest('[data-mail-section]');
@@ -3987,7 +3994,7 @@
     }
     const planDay = event.target.closest('[data-plan-day]');
     if (planDay) {
-      planDate = planDate === planDay.dataset.planDay ? '' : planDay.dataset.planDay;
+      planDate = planDay.dataset.planDay;
       renderPage();
       $(`[data-plan-day="${planDay.dataset.planDay}"]`)?.focus();
       return;
@@ -3995,7 +4002,7 @@
     const planStep = event.target.closest('[data-plan-month-step]');
     if (planStep) {
       planMonth = finance.shiftMonthKey(planMonth || today().slice(0, 7), Number(planStep.dataset.planMonthStep));
-      planDate = '';
+      planDate = `${planMonth}-01`;
       renderPage();
       $(`[data-plan-month-step="${planStep.dataset.planMonthStep}"]`)?.focus();
       return;
@@ -4019,7 +4026,6 @@
       return;
     }
     if (name === 'daily-add-statement') { openDailyStatement(action.dataset.card, action.dataset.date); return; }
-    if (name === 'record-tab') { recordTab = action.dataset.tab === 'receipts' ? 'receipts' : 'transactions'; renderPage(); return; }
     if (name === 'range-mode') { setRecordRangeMode(action.dataset.mode); return; }
     if (name === 'range-month') { stepRecordMonth(Number(action.dataset.step || 0)); return; }
     if (name === 'record-basis') { recordBasis = action.dataset.basis === 'gross' ? 'gross' : 'real'; renderPage(); return; }
@@ -4104,6 +4110,12 @@
   }
 
   function bindEvents() {
+    window.addEventListener('hashchange', () => {
+      currentPage = pageFromHash();
+      planFilter = 'all';
+      mailSection = 'pending';
+      if (!$('#app-shell').hidden) renderPage();
+    });
     // 更新直後に古いHTMLが残っていても日時訂正欄を用意する。
     if (!$('#event-usage-time')) {
       const label = document.createElement('label');
@@ -4122,6 +4134,13 @@
     const menu = $('#sidebar');
     const content = $('#page-container');
     content.addEventListener('change', event => {
+      if (event.target.id === 'record-chart-type') {
+        recordChartType = event.target.value === 'income' ? 'income' : 'expense';
+        recordCategory = '';
+        renderPage();
+        $('#record-chart-type')?.focus();
+        return;
+      }
       if (event.target.id !== 'detail-period') return;
       detailPeriod = event.target.value;
       renderPage();
@@ -4249,7 +4268,7 @@
     } catch (error) {
       showAuth(`Firebaseに接続できません: ${authErrorMessage(error)}`);
     }
-    window.__YORYOKU__ = { getState: () => state, getCloudSession: () => cloud?.getSession() || null, getNextDeadline, pendingExp, buildEngineInput, spendableAmount, cashflowCheck, today, createTransaction, syncSalaryRecords, applyEffect, revertEffect, validateSettlement, setPage: page => { currentPage = page; renderPage(); }, setShiftMonth: month => { shiftPaymentMonth = month; renderPage(); }, setImportCandidates: handleImportCandidates, acceptCandidate, stripCandidate, setReceipts: handleReceipts, setReceiptItems: handleReceiptItems, setItemAliases: handleItemAliases, wasteRanking, learnItemAliases, setRecordTab: tab => { recordTab = tab === 'receipts' ? 'receipts' : 'transactions'; renderPage(); }, dueReviewItems, reviewWindowOpen, receiptsAvailable, openReceiptModal, openReviewModal, answerReview, answerReviewReason, saveReceiptForm, normalizeState, emptyState, nextCardPaymentDate: finance.nextCardPaymentDate, simulateSpending: finance.simulateSpending, aggregateCardBills: finance.aggregateCardBills, calculateWageForecast: finance.calculateWageForecast, seedDemo: () => { state = seedDemoState(); persist(); showApp(); } };
+    window.__YORYOKU__ = { getState: () => state, getCloudSession: () => cloud?.getSession() || null, getNextDeadline, pendingExp, buildEngineInput, spendableAmount, cashflowCheck, today, createTransaction, syncSalaryRecords, applyEffect, revertEffect, validateSettlement, setPage: page => { currentPage = page; renderPage(); }, setShiftMonth: month => { shiftPaymentMonth = month; renderPage(); }, setImportCandidates: handleImportCandidates, acceptCandidate, stripCandidate, setReceipts: handleReceipts, setReceiptItems: handleReceiptItems, setItemAliases: handleItemAliases, wasteRanking, learnItemAliases, setRecordTab: tab => { currentPage = tab === 'receipts' ? 'receipts' : 'records'; renderPage(); }, dueReviewItems, reviewWindowOpen, receiptsAvailable, openReceiptModal, openReviewModal, answerReview, answerReviewReason, saveReceiptForm, normalizeState, emptyState, nextCardPaymentDate: finance.nextCardPaymentDate, simulateSpending: finance.simulateSpending, aggregateCardBills: finance.aggregateCardBills, calculateWageForecast: finance.calculateWageForecast, seedDemo: () => { state = seedDemoState(); persist(); showApp(); } };
   }
 
   run();
