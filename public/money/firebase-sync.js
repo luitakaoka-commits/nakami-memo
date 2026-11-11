@@ -20,12 +20,18 @@ import {
   getFirestore,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
   writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js';
+import './redesign-sync-coordinator.js?v=82';
+import './redesign-backup-read.js?v=82';
+import './redesign-migration-check.js?v=82';
+import './redesign-restore-plan.js?v=82';
+import './redesign-restore-execute.js?v=82';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyA4qpbwxpp8tEEWLCkNMPIYuDTN7G9cF3A',
@@ -61,6 +67,7 @@ let householdId = null;
 let stopOutcomeQueue = null;
 const outcomeQueueInFlight = new Set();
 let saveTimer = null;
+let workspaceSaver = null;
 let remoteHandler = () => {};
 let statusHandler = () => {};
 
@@ -122,12 +129,35 @@ async function createWorkspace(initialState) {
 
 async function selectWorkspace(workspaceId) {
   if (!currentUser) throw new Error('ログインが必要です');
+  if (workspaceSaver?.isDirty()) throw new Error('未保存の変更があります。同期の状態を確認してください。');
   const available = await refreshWorkspaces();
   const selected = available.find(item => item.id === workspaceId);
   if (!selected) throw new Error('共有スペースを開けません');
 
   if (stopWorkspace) stopWorkspace();
+  clearTimeout(saveTimer);
+  workspaceSaver = null;
   currentWorkspace = selected;
+  const uid = currentUser.uid;
+  const workspaceRef = doc(db, 'workspaces', selected.id);
+  const recoveryKey = `okane-unsaved:${uid}:${selected.id}`;
+  const previousRecovery = localStorage.getItem(recoveryKey);
+  if (previousRecovery) {
+    localStorage.setItem(`${recoveryKey}:archive:${crypto.randomUUID()}`, previousRecovery);
+    localStorage.removeItem(recoveryKey);
+    statusHandler('error', new Error('前回の未保存の変更をこの端末に保管しています。サーバーの内容を読み込みます。'));
+  }
+  const { saveSnapshot, createCoordinator } = globalThis.RedesignSyncCoordinator;
+  workspaceSaver = createCoordinator({
+    retain: (state, metadata) => localStorage.setItem(recoveryKey, JSON.stringify({ format: 'money-unsaved-entry-v2', state, ...metadata })),
+    clearRetained: () => localStorage.removeItem(recoveryKey),
+    onStatus: (...args) => {
+      if (currentWorkspace?.id === selected.id && currentUser?.uid === uid) statusHandler(...args);
+    },
+    applyRemote: (state, meta) => remoteHandler(state, meta),
+    write: request => saveSnapshot({ ...request, db, ref: workspaceRef, uid, runTransaction, candidateRef: id => doc(workspaceRef, 'importCandidates', id), updatedAt: serverTimestamp() })
+  });
+  const saver = workspaceSaver;
   localStorage.setItem(ACTIVE_WORKSPACE_KEY, selected.id);
   startCandidateWatch();
   startReceiptWatch();
@@ -143,7 +173,16 @@ async function selectWorkspace(workspaceId) {
       const data = snapshot.data();
       currentWorkspace = { ...workspaceView(snapshot) };
       const meta = { initial: first, updatedBy: data.updatedBy || '', pending: snapshot.metadata.hasPendingWrites };
-      if (data.state && !snapshot.metadata.hasPendingWrites) remoteHandler(clone(data.state), meta);
+      if (data.state && !snapshot.metadata.hasPendingWrites) {
+        try {
+          if (data.state.modelVersion !== undefined || data.state.bills !== undefined) throw new Error('新形式の家計です。対応した画面で開いてください。');
+          saver.receive(clone(data.state), data.revision === undefined ? 0 : data.revision, meta);
+        } catch (error) {
+          statusHandler('error', error);
+          if (first) { first = false; reject(error); }
+          return;
+        }
+      }
       if (first) {
         first = false;
         resolve(data.state ? clone(data.state) : null);
@@ -174,24 +213,23 @@ async function connect(initialState, onRemote, onStatus, onCandidates, onReceipt
   return getSession();
 }
 
-function queueSave(nextState) {
-  if (!currentUser || !currentWorkspace) return;
-  const workspaceId = currentWorkspace.id;
-  const payload = clone(nextState);
+function queueSave(nextState, acceptance) {
+  if (!currentUser || !currentWorkspace || !workspaceSaver) return false;
   clearTimeout(saveTimer);
-  statusHandler('saving');
-  saveTimer = setTimeout(async () => {
-    try {
-      await setDoc(doc(db, 'workspaces', workspaceId), {
-        state: payload,
-        updatedAt: serverTimestamp(),
-        updatedBy: currentUser.uid
-      }, { merge: true });
-      statusHandler('saved');
-    } catch (error) {
-      statusHandler('error', error);
-    }
-  }, 450);
+  try {
+    workspaceSaver.enqueue(clone(nextState), acceptance);
+    const saver = workspaceSaver;
+    saveTimer = setTimeout(() => saver.flush(), 450);
+    return true;
+  } catch (error) { statusHandler('error', error); return false; }
+}
+
+async function flushPendingSave() {
+  const saver = workspaceSaver;
+  if (!saver) throw new Error('クラウド保存が開始されていません');
+  clearTimeout(saveTimer);
+  await saver.flush();
+  if (saver.isDirty() || saver.isBlocked()) throw new Error('変更をクラウドに保存できませんでした');
 }
 
 async function addMember(memberUid) {
@@ -240,15 +278,35 @@ function startCandidateWatch() {
   stopCandidates = onSnapshot(
     collection(db, 'workspaces', workspaceId, 'importCandidates'),
     snapshot => candidateHandler(snapshot.docs.map(item => ({ id: item.id, ...item.data() }))),
-    () => candidateHandler([])
+    error => statusHandler('error', error)
   );
 }
 
 async function updateImportCandidate(candidateId, patch) {
   if (!currentUser || !currentWorkspace) throw new Error('ログインが必要です');
-  await updateDoc(doc(db, 'workspaces', currentWorkspace.id, 'importCandidates', candidateId), {
-    ...patch,
-    updatedAt: serverTimestamp()
+  if (patch.status !== 'ignored') throw new Error('取込候補の操作が不正です');
+  const ref = doc(db, 'workspaces', currentWorkspace.id, 'importCandidates', candidateId);
+  await runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists() || !['pending', 'needs_review'].includes(snapshot.data().status)) {
+      throw new Error('メール候補は別の端末で更新されました');
+    }
+    transaction.update(ref, { status: 'ignored', updatedAt: serverTimestamp() });
+  });
+}
+
+async function correctImportCandidateType(candidateId, expected, confirmed) {
+  if (!currentUser || !currentWorkspace) throw new Error('ログインが必要です');
+  if (typeof candidateId !== 'string' || !candidateId || candidateId.includes('/')) throw new Error('候補IDを確認してください');
+  const uid = currentUser.uid, workspaceId = currentWorkspace.id;
+  const ref = doc(db, 'workspaces', workspaceId, 'importCandidates', candidateId);
+  return runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(ref);
+    if (currentUser?.uid !== uid || currentWorkspace?.id !== workspaceId) throw new Error('家計が切り替わりました。通知を確認し直してください');
+    if (!snapshot.exists()) throw new Error('候補が見つかりません');
+    const patch = globalThis.RedesignSyncCoordinator.purchaseCandidateCorrection(snapshot.data(), expected, confirmed);
+    transaction.update(ref, { ...patch, updatedAt: serverTimestamp() });
+    return patch;
   });
 }
 
@@ -537,7 +595,8 @@ async function addToInventory(plan) {
       unit: row.unit,
       category: row.category,
       purchaseRef: row.purchaseRef,
-      purchasePrice: row.purchasePrice,
+      // 家で共有する在庫に購入金額は載せない。金額は本人のレシート明細に残る。
+      ...(householdId ? {} : { purchasePrice: row.purchasePrice }),
       // なかみメモが「使い切った／捨てた」をこの共有スペースの明細へ返すのに使う
       purchaseWorkspaceId: workspaceId,
       createdAt: now,
@@ -637,6 +696,7 @@ function getSession() {
 
 async function signOutCurrentUser() {
   clearTimeout(saveTimer);
+  workspaceSaver = null;
   if (stopWorkspace) stopWorkspace();
   if (stopCandidates) stopCandidates();
   if (stopReceipts) stopReceipts();
@@ -668,7 +728,104 @@ async function signInCurrentUser() {
   return credential;
 }
 
+async function readCloudBackup() {
+  const user = currentUser;
+  const workspaceId = currentWorkspace?.id;
+  if (!user || !workspaceId) throw new Error('ログインして家計を開いてください');
+  const token = await user.getIdToken();
+  const signal = AbortSignal.timeout(60000);
+  const ensureSession = () => {
+    if (currentUser !== user || currentWorkspace?.id !== workspaceId) throw new Error('読み取り中に家計が切り替わりました');
+  };
+  const call = async (url, body) => {
+    ensureSession();
+    const response = await fetch(url, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { Authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      cache: 'no-store', signal
+    });
+    if (!response.ok) throw new Error('クラウドの取得に失敗しました（HTTP ' + response.status + '）');
+    return response.json();
+  };
+  const saver = workspaceSaver;
+  const snapshot = await globalThis.RedesignBackupRead.readCurrentSnapshot({
+    projectId: firebaseConfig.projectId,
+    workspaceId,
+    beforeRead: async () => {
+      // 送信中の通常保存を待つ。競合で退避中でもクラウド原本の取得は妨げない。
+      await saver?.flush();
+      ensureSession();
+    },
+    getJson: url => call(url),
+    postJson: (url, body) => call(url, body)
+  });
+  ensureSession();
+  return snapshot;
+}
+
+function readUnsavedRecovery() {
+  if (!currentUser || !currentWorkspace) throw new Error('ログインして家計を開いてください');
+  return globalThis.RedesignSyncCoordinator.readRecovery(localStorage, currentUser.uid, currentWorkspace.id);
+}
+
+async function restoreCloudBackup(snapshot, resume = false) {
+  const user = currentUser;
+  const workspaceId = currentWorkspace?.id;
+  if (!user || !workspaceId) throw new Error('ログインして家計を開いてください');
+  await flushPendingSave();
+  const recoveryKey = 'okane-cloud-restore:' + user.uid;
+  const retained = resume ? JSON.parse(localStorage.getItem(recoveryKey) || 'null') : null;
+  if (resume && !retained) throw new Error('再開する復元がありません');
+  if (!resume && localStorage.getItem(recoveryKey)) throw new Error('前の復元を先に確認してください');
+  const source = resume ? retained.snapshot : snapshot;
+  const targetId = resume ? retained.receipt.targetId : 'restore-' + crypto.randomUUID();
+  const plan = globalThis.RedesignRestorePlan.planRestore({ snapshot: source, targetId, uid: user.uid });
+  const prefix = 'projects/' + firebaseConfig.projectId + '/databases/(default)/documents/workspaces/';
+  if (plan.rootWrites[0].update.name !== prefix + targetId) throw new Error('このプロジェクトの原本を選択してください');
+  const token = await user.getIdToken();
+  const ensureSession = () => {
+    if (currentUser !== user || currentWorkspace?.id !== workspaceId) throw new Error('復元中に家計が切り替わりました');
+  };
+  const base = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId + '/databases/(default)/documents';
+  const call = async (url, options = {}) => {
+    ensureSession();
+    const response = await fetch(url, {
+      ...options, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      cache: 'no-store', signal: AbortSignal.timeout(60000)
+    });
+    if (!response.ok) throw new Error('復元先の通信に失敗しました（HTTP ' + response.status + '）');
+    return response.json();
+  };
+  const readBack = (id, time) => globalThis.RedesignBackupRead.readSnapshot({
+    projectId: firebaseConfig.projectId, workspaceId: id, readTime: time, getJson: url => call(url)
+  });
+  const commitWrites = writes => call(base + ':commit', { method: 'POST', body: JSON.stringify({ writes }) });
+  if (!resume) localStorage.setItem(recoveryKey, JSON.stringify({
+    snapshot: source, receipt: { status: 'root_uncertain', targetId }
+  }));
+  const options = { snapshot: source, uid: user.uid, commitWrites, readBack };
+  const result = resume
+    ? await globalThis.RedesignRestoreExecute.resumeRestore({
+      ...options, receipt: retained.receipt,
+      readCurrent: async id => {
+        const document = await call(base + '/workspaces/' + encodeURIComponent(id));
+        return readBack(id, document.updateTime);
+      }
+    })
+    : await globalThis.RedesignRestoreExecute.executeRestore({ ...options, targetId });
+  ensureSession();
+  if (result.status === 'verified') {
+    localStorage.removeItem(recoveryKey);
+    await refreshWorkspaces();
+  } else localStorage.setItem(recoveryKey, JSON.stringify({ snapshot: source, receipt: result }));
+  return result;
+}
+
 export const firebaseSync = {
+  restoreCloudBackup,
+  readUnsavedRecovery,
+  readCloudBackup,
   waitForAuth: async () => {
     await authReady;
     return currentUser ? { uid: currentUser.uid, email: currentUser.email || '' } : null;
@@ -679,11 +836,13 @@ export const firebaseSync = {
   selectWorkspace,
   refreshWorkspaces,
   queueSave,
+  flushPendingSave,
   addMember,
   removeMember,
   renameWorkspace,
   getSession,
   updateImportCandidate,
+  correctImportCandidateType,
   deleteImportCandidate,
   saveReceipt,
   updateReceiptItem,

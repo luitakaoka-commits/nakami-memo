@@ -203,6 +203,89 @@ test('記録が無い期間では合計が0になる', () => {
   equal(summary.expense.categories.length, 0, 'カテゴリなし');
 });
 
+test('利用時刻の訂正は日本時間で保存し、変更しない時刻の秒も保持する', () => {
+  equal(engine.editedUsageInstant({ date: '2026-10-20', time: '00:05' }), '2026-10-19T15:05:00.000Z', '日付境界の訂正');
+  const previous = '2026-10-20T06:13:25.000Z';
+  equal(engine.editedUsageInstant({ date: '2026-10-20', time: '15:13', previous }), previous, '未編集の秒');
+});
+
+test('不明な利用時刻を空欄に戻せて、利用日を変更すると古い日付を残さない', () => {
+  const previous = '2026-10-20T06:13:25.000Z';
+  equal(engine.editedUsageInstant({ date: '2026-10-20', time: '', previous }), '', '不明な時刻を消す');
+  equal(engine.editedUsageInstant({ date: '2026-10-21', time: '15:13', previous }), '2026-10-21T06:13:00.000Z', '利用日の訂正');
+});
+
+test('存在しない日付と不正な利用時刻を保存しない', () => {
+  for (const input of [{ date: '2026-02-30', time: '12:00' }, { date: '2026-10-20', time: '24:00' }, { date: '2026-10-20', time: '15:60' }]) {
+    let rejected = false;
+    try { engine.editedUsageInstant(input); } catch (error) { rejected = error instanceof RangeError; }
+    assert(rejected, '不正な日時を受け入れた');
+  }
+});
+
+function correctionFixture() {
+  const cards = ['old', 'right'].map(id => ({ ...CARD, id, closingDay: 15 }));
+  const detail = tx({ id: 'detail', entryType: 'itemized', amount: 988, transactionDate: '2026-08-10', dueDate: '2026-09-10', status: 'absorbed', cardId: 'old', absorbedBy: 'old-bill' });
+  const bills = cards.map(card => tx({ id: card.id + '-bill', entryType: 'statement', amount: 10000, dueDate: '2026-09-10', transactionDate: '2026-09-10', status: 'settled', cardId: card.id }));
+  return { cards, transactions: [detail, ...bills] };
+}
+test('吸収済み明細のカード訂正は総額や引落状態を変えず内訳だけを移す', () => {
+  const f = correctionFixture(), before = JSON.stringify(f);
+  const next = engine.correctAbsorbedCard('detail', 'right', f.transactions, f.cards);
+  equal(JSON.stringify(next), JSON.stringify({ ...f.transactions[0], cardId: 'right', absorbedBy: 'right-bill' }), '変更範囲');
+  equal(JSON.stringify(f), before, '入力を変更しない');
+  const after = f.transactions.map(t => t.id === next.id ? next : t);
+  equal(engine.detailsOfStatement(after[1], after, f.cards).length, 0, '旧請求から外す');
+  equal(engine.detailsOfStatement(after[2], after, f.cards).length, 1, '正しい請求の内訳');
+  equal(JSON.stringify(engine.summarizePeriod(after)), JSON.stringify(engine.summarizePeriod(f.transactions)), '支出を再計上しない');
+});
+test('訂正先の引落済み請求が不明・重複・別期間なら明細を移さない', () => {
+  for (const change of [f => f.transactions.pop(), f => f.transactions.push({ ...f.transactions[2], id: 'duplicate' }), f => { f.transactions[2].dueDate = '2026-10-13'; }, f => { f.transactions[2].status = 'planned'; }, f => { f.transactions[0].status = 'planned'; }, f => { f.transactions[1].cardId = 'right'; }, f => { f.transactions[2].amount = 1; }]) {
+    const f = correctionFixture(); change(f); const before = JSON.stringify(f);
+    let rejected = false; try { engine.correctAbsorbedCard('detail', 'right', f.transactions, f.cards); } catch (_) { rejected = true; }
+    assert(rejected, '曖昧な訂正を受け入れた'); equal(JSON.stringify(f), before, '拒否時も原本を保持');
+  }
+});
+test('返金と紐付く明細のカードは単独で訂正しない', () => {
+  const f = correctionFixture(); f.transactions.push(tx({ id: 'refund', refundEvidence: { targetId: 'detail' } }));
+  let rejected = false; try { engine.correctAbsorbedCard('detail', 'right', f.transactions, f.cards); } catch (_) { rejected = true; }
+  assert(rejected, '返金との紐付けを壊した');
+});
+
+test('未引落明細の取消と復帰は原本と金銭項目を保持する', () => {
+  const item = tx({ id: 'cancel-me', amount: 9600, transactionDate: '2026-08-20', dueDate: '2026-09-10', entryType: 'itemized' });
+  const rows = [item], before = JSON.stringify(rows);
+  const cancelled = engine.setUnsettledCardCancellation(item.id, rows, [CARD], { cancelled: true, confirmed: true });
+  equal(JSON.stringify(cancelled), JSON.stringify({ ...item, status: 'cancelled' }), '状態以外を変えた');
+  equal(JSON.stringify(rows), before, '入力原本を変更した');
+  equal(engine.groupCardCharges([cancelled], [CARD]).length, 0, '取消済みを再請求した');
+  const restored = engine.setUnsettledCardCancellation(item.id, [cancelled], [CARD], { cancelled: false, confirmed: true });
+  equal(JSON.stringify(restored), JSON.stringify(item), '元の利用に戻らない');
+});
+
+test('引落済み・請求内訳・不正な明細・不明なカードの単独取消を拒否する', () => {
+  const item = tx({ id: 'cancel-me', amount: 500, transactionDate: '2026-08-20', dueDate: '2026-09-10', entryType: 'itemized' });
+  for (const patch of [{ status: 'settled' }, { status: 'absorbed' }, { entryType: 'statement' }, { amount: -500 }, { absorbedBy: 'bill' }, { sourceAccountId: 'other' }, { cardId: 'missing' }]) {
+    let rejected = false;
+    try { engine.setUnsettledCardCancellation(item.id, [{ ...item, ...patch }], [CARD], { cancelled: true, confirmed: true }); } catch (_) { rejected = true; }
+    assert(rejected, '不正な単独取消を受け入れた');
+  }
+});
+
+test('確認なし・返金連携・請求総額がある期間では単独取消しない', () => {
+  const item = tx({ id: 'cancel-me', amount: 500, transactionDate: '2026-08-20', dueDate: '2026-09-10', entryType: 'itemized' });
+  const cases = [
+    { rows: [item], confirmed: false },
+    { rows: [item, tx({ id: 'refund', refundEvidence: { targetId: item.id } })], confirmed: true },
+    { rows: [item, tx({ id: 'bill', entryType: 'statement', transactionDate: '2026-08-20', dueDate: '2026-09-10', amount: 500 })], confirmed: true },
+    { rows: [item, { ...item }], confirmed: true }
+  ];
+  for (const c of cases) {
+    let rejected = false; try { engine.setUnsettledCardCancellation(item.id, c.rows, [CARD], { cancelled: true, confirmed: c.confirmed }); } catch (_) { rejected = true; }
+    assert(rejected, '照合を要する取消を受け入れた');
+  }
+});
+
 if (!failures.length) { console.log(JSON.stringify({ suite: 'records-view', total, passed: total, failed: 0 })); process.exit(0); }
 console.log(JSON.stringify({ suite: 'records-view', total, passed: total - failures.length, failed: failures.length, failures }, null, 2));
 process.exit(1);

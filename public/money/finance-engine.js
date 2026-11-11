@@ -72,6 +72,16 @@
     return `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`;
   }
 
+  /** 編集画面で明示された日本時間だけを使う。空欄は時刻不明へ戻す。 */
+  function editedUsageInstant({ date, time, previous = '' }) {
+    if (time === '') return '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '') || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time || '')) throw new RangeError('利用日と利用時刻を確認してください');
+    const value = new Date(`${date}T${time}:00+09:00`);
+    if (!Number.isFinite(value.getTime()) || jstDateStringOf(value.toISOString()) !== date) throw new RangeError('利用日と利用時刻を確認してください');
+    if (jstDateStringOf(previous) === date && jstTimeStringOf(previous) === time) return previous;
+    return value.toISOString();
+  }
+
   /** 「今日」を日本時間の 'YYYY-MM-DD' で返す。実行環境のタイムゾーンに依存しない。 */
   function jstToday(now = new Date()) {
     return jstDateStringOf(now instanceof Date ? now.toISOString() : now);
@@ -274,9 +284,12 @@
     return day === 0 || day === 6;
   }
 
-  /** 土日でも祝日でもない日を営業日とする */
+  /** 土日・祝日・銀行の年末年始休業日を除いて営業日とする。 */
   function isJapaneseBusinessDay(dateInput, options = {}) {
-    return !isWeekend(dateInput) && !isJapaneseHoliday(dateInput, options);
+    const date = parseLocalDate(dateInput);
+    const bankYearEndOrNewYear = (date.getMonth() === 11 && date.getDate() === 31)
+      || (date.getMonth() === 0 && (date.getDate() === 2 || date.getDate() === 3));
+    return !bankYearEndOrNewYear && !isWeekend(date) && !isJapaneseHoliday(date, options);
   }
 
   /** 営業日でなければ、営業日になるまで前へ戻す（給与の繰り上げ用）。営業日ならそのまま返す。 */
@@ -287,6 +300,7 @@
       cursor = addDays(cursor, -1);
       guard += 1;
     }
+    if (!isJapaneseBusinessDay(cursor, options)) throw new Error('前の銀行営業日を確認できません');
     return toDateString(cursor);
   }
 
@@ -298,6 +312,7 @@
       cursor = addDays(cursor, 1);
       guard += 1;
     }
+    if (!isJapaneseBusinessDay(cursor, options)) throw new Error('次の銀行営業日を確認できません');
     return toDateString(cursor);
   }
 
@@ -658,6 +673,15 @@
    * 明細は内数として計算から外す。請求総額がまだ無いサイクルは明細を採用するため、
    * 「利用してから総額を入力するまで」の空白期間も金額に反映される。
    */
+  function hasConfirmedCardStatement(transaction, cycle) {
+    const proof = transaction?.statementEvidence;
+    return Boolean(transaction?.kind === 'payment' && transaction.entryType === 'statement' && proof?.source === 'issuer-manual'
+      && Number.isSafeInteger(transaction.amount) && transaction.amount > 0 && proof.amount === transaction.amount
+      && proof.cardId === transaction.cardId && proof.accountId === transaction.sourceAccountId
+      && proof.dueDate === transaction.dueDate && Boolean(cycle) && proof.cycle === cycle
+      && typeof proof.checkedAt === 'string' && Number.isFinite(Date.parse(proof.checkedAt)));
+  }
+
   function groupCardCharges(transactions = [], cards = [], options = {}) {
     const cardsById = new Map((cards || []).map(card => [card.id, card]));
     const groups = new Map();
@@ -718,6 +742,25 @@
    * 旧アプリでは引落予定日だけを登録していたため、これらは既に発生した利用として扱い、
    * 安全側（控除する側）に倒す。利用日はユーザーがあとから修正できる。
    */
+  function capUnsettledCardCredits(entries, cards = [], options = {}) {
+    if (!entries.some(item => item.refundEvidence?.creditDate)) return entries;
+    const cardMap = new Map(cards.map(card => [card.id, card]));
+    const available = new Map();
+    const keyOf = item => JSON.stringify([item.cardId, item.dueDate, cardBillingCycleOf(item, cardMap.get(item.cardId), options)]);
+    for (const item of entries) {
+      if (item.kind !== 'payment' || !item.cardId || item.refundEvidence?.creditDate) continue;
+      const key = keyOf(item);
+      available.set(key, (available.get(key) || 0) + Number(item.amount || 0));
+    }
+    return entries.map(item => {
+      if (!item.refundEvidence?.creditDate) return item;
+      const key = keyOf(item);
+      const credit = Math.min(Math.max(0, available.get(key) || 0), Math.max(0, -item.amount));
+      available.set(key, (available.get(key) || 0) - credit);
+      return { ...item, amount: credit ? -credit : 0 };
+    });
+  }
+
   function calculateUnpaidCardUsage(transactions = [], today, options = {}) {
     const deadline = options.deadline || '';
     const groups = groupCardCharges(transactions, options.cards || [], options);
@@ -725,15 +768,17 @@
     // 請求サイクルごとに採用された取引だけを、未払い債務として集める。
     //  請求総額 : 締め済みで金額が確定しているため、登録時点から引落日まで控除する
     //  明細     : 実際に利用済みのものだけを控除する（未来の利用予定は含めない）
-    const items = [];
+    let items = [];
     groups.forEach(group => {
       group.adopted.forEach(item => {
+        if (item.isVirtual === true && item.recurringPlanId) return;
         if (group.source === STATEMENT) { items.push(item); return; }
         if (item.dateEstimated === true) { items.push(item); return; }
         const usedOn = usageDateOf(item);
         if (usedOn && usedOn <= today) items.push(item);
       });
     });
+    items = capUnsettledCardCredits(items, options.cards || [], options);
 
     const sum = list => list.reduce((total, item) => total + Number(item.amount || 0), 0);
     const withinDeadline = deadline ? items.filter(item => item.dueDate && item.dueDate <= deadline) : items;
@@ -776,18 +821,46 @@
    * recurringPlans を指定期間の仮想取引へ展開する。
    * 同じ plan / 同じ日付の実取引が既にある場合は展開しない（二重計上を防ぐ）。
    */
-  function expandScheduledTransactions(recurringPlans = [], fromDate, toDate, existingTransactions = []) {
+  function recurringOccurrenceDate(transaction) {
+    const prefix = 'recurring:' + transaction.recurringPlanId + ':';
+    const encoded = typeof transaction.id === 'string' && transaction.id.startsWith(prefix)
+      ? transaction.id.slice(prefix.length) : '';
+    for (const date of [transaction.scheduledDate, encoded]) {
+      if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+          && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date) return date;
+    }
+    return transaction.dueDate;
+  }
+
+  function recurringInterval(plan) {
+    const interval = plan.intervalMonths ?? 1;
+    if (!Number.isInteger(interval) || interval < 1 || interval > 12) return null;
+    if (interval > 1) {
+      const date = plan.startDate;
+      if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+          || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) return null;
+    }
+    return interval;
+  }
+
+  function expandScheduledTransactions(recurringPlans = [], fromDate, toDate, existingTransactions = [], options = {}) {
     if (!fromDate || !toDate || fromDate > toDate) return [];
     const taken = new Set(existingTransactions
       .filter(transaction => transaction && transaction.recurringPlanId)
-      .map(transaction => `${transaction.recurringPlanId}:${transaction.dueDate}`));
+      .map(transaction => `${transaction.recurringPlanId}:${String(recurringOccurrenceDate(transaction) || '').slice(0, 7)}`));
 
     const results = [];
     const start = parseLocalDate(fromDate);
     const end = parseLocalDate(toDate);
 
+    const cards = new Map((options.cards || []).map(card => [card.id, card]));
     recurringPlans.forEach(plan => {
       if (!plan || plan.isActive === false) return;
+      const card = plan.cardId ? cards.get(plan.cardId) : null;
+      if (plan.cardId && (!card?.accountId || plan.kind !== 'payment')) return;
+      const interval = recurringInterval(plan);
+      if (interval === null) return;
+      const anchorMonth = interval > 1 ? Number(plan.startDate.slice(0, 4)) * 12 + Number(plan.startDate.slice(5, 7)) - 1 : null;
       const amount = Number(plan.amount || 0);
       if (!amount) return;
       const dayOfMonth = Math.min(Math.max(Number(plan.dayOfMonth) || 1, 1), 31);
@@ -796,25 +869,28 @@
       while (cursor <= end && guard < 120) {
         const occurrence = dateAt(cursor.getFullYear(), cursor.getMonth(), dayOfMonth);
         const key = toDateString(occurrence);
-        if (occurrence >= start && occurrence <= end
+        const monthOffset = anchorMonth === null ? 0 : cursor.getFullYear() * 12 + cursor.getMonth() - anchorMonth;
+        if (monthOffset >= 0 && monthOffset % interval === 0 && occurrence >= start && occurrence <= end
           && (!plan.startDate || key >= plan.startDate)
           && (!plan.endDate || key <= plan.endDate)
-          && !taken.has(`${plan.id}:${key}`)) {
+          && !taken.has(`${plan.id}:${key.slice(0, 7)}`)) {
           results.push({
             id: `recurring:${plan.id}:${key}`,
             kind: plan.kind || 'payment',
             amount,
             transactionDate: key,
-            dueDate: key,
+            dueDate: card ? calculateCardPaymentDate(key, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, options.holidayOptions) : key,
             status: 'planned',
-            sourceAccountId: plan.sourceAccountId || '',
+            sourceAccountId: card?.accountId || plan.sourceAccountId || '',
             destinationAccountId: plan.destinationAccountId || '',
             transferType: plan.transferType || 'external',
-            cardId: '',
+            cardId: card?.id || '',
+            ...(card ? { entryType: 'itemized' } : {}),
             category: plan.category || '固定費',
             memo: plan.name || '固定費',
             affectsForecast: true,
             recurringPlanId: plan.id,
+            scheduledDate: key,
             isVirtual: true
           });
         }
@@ -895,20 +971,19 @@
     const includeSalary = input.includeSalary !== false;
 
     // 同じ請求サイクルに請求総額と明細が併存する場合、明細は内数なので銀行残高からは引かない
-    const cardGroups = groupCardCharges(input.transactions || [], input.cards || [], holidayOptions);
+    const virtualTransactions = expandScheduledTransactions(
+      input.recurringPlans || [], today, endDate, input.transactions || [], { cards: input.cards, holidayOptions }
+    );
+    const cardGroups = groupCardCharges([...(input.transactions || []), ...virtualTransactions], input.cards || [], holidayOptions);
     const suppressedIds = new Set(cardGroups.flatMap(group => group.suppressed).map(item => item.id));
 
-    const realTransactions = (input.transactions || []).filter(transaction => transaction
+    const realTransactions = capUnsettledCardCredits((input.transactions || []).filter(transaction => transaction
       && transaction.status === 'planned'
       && transaction.affectsForecast !== false
       && !suppressedIds.has(transaction.id)
       && (includeSalary || !transaction.salaryPaymentMonth)
       && transaction.dueDate >= today
-      && transaction.dueDate <= endDate);
-
-    const virtualTransactions = expandScheduledTransactions(
-      input.recurringPlans || [], today, endDate, input.transactions || []
-    );
+      && transaction.dueDate <= endDate), input.cards || [], holidayOptions);
 
     // 記録に給与の取引がある月は、その取引（realTransactions）で数える。裏での見込みは足さない
     const salaryEvents = includeSalary
@@ -933,7 +1008,7 @@
       salary
     }));
 
-    const events = [...realTransactions, ...virtualTransactions, ...salaryTransactions]
+    const events = [...realTransactions, ...virtualTransactions.filter(item => item.dueDate <= endDate && !suppressedIds.has(item.id)), ...salaryTransactions]
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
     const balances = new Map(accounts.map(item => [item.id, Number(item.currentBalance || 0)]));
@@ -1128,7 +1203,7 @@
       && transaction.dueDate <= deadline;
 
     const virtualTransactions = expandScheduledTransactions(
-      input.recurringPlans || [], today, deadline, input.transactions || []
+      input.recurringPlans || [], today, deadline, input.transactions || [], { cards: input.cards, holidayOptions }
     );
     const events = [...(input.transactions || []).filter(withinRange), ...virtualTransactions];
 
@@ -1163,9 +1238,12 @@
       : [];
     const salaryTotal = salaryEvents.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
 
-    const unpaidCard = calculateUnpaidCardUsage(input.transactions || [], today, {
+    const unpaidCard = calculateUnpaidCardUsage([...(input.transactions || []), ...virtualTransactions], today, {
       deadline, cards: input.cards || [], ...holidayOptions
     });
+
+    const plannedCardItems = unpaidCard.groups.flatMap(group => group.adopted).filter(item => item.isVirtual === true && item.recurringPlanId);
+    const plannedCardTotal = plannedCardItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
     // 二重計上していないことを確認できるよう、意図的に現金支出から外したカード引落を保持する
     const excludedCardDues = events.filter(item => item.kind === 'payment' && item.cardId);
@@ -1175,11 +1253,12 @@
       + salaryTotal
       - cashOutflow
       - unpaidCard.total
+      - plannedCardTotal
       - savingTotal
       - nisaTotal
       - defenseLine;
 
-    const days = daysBetween(today, deadline);
+    const days = daysBetween(today, deadline) + (input.inclusiveDeadline === true ? 1 : 0);
     const dailyDays = Math.max(days, 1);
     const daily = total >= 0 ? Math.floor(total / dailyDays) : Math.ceil(total / dailyDays);
 
@@ -1199,6 +1278,7 @@
       cashOutflow,
       cashOutflowItems,
       unpaidCardTotal: unpaidCard.total,
+      plannedCardTotal,
       unpaidCardCount: unpaidCard.count,
       unpaidCardItems: unpaidCard.items,
       unpaidCardByCard: unpaidCard.byCard,
@@ -1224,6 +1304,7 @@
         { key: 'salary', label: '期限までの給与', amount: salaryTotal, direction: 'in' },
         { key: 'cashOut', label: '期限までの現金支出', amount: -cashOutflow, direction: 'out' },
         { key: 'unpaidCard', label: '未払いのカード利用', amount: -unpaidCard.total, direction: 'out' },
+        ...(plannedCardTotal ? [{ key: 'plannedCard', label: '期限までのカード定期利用見込み', amount: -plannedCardTotal, direction: 'out' }] : []),
         { key: 'saving', label: '期限までの貯金', amount: -savingTotal, direction: 'out' },
         { key: 'nisa', label: '期限までのNISA', amount: -nisaTotal, direction: 'out' },
         { key: 'defense', label: '最低限残す金額', amount: -defenseLine, direction: 'out' }
@@ -1452,6 +1533,48 @@
     });
     // 総額を確定した後で届いた明細も、既に吸収した内訳と一緒に返す。
     return sortByUsageDesc([...absorbed, ...siblings]);
+  }
+
+  /** 引落済み総額は動かさず、通知のカードに合わせて既存の内訳を付け替える。 */
+  function setUnsettledCardCancellation(id, transactions = [], cards = [], options = {}) {
+    if (options.confirmed !== true || typeof options.cancelled !== 'boolean') throw new Error('取消の原本確認が必要です');
+    const matches = transactions.filter(item => item.id === id);
+    const current = matches[0];
+    const cardMatches = cards.filter(card => card.id === current?.cardId);
+    const card = cardMatches[0];
+    if (matches.length !== 1 || !current || current.kind !== 'payment' || current.entryType !== 'itemized'
+      || !['planned', 'cancelled'].includes(current.status) || current.absorbedBy || current.refundEvidence
+      || !Number.isSafeInteger(current.amount) || current.amount <= 0 || cardMatches.length !== 1
+      || !card?.accountId || card.accountId !== current.sourceAccountId) throw new Error('未引落のカード利用明細だけを取消できます');
+    if (transactions.some(item => item.refundEvidence?.targetId === id && item.status !== 'cancelled')) throw new Error('返金と紐付いているため個別に取消できません');
+    const cycle = cardBillingCycleOf(current, card, options);
+    if (!cycle || transactions.some(item => item.id !== id && item.cardId === card.id && item.kind === 'payment'
+      && item.entryType === 'statement' && ['planned', 'settled'].includes(item.status)
+      && cardBillingCycleOf(item, card, options) === cycle)) throw new Error('請求総額がある期間は明細と請求の対応を確認してください');
+    return { ...current, status: options.cancelled ? 'cancelled' : 'planned' };
+  }
+
+  function correctAbsorbedCard(id, cardId, transactions = [], cards = [], options = {}) {
+    const matches = transactions.filter(item => item.id === id);
+    const cardMatches = cards.filter(item => item.id === cardId);
+    const current = matches[0], card = cardMatches[0];
+    if (matches.length !== 1 || cardMatches.length !== 1 || !card.accountId || !current
+      || current.kind !== 'payment' || entryTypeOf(current) !== ITEMIZED || current.status !== 'absorbed'
+      || current.cardId === cardId || !current.absorbedBy) throw new Error('訂正する明細とカードを確認してください');
+    if (current.refundEvidence || transactions.some(item => item.refundEvidence?.targetId === id)) throw new Error('返金と紐付いた明細は個別にカードを変更できません');
+    const originals = transactions.filter(item => item.id === current.absorbedBy);
+    const original = originals[0];
+    if (originals.length !== 1 || original.kind !== 'payment' || entryTypeOf(original) !== STATEMENT
+      || original.status !== 'settled' || original.cardId !== current.cardId || original.dueDate !== current.dueDate) throw new Error('元の引落済み請求との紐付けを確認してください');
+    const cycle = cardBillingCycleOf({ ...current, cardId }, card, options);
+    const destinations = transactions.filter(item => item.kind === 'payment' && entryTypeOf(item) === STATEMENT
+      && item.status === 'settled' && item.cardId === cardId && item.sourceAccountId === card.accountId
+      && item.dueDate === current.dueDate && cycle && cardBillingCycleOf(item, card, options) === cycle);
+    if (destinations.length !== 1) throw new Error('同じ請求期間の引落済み総額を1件に特定できません');
+    const includedAmount = detailsOfStatement(destinations[0], transactions, cards, options).reduce((sum, item) => sum + Number(item.amount), 0);
+    if (!Number.isSafeInteger(current.amount) || current.amount <= 0 || !Number.isSafeInteger(includedAmount)
+      || !Number.isSafeInteger(destinations[0].amount) || includedAmount + current.amount > destinations[0].amount) throw new Error('訂正後の明細が請求総額を超えるため確認が必要です');
+    return { ...current, cardId, sourceAccountId: card.accountId, absorbedBy: destinations[0].id };
   }
 
   /** 記録の集計で「支出」に数える取引か */
@@ -2015,13 +2138,13 @@
     parseLocalDate, toDateString, addDays, daysBetween, daysInMonth,
     monthKeyOf, shiftMonthKey, calendarMonthRange, monthRangeOf,
     // 日本時間(JST)と利用時刻
-    jstDateStringOf, jstTimeStringOf, jstToday, usageInstantOf, sortByUsageDesc,
+    jstDateStringOf, jstTimeStringOf, editedUsageInstant, jstToday, usageInstantOf, sortByUsageDesc,
     // 祝日・営業日
     japaneseHolidayName, isJapaneseHoliday, isJapaneseBusinessDay,
     previousBusinessDay, nextBusinessDay, holidaysForYear,
     // カード
-    calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills,
-    closingMonthOf, cardBillingCycleOf, groupCardCharges, detailsOfStatement,
+    calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills, capUnsettledCardCredits,
+    closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement, correctAbsorbedCard, setUnsettledCardCancellation,
     // 記録の集計
     summarizePeriod,
     // 給与
@@ -2029,6 +2152,8 @@
     recordedSalaryMonths, salaryMonthsOutsideForecast, salaryRecordOf, planLegacySalaryRecovery, planSalaryRecords, salaryRecordSummary,
     // 予定
     expandScheduledTransactions,
+    recurringOccurrenceDate,
+    recurringInterval,
     // 2つの主計算（必ず別関数・別結果）
     calculateCashflowCheck, calculateSpendableAmount,
     // 「今使える金額」の派生

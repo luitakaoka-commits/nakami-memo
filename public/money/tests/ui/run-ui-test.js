@@ -14,7 +14,7 @@ const APP_PATH = process.env.APP_PATH || '/money/index.html';
 // 実行日のままにすると、日付が進むたびに黙って落ちる。
 const TODAY = '2026-09-02T09:00:00+09:00';
 const STUB = fs.readFileSync(process.env.STUB_PATH || path.join(__dirname, 'stub-firebase-sync.js'), 'utf8');
-const PORT = 8791;
+const PORT = Number(process.env.MONEY_UI_PORT || 8791);
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
@@ -64,6 +64,7 @@ const failures = [];
 const consoleErrors = [];
 
 function record(name, fn) {
+  if (process.env.UI_CHECK && !process.env.UI_CHECK.split(',').includes(name)) return Promise.resolve();
   return Promise.resolve()
     .then(fn)
     .then(() => { checks[name] = 'pass'; })
@@ -104,9 +105,32 @@ const closeModals = page => page.evaluate(() => {
   await page.goto(`http://localhost:${PORT}${APP_PATH}`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => Boolean(window.__YORYOKU__), null, { timeout: 10000 }).catch(() => {});
 
+  await record('approved_cashflow_layout', async () => {
+    const sections = page.locator('[data-daily-home] > .sheet');
+    assert(await sections.count() === 3, '資金繰りの3つの枠が揃っていない');
+    assert((await sections.nth(0).innerText()).includes('9月15日'), '締め日が金額の上にない');
+    assert((await sections.nth(1).locator('h2').innerText()) === '金額の計算', '計算内訳が独立した枠にない');
+    assert((await sections.nth(2).locator('h2').innerText()) === '確認事項', '確認事項の枠がない');
+    const toAmount = text => Number(text.replace(/−/g, '-').replace(/[^\d-]/g, ''));
+    const shown = toAmount(await sections.nth(0).locator('.amount').innerText());
+    const values = await sections.nth(1).locator('dd').allTextContents();
+    assert(shown === -10000 && toAmount(values.at(-1)) === shown && values.slice(0, -1).map(toAmount).reduce((a, b) => a + b, 0) === shown, '内訳が試算額と一致しない');
+    await sections.nth(2).locator('[data-action="prototype-account"]').click();
+    const detail = page.locator('#money-flow-dialog');
+    assert(await detail.isVisible(), '口座残高の詳細が開かない');
+    await detail.locator('.note-mark').click();
+    assert((await detail.locator('.note-glass').innerText()).includes('銀行の残高は未確認'), '残高の説明が開かない');
+    await detail.locator('[data-flow-close]').last().click();
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-page="cashflow"]').click();
+    assert(await page.locator('.forecast-bars .forecast-zero').count() === 1, '見通しの棒グラフが表示されない');
+    assert(await page.getByRole('heading', { name: '入出金と残高' }).isVisible(), '見通しの表が表示されない');
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+  });
+
   await record('initial_render', async () => {
     assert(await page.isVisible('#app-shell'), 'app-shell が表示されていない');
-    assert((await page.textContent('#page-title')).trim() === 'ホーム', 'ホームが表示されていない');
+    assert((await page.textContent('#page-title')).trim() === '資金繰り・試算', '資金繰り・試算が表示されていない');
     const migrated = await page.evaluate(() => {
       const state = window.__YORYOKU__.getState();
       const oldCard = state.transactions.find(item => item.id === 't1');
@@ -120,6 +144,163 @@ const closeModals = page => page.evaluate(() => {
     assert(Boolean(backup), '移行前バックアップが保存されていない');
   });
 
+  await record('home_cashflow_status', async () => {
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'スマホ画面が横にはみ出している');
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-page="cashflow"]').click();
+    assert((await page.textContent('#page-title')).trim() === '支払いの見通し', '詳細画面を開けない');
+    await page.getByText('引落の内訳', { exact: true }).click();
+    assert(await page.locator('.check-hero .stat-card').count() > 0, '詳細画面に金額の内訳がない');
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+  });
+
+  await record('daily_use_home', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+    await page.locator('#menu-button').click();
+    assert(await page.locator('#sidebar').evaluate(menu => menu.open), 'ハンバーガーメニューが開かない');
+    await page.locator('#sidebar [data-page="cashflow"]').click();
+    assert(await page.locator('.forecast-bars .forecast-zero').count() === 1, '予測残高の0円基準線がない');
+    assert(await page.locator('.forecast-bars rect').count() > 1, '予測残高を棒グラフで確認できない');
+    assert(!(await page.locator('#sidebar').evaluate(menu => menu.open)), '画面切替後もメニューが開いている');
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+    assert(await page.locator('[data-daily-home]').count() === 1, '新しい日常画面が表示されていない');
+    assert((await page.locator('.daily-hero').innerText()).includes('9月15日'), '主要カードの15日締めが表示されていない');
+    // 基準口座30万円−家賃8万円−カード8万円−予備15万円。別口座や予定給与は足さない。
+    const dailyShown = (await page.locator('.daily-amount').innerText()).replace(/−/g, '-').replace(/[^0-9-]/g, '');
+    assert(dailyShown === '-10000', `余力が基準口座と保守的な計算に一致しない: ${dailyShown}`);
+    const guidance = page.locator('[data-calculation] .operation-note');
+    const note = guidance.locator('.note-glass');
+    assert(!(await note.isVisible()), '使える額の説明が初期状態で開いている');
+    await guidance.locator('.note-mark').click();
+    assert(await note.isVisible() && (await note.innerText()).includes('9/15まで'), '丸い注意マークから締め日の説明を開けない');
+    await guidance.locator('summary').press('Enter');
+    assert(!(await note.isVisible()), 'キーボードで説明を閉じられない');
+    try {
+      await page.evaluate(() => window.__YORYOKU__.setImportCandidates([{ id: 'daily-live', status: 'pending', type: 'purchase', amount: 1000, usedDate: '2026-09-02' }]));
+      assert((await page.locator('.daily-checks').innerText()).includes('1件 ›'), '内訳画面でメール候補の更新が即時反映されない');
+    } finally {
+      await page.evaluate(() => window.__YORYOKU__.setImportCandidates([]));
+    }
+    for (const width of [320, 375, 414, 768]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const target of ['home', 'daily', 'cashflow']) {
+        await page.evaluate(p => window.__YORYOKU__.setPage(p), target);
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${target}が${width}pxで横にはみ出す`);
+        assert(await page.locator('.daily-home').isVisible(), `${target}の表示がない`);
+      }
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+    if (process.env.MONEY_DAILY_SCREENSHOT) {
+      await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+      await page.screenshot({ path: process.env.MONEY_DAILY_SCREENSHOT, fullPage: true });
+    }
+    if (process.env.MONEY_DAILY_DESKTOP_SCREENSHOT) {
+      await page.setViewportSize({ width: 768, height: 1024 });
+      await page.screenshot({ path: process.env.MONEY_DAILY_DESKTOP_SCREENSHOT, fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
+  });
+
+  await record('daily_confirmation_routes', async () => {
+    const snapshot = await page.evaluate(() => structuredClone(window.__YORYOKU__.getState()));
+    try {
+      await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+      assert(await page.locator('.daily-checks [data-check="imports"]').count() === 0, '未確認0件を確認待ちとして表示している');
+      assert(await page.locator('.daily-checks [data-page="settings"]').count() === 0, '未検出の支払いを確認待ちとして表示している');
+      await page.locator('[data-calculation] .note-mark').click();
+      assert((await page.locator('[data-calculation] .note-glass').innerText()).includes('までの支払い額'), '使う期限と支払いを確保する期限が分離されていない');
+      await page.locator('[data-action="prototype-account"]').click();
+      await page.locator('#money-flow-dialog [data-check="accounts"]').click();
+      assert(await page.evaluate(() => window.scrollY) === 0, '移動先が元のスクロール位置のままで見出しが隠れる');
+      assert(await page.locator('[data-check-item="account"]').count() === 3, '未確認の口座だけを表示できない');
+      await page.locator('[data-check-item="account"] [data-action="edit-account"]').first().click();
+      assert(await page.locator('#account-name').inputValue() === '生活費口座', '対象口座の編集へ直接つながらない');
+      await closeModals(page);
+      await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+      await page.locator('[data-action="prototype-bills"]').click();
+      await page.locator('#money-flow-dialog [data-check="bills"]').click();
+      assert(await page.locator('[data-check-item="bill"]').count() === 2, '未確認の請求だけを表示できない');
+      assert((await page.locator('[data-check-item="bill"]').first().innerText()).includes('引落'), '請求の対象日が分からない');
+      const selectedId = await page.locator('[data-check-item="bill"] [data-action="edit-event"]').first().getAttribute('data-id');
+      await page.locator('[data-check-item="bill"] [data-action="edit-event"]').first().click();
+      assert(await page.locator('#event-id').inputValue() === selectedId, '対象請求の編集へ直接つながらない');
+      await closeModals(page);
+      // 旧形式の移行で両取引が総額になるfixtureとは別に、総額がない明細だけの状態を作る。
+      const itemizedTransactions = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        state.transactions.find(t => t.id === 't2').entryType = 'itemized';
+        window.__YORYOKU__.setPage('checks');
+        return JSON.stringify(state.transactions);
+      });
+      await page.locator('[data-action="daily-add-statement"]').first().click();
+      assert(await page.locator('#event-card').inputValue() === 'c1', '請求登録に対象カードが引き継がれない');
+      assert(await page.locator('#event-entry-type').inputValue() === 'statement', '請求総額として開いていない');
+      assert(await page.locator('#event-amount').inputValue() === '', '未確認の総額を勝手に確定入力している');
+      await closeModals(page);
+      for (const width of [320, 375, 414, 768]) {
+        await page.setViewportSize({ width, height: 844 });
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `請求確認が${width}pxで横にはみ出す`);
+      }
+      if (process.env.MONEY_CHECKS_SCREENSHOT) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+        await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
+        await page.screenshot({ path: process.env.MONEY_CHECKS_SCREENSHOT, fullPage: true });
+      }
+      const after = await page.evaluate(() => window.__YORYOKU__.getState());
+      assert(JSON.stringify(after.transactions) === itemizedTransactions, '確認画面を開いただけで取引を変更した');
+      await page.evaluate(() => {
+        const s = window.__YORYOKU__.getState();
+        s.accounts.forEach(a => { a.balanceEvidence = { source: 'bank-manual', amount: a.currentBalance, date: '2026-09-02' }; });
+        s.transactions = []; s.workEntries = []; s.recurringPlans = [];
+        window.__YORYOKU__.setPage('home');
+      });
+      assert(await page.locator('.daily-checks .daily-check').count() === 0, '確認待ちがないのにリンクを作っている');
+      assert((await page.locator('.daily-checks').innerText()).includes('0件 ›'), '確認待ちがないときの件数が正しくない');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(s => { Object.assign(window.__YORYOKU__.getState(), s); window.__YORYOKU__.setPage('home'); }, snapshot);
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
+  });
+
+  await record('daily_horizon_setting', async () => {
+    const snapshot = await page.evaluate(() => structuredClone(window.__YORYOKU__.getState()));
+    try {
+      await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+      await page.locator('#settings-horizon').selectOption('30');
+      await page.locator('#settings-form [type="submit"]').click();
+      await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+      // 30日では10/13のカード5万円を期間外とし、基準口座30万−家賃8万−9月カード3万−予備15万。
+      const shown = (await page.locator('.daily-amount').innerText()).replace(/−/g, '-').replace(/[^0-9-]/g, '');
+      assert(shown === '40000', `期間外の支払いが余力に残っている: ${shown}`);
+      await page.locator('#menu-button').click();
+      await page.locator('#sidebar [data-page="cashflow"]').click();
+      await page.getByText('引落の内訳', { exact: true }).click();
+      assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('9/2〜10/1・30日間'), '予測終了日と日数が設定に一致しない');
+      assert(!(await page.locator('[data-debit-assessment] .timeline-table tbody').innerText()).includes('10/13'), '期間外の引落が残高表に残っている');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForFunction(() => Boolean(window.__YORYOKU__));
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().settings.cashflowHorizonDays) === 30, '再読込で期間設定が失われる');
+      await page.evaluate(() => window.__YORYOKU__.setPage('cashflow'));
+      await page.getByText('引落の内訳', { exact: true }).click();
+      assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('30日間'), '再読込後の画面が90日へ戻る');
+      await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+      await page.locator('#settings-horizon').selectOption('90');
+      await page.locator('#settings-form [type="submit"]').click();
+      await page.evaluate(() => window.__YORYOKU__.setPage('cashflow'));
+      await page.getByText('引落の内訳', { exact: true }).click();
+      assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('9/2〜11/30・90日間'), '90日に戻しても反映されない');
+    } finally {
+      await page.evaluate(s => {
+        Object.assign(window.__YORYOKU__.getState(), s);
+        localStorage.setItem('yoryoku-finance-v2', JSON.stringify(s));
+        window.__YORYOKU__.setPage('home');
+      }, snapshot);
+    }
+  });
+
   await record('spendable_amount', async () => {
     const result = await page.evaluate(() => window.__YORYOKU__.spendableAmount());
     assert(typeof result.total === 'number', '今使える金額が数値でない');
@@ -130,7 +311,7 @@ const closeModals = page => page.evaluate(() => {
     assert(result.total === expected, `今使える金額が式と一致しない: ${result.total} != ${expected}`);
     assert(result.unpaidCardTotal === 80000, `未払いカードが想定と違う: ${result.unpaidCardTotal}`);
     assert(result.cashAvailable === 340000, '貯金口座が現金に含まれている');
-    const shown = await page.textContent('.hero-card h1');
+    const shown = await page.textContent('.daily-amount');
     assert(shown.replace(/[^0-9-]/g, '').length > 0, 'ホームに金額が表示されていない');
   });
 
@@ -153,7 +334,7 @@ const closeModals = page => page.evaluate(() => {
     await page.waitForSelector('.timeline-table tbody tr');
     const rows = await page.$$eval('.timeline-table tbody tr', nodes => nodes.length);
     assert(rows > 0, '残高推移が表示されていない');
-    assert((await page.textContent('#page-title')).trim() === '支払い能力チェック', 'ページタイトルが違う');
+    assert((await page.textContent('#page-title')).trim() === '支払いの見通し', 'ページタイトルが違う');
   });
 
   await record('salary_payment_date', async () => {
@@ -208,8 +389,20 @@ const closeModals = page => page.evaluate(() => {
 
   await record('candidate_not_counted_before_approval', async () => {
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
-    await page.getByRole('button', { name: 'メール取込を確認', exact: true }).click();
-    assert(await page.getByRole('heading', { name: '通知・メールからの取込候補' }).isVisible(), '未確認0件のホームから取込候補を確認できない');
+    await page.locator('.daily-checks [data-page="imports"]').click();
+    assert(await page.getByRole('heading', { name: 'メール確認' }).isVisible(), '未確認0件のホームから取込候補を確認できない');
+    assert(await page.locator('[data-mail-section="pending"]').getAttribute('aria-pressed') === 'true', '最初に未取り込みが表示されない');
+    await page.locator('.candidate-list').evaluate(node => {
+      const swipe = (type, field, clientX) => {
+        const event = new Event(type, { bubbles: true });
+        Object.defineProperty(event, field, { value: [{ clientX, clientY: 100 }] });
+        node.dispatchEvent(event);
+      };
+      swipe('touchstart', 'touches', 280);
+      swipe('touchend', 'changedTouches', 120);
+    });
+    assert(await page.locator('[data-mail-section="accepted"]').getAttribute('aria-pressed') === 'true', 'スワイプで取り込み済みに切り替わらない');
+    await page.locator('[data-mail-section="pending"]').click();
     const CANDIDATES = [
       { id: 'cand1', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-08-24T10:00:00.000Z', usedDate: '2026-08-24', amount: 12000, cardHint: 'メインカード', merchant: 'ローソン', type: 'purchase', status: 'pending', fingerprint: 'fp-a', note: '' },
       { id: 'cand2', sourcePackage: 'rakuten-card.co.jp', sourceLabel: '楽天カード', detectedAt: '2026-08-24T10:05:00.000Z', usedDate: '2026-08-24', amount: 12000, cardHint: 'メインカード', type: 'purchase', status: 'pending', fingerprint: 'fp-a', note: '' },
@@ -222,8 +415,8 @@ const closeModals = page => page.evaluate(() => {
     assert(before.spendable === after.spendable, '承認前の候補が今使える金額に反映されている');
     assert(before.min === after.min, '承認前の候補が支払い能力チェックに反映されている');
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
-    assert((await page.locator('.home-mail-import').innerText()).includes('未確認の取込候補が3件'), 'ホームの未確認件数が更新されていない');
-    await page.getByRole('button', { name: 'メール取込を確認', exact: true }).click();
+    assert((await page.locator('.daily-checks [data-page="imports"]').innerText()).includes('3件 ›'), 'ホームの未確認件数が更新されていない');
+    await page.locator('.daily-checks [data-page="imports"]').click();
     await page.waitForSelector('.candidate-row');
     const rows = await page.$$eval('.candidate-row', nodes => nodes.length);
     assert(rows === 3, `候補の表示件数が違う: ${rows}`);
@@ -237,7 +430,7 @@ const closeModals = page => page.evaluate(() => {
 
   await record('candidate_approved_to_transaction', async () => {
     const before = await page.evaluate(() => window.__YORYOKU__.getState().transactions.length);
-    await page.evaluate(() => window.__YORYOKU__.acceptCandidate('cand1'));
+    await page.evaluate(() => window.__YORYOKU__.acceptCandidate('cand1', 'c1'));
     await page.waitForTimeout(300);
     const created = await page.evaluate(() => {
       const list = window.__YORYOKU__.getState().transactions;
@@ -313,7 +506,7 @@ const closeModals = page => page.evaluate(() => {
       { id: 'cand9', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-08-24T10:00:00.000Z', usedDate: '2026-08-24', amount: 7777, cardHint: 'SMBC', merchant: 'テスト店', type: 'purchase', status: 'pending', fingerprint: 'fp-9', note: '' }
     ]));
     await page.waitForTimeout(120);
-    await page.evaluate(() => window.__YORYOKU__.acceptCandidate('cand9'));
+    await page.evaluate(() => window.__YORYOKU__.acceptCandidate('cand9', 'c1'));
     await page.waitForTimeout(350);
     const after = await page.evaluate(() => {
       const list = window.__YORYOKU__.getState().transactions;
@@ -504,9 +697,15 @@ const closeModals = page => page.evaluate(() => {
     const names = () => page.locator('#page-container .list-row');
     assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '「すべて」に明細が混ざっている');
     assert(await names().filter({ hasText: 'セブン' }).count() === 0, '「すべて」に新しい明細が混ざっている');
-    await page.click('[data-plan-filter="payment"]');
-    assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '「支払い」に明細が混ざっている');
-    await page.click('[data-plan-filter="details"]');
+    assert(await page.locator('.plan-grid button').count() >= 28, '予定に月間カレンダーがない');
+    const day = page.locator('.plan-grid button').first();
+    await day.click();
+    assert(await day.getAttribute('aria-pressed') === 'true', 'カレンダーの日付を選べない');
+    assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '日付を選んだ予定に明細が混ざっている');
+    await day.click();
+    await page.locator('.plan-view-toolbar [data-plan-section="details"]').click();
+    assert(await page.locator('.card-detail-nav').isVisible(), '明細のカード切替が表示されない');
+    assert(await page.locator('#detail-period').isVisible(), '利用期間を選べない');
     assert(await page.locator('[data-plan-detail-card="c1"]').count() === 1, '1枚目のカードが選べない');
     assert(await page.locator('[data-plan-detail-card="c2"]').count() === 1, '2枚目のカードが選べない');
     assert(await names().filter({ hasText: 'セブン' }).count() === 1, '1枚目の明細が見えない');
@@ -525,7 +724,9 @@ const closeModals = page => page.evaluate(() => {
       state.transactions = state.transactions.filter(item => item.id !== 'dx-other');
       window.__YORYOKU__.setPage('plans');
     });
-    await page.click('[data-plan-filter="all"]');
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-page="plans"]:not([data-plan-section])').click();
+    assert(await page.locator('.card-detail-nav').count() === 0, '予定にカード切替が表示されている');
   });
 
   await record('duplicate_statement_blocked', async () => {
@@ -571,10 +772,39 @@ const closeModals = page => page.evaluate(() => {
 
   await record('statement_absorbs_details', async () => {
     await closeModals(page);
+    await page.evaluate(() => window.__YORYOKU__.setPage('accounts'));
+    await page.locator('[data-action="edit-account"][data-id="a1"]').click();
+    await page.locator('#account-balance-verified').check();
+    await page.locator('#account-form [type=submit]').click();
+    assert(await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').balanceEvidence?.source === 'bank-manual'), '銀行残高の確認が保存されていない');
     const before = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').currentBalance);
     await page.evaluate(() => window.__YORYOKU__.setPage('plans'));
     await page.waitForTimeout(150);
     await page.click('[data-action="settle-event"][data-id="dx-st"]');
+    await page.getByText('引落を記録する前にカード会社の請求額を確認してください', { exact: true }).waitFor();
+    const unchecked = await page.evaluate(() => {
+      const state = window.__YORYOKU__.getState();
+      return { balance: state.accounts.find(item => item.id === 'a1').currentBalance, status: state.transactions.find(item => item.id === 'dx-st').status };
+    });
+    assert(unchecked.balance === before && unchecked.status === 'planned', '請求額の未確認時に引落が記録された');
+    await page.click('[data-action="confirm-statement"][data-id="dx-st"]');
+    await page.getByText('請求額確認済み', { exact: true }).first().waitFor();
+    const confirmed = await page.evaluate(() => {
+      const saved = JSON.parse(localStorage.getItem('yoryoku-finance-v2'));
+      const bill = saved.transactions.find(item => item.id === 'dx-st');
+      return { balance: saved.accounts.find(item => item.id === 'a1').currentBalance, status: bill.status, evidence: bill.statementEvidence };
+    });
+    assert(confirmed.balance === before && confirmed.status === 'planned' && confirmed.evidence.amount === 20000, '請求額の確認だけで残高または引落状態が変わった');
+    await page.click('[data-action="settle-event"][data-id="dx-st"]');
+    const debit = page.locator('#debit-form');
+    await debit.locator('[name=amount]').fill('19999');
+    await debit.locator('[name=included]').selectOption('no');
+    await debit.locator('[type=submit]').click();
+    await page.getByText('請求額と実際の引落額を確認してください', { exact: true }).waitFor();
+    const rejected = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(item => item.id === 'a1').currentBalance);
+    assert(rejected === before, '請求額と不一致の引落で残高が変わった');
+    await debit.locator('[name=amount]').fill('20000');
+    await debit.locator('[type=submit]').click();
     await page.waitForTimeout(400);
 
     const after = await page.evaluate(() => {
@@ -592,6 +822,8 @@ const closeModals = page => page.evaluate(() => {
     assert(after.oldItem.status === 'absorbed' && after.oldItem.absorbedBy === 'dx-st', `明細が吸収されていない: ${JSON.stringify(after.oldItem)}`);
     assert(after.newItem.status === 'absorbed', `明細が吸収されていない: ${JSON.stringify(after.newItem)}`);
     assert(after.balance === before - 20000, `残高が総額の分だけ減っていない: ${before} → ${after.balance}`);
+
+    assert(await page.evaluate(() => !window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').balanceEvidence), '引落後も以前の残高が確認済みのままになっている');
 
     // 記録画面でも、確定した総額から明細を展開できる
     await page.evaluate(() => window.__YORYOKU__.setPage('records'));
@@ -619,8 +851,8 @@ const closeModals = page => page.evaluate(() => {
       { id: 'late-candidate', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-05T02:00:00.000Z', usedDate: '2026-09-05', amount: 321, cardHint: 'SMBC', merchant: '後から届いた店', type: 'purchase', status: 'pending', fingerprint: 'late-fp', note: '' }
     ]));
     await page.evaluate(async () => {
-      await window.__YORYOKU__.acceptCandidate('late-candidate');
-      await window.__YORYOKU__.acceptCandidate('late-candidate');
+      await window.__YORYOKU__.acceptCandidate('late-candidate', 'c1');
+      await window.__YORYOKU__.acceptCandidate('late-candidate', 'c1');
     });
     const after = await page.evaluate(() => {
       const api = window.__YORYOKU__;
@@ -1068,6 +1300,625 @@ const closeModals = page => page.evaluate(() => {
     assert(dismissed.virtual === 0, '消した月の見込みが裏で足されている');
   });
 
+  await record('mail_missing_card_or_usage_date_never_falls_back', async () => {
+    const result = await page.evaluate(async () => {
+      const api = window.__YORYOKU__;
+      const base = { sourcePackage: 'unknown', sourceLabel: '不明', detectedAt: '2026-09-02T01:00:00.000Z', amount: 472, type: 'purchase', status: 'pending' };
+      api.setImportCandidates([{ ...base, id: 'no-card', usedDate: '2026-09-02' }]);
+      await api.acceptCandidate('no-card');
+      api.setImportCandidates([{ ...base, id: 'no-date', usedDate: '' }]);
+      await api.acceptCandidate('no-date', 'c1');
+      api.getState().cards.push({ id: 'no-account', name: '未設定', accountId: '' });
+      api.setImportCandidates([{ ...base, id: 'no-account', usedDate: '2026-09-02' }]);
+      await api.acceptCandidate('no-account', 'no-account');
+      api.getState().cards = api.getState().cards.filter(card => card.id !== 'no-account');
+      return api.getState().transactions.filter(item => ['mail_no-card', 'mail_no-date', 'mail_no-account'].includes(item.id)).length;
+    });
+    assert(result === 0, 'カード・引落口座・利用日が不明な候補から取引を作成した');
+  });
+
+  await record('mail_import_requires_correct_card', async () => {
+    await closeModals(page);
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      const state = api.getState();
+      state.cards.push({ ...state.cards[0], id: 'candidate-card-2', name: 'もう一枚のカード' });
+      api.setImportCandidates([{ id: 'card-selection-test', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '2026-09-02', amount: 418, cardHint: '別のカード名', merchant: 'テスト店', type: 'purchase', status: 'pending', fingerprint: 'selection-test' }]);
+      api.setPage('imports');
+    });
+    const row = page.locator('.candidate-row').filter({ has: page.locator('[data-id="card-selection-test"]') });
+    const cardSelect = row.locator('select[data-candidate-card]');
+    assert(await cardSelect.count() === 1, '取り込むカードを選択できない');
+    assert(await cardSelect.inputValue() === '', '一致しないカードが自動選択されている');
+    await row.locator('[data-action="accept-candidate"]').click();
+    assert(await page.evaluate(() => !window.__YORYOKU__.getState().transactions.some(item => item.id === 'mail_card-selection-test')), 'カード未選択で取り込まれた');
+    await cardSelect.selectOption('candidate-card-2');
+    await page.evaluate(() => window.__YORYOKU__.setImportCandidates([{ id: 'card-selection-test', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '2026-09-02', amount: 418, cardHint: '別のカード名', merchant: 'テスト店', type: 'purchase', status: 'pending', fingerprint: 'selection-test' }]));
+    assert(await cardSelect.inputValue() === 'candidate-card-2', '新着候補の更新で選択中のカードが消えた');
+    await row.locator('[data-action="accept-candidate"]').click();
+    const selected = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_card-selection-test')?.cardId);
+    assert(selected === 'candidate-card-2', `選んだカードが使われていない: ${selected}`);
+    await closeModals(page);
+  });
+
+  await record('mail_receive_time_is_not_purchase_time', async () => {
+    const transaction = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_card-selection-test'));
+    assert(transaction && transaction.transactionDate === '2026-09-02', '利用日が失われた');
+    assert(transaction.transactionAt === '', 'メールの受信時刻を利用時刻として保存している');
+  });
+
+  await record('mail_body_time_requires_explicit_timezone_and_matching_date', async () => {
+    const result = await page.evaluate(async () => {
+      const api = window.__YORYOKU__;
+      const base = { sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '2026-09-02', usedTime: '12:34', usedTimeZone: 'Asia/Tokyo', usedTimeSource: 'mail-body', amount: 471, type: 'purchase', status: 'pending' };
+      const options = [
+        { id: 'body-time', date: '2026-09-02' },
+        { id: 'zone-unknown', date: '2026-09-02', usedTimeZone: '' },
+        { id: 'date-changed', date: '2026-09-01' }
+      ];
+      const values = [];
+      for (const [index, option] of options.entries()) {
+        const candidate = { ...base, ...option, amount: base.amount + index };
+        api.setImportCandidates([candidate]);
+        await api.acceptCandidate(candidate.id, 'c1', { amount: candidate.amount, date: option.date, entryType: 'itemized', merchant: '' });
+        const transaction = api.getState().transactions.find(item => item.id === `mail_${candidate.id}`);
+        const saved = window.__TEST_CALLS__.filter(item => item.fn === 'updateImportCandidate' && item.id === candidate.id).pop();
+        values.push({ at: transaction?.transactionAt, patch: saved?.patch });
+      }
+      return values;
+    });
+    assert(result[0].at === '2026-09-02T03:34:00.000Z', '本文の日本時間を正しく保存していない');
+    assert(result[1].at === '', '時間帯不明の時刻を確定している');
+    assert(result[2].at === '' && result[2].patch?.usedTime === '', '変更前の日付の時刻を引き継いでいる');
+  });
+
+  await record('mail_duplicate_requires_confirmation', async () => {
+    await page.evaluate(() => {
+      window.__originalMailConfirm = window.confirm;
+      window.__mailConfirmCount = 0;
+      window.confirm = () => { window.__mailConfirmCount += 1; return false; };
+      window.__YORYOKU__.setImportCandidates([{ id: 'same-charge-test', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '2026-09-02', amount: 418, cardHint: '', merchant: 'テスト店', type: 'purchase', status: 'pending', fingerprint: 'different-email' }]);
+      window.__YORYOKU__.setPage('imports');
+    });
+    try {
+      const row = page.locator('.candidate-row').filter({ has: page.locator('[data-id="same-charge-test"]') });
+      await row.locator('[data-candidate-card]').selectOption('candidate-card-2');
+      await row.locator('[data-action="accept-candidate"]').click();
+      const check = await page.evaluate(() => ({ asked: window.__mailConfirmCount, added: window.__YORYOKU__.getState().transactions.some(item => item.id === 'mail_same-charge-test') }));
+      assert(check.asked === 1 && !check.added, '同じカード・日付・金額を確認せずに取り込んだ');
+    } finally {
+      await page.evaluate(() => { window.confirm = window.__originalMailConfirm; });
+    }
+  });
+
+  await record('mail_card_mapping_requires_explicit_choice_and_exact_notice', async () => {
+    const candidate = { id: 'map-card-1', sourcePackage: 'notice.example', sourceLabel: 'カード会社', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '2026-09-02', amount: 275, cardHint: 'カード会社の特定カード', type: 'purchase', status: 'pending', fingerprint: 'map-1' };
+    await page.evaluate(item => { const api = window.__YORYOKU__; api.getState().settings.mailCardMappings = []; api.setImportCandidates([item]); api.setPage('imports'); }, candidate);
+    let row = page.locator('.candidate-row').filter({ has: page.locator('[data-id="map-card-1"]') });
+    assert(await row.locator('[data-candidate-card]').inputValue() === '', '対応を登録する前にカードが選ばれた');
+    await row.locator('[data-candidate-card]').selectOption('candidate-card-2');
+    await row.locator('[data-action="remember-candidate-card"]').click();
+    await page.evaluate(item => window.__YORYOKU__.setImportCandidates([{ ...item, id: 'map-card-2' }, { ...item, id: 'map-card-3', sourcePackage: 'other.example' }, { ...item, id: 'map-card-4', cardHint: 'カード会社' }]), candidate);
+    row = page.locator('.candidate-row').filter({ has: page.locator('[data-id="map-card-2"]') });
+    assert(await row.locator('[data-candidate-card]').inputValue() === 'candidate-card-2', '登録した対応が使われない');
+    for (const id of ['map-card-3', 'map-card-4']) {
+      const other = page.locator('.candidate-row').filter({ has: page.locator(`[data-id="${id}"]`) });
+      assert(await other.locator('[data-candidate-card]').inputValue() === '', '異なる差出人または種類不明に対応を使った');
+    }
+    await page.getByText('メールとカードの対応', { exact: true }).click();
+    await page.locator('[data-action="forget-candidate-card"]').click();
+    assert(await row.locator('[data-candidate-card]').inputValue() === '', '解除した対応が残っている');
+  });
+
+  await record('mail_candidate_edits_survive_live_updates', async () => {
+    const candidate = { id: 'editable-candidate', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '', amount: 0, cardHint: '', merchant: '', type: 'purchase', status: 'needs_review', fingerprint: 'editable-fp' };
+    await page.evaluate(item => { window.__YORYOKU__.setImportCandidates([item]); window.__YORYOKU__.setPage('imports'); }, candidate);
+    const row = page.locator('.candidate-row').filter({ has: page.locator('[data-id="editable-candidate"]') });
+    await row.locator('[data-candidate-card]').selectOption('c1');
+    await row.locator('[data-candidate-field="amount"]').fill('731');
+    await row.locator('[data-candidate-field="date"]').fill('2026-09-01');
+    await row.locator('[data-candidate-field="merchant"]').fill('修正した店');
+    if (process.env.MONEY_REVIEW_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_REVIEW_SCREENSHOT, fullPage: true });
+    await page.evaluate(item => window.__YORYOKU__.setImportCandidates([item]), candidate);
+    assert(await row.locator('[data-candidate-field="amount"]').inputValue() === '731', '更新で金額が消えた');
+    assert(await row.locator('[data-candidate-field="date"]').inputValue() === '2026-09-01', '更新で利用日が消えた');
+    const warned = await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      const existing = api.createTransaction({ id: 'other-card-existing', kind: 'payment', origin: 'mail-import', entryType: 'itemized', cardId: 'candidate-card-2', transactionDate: '2026-09-01', amount: 731, memo: '修正した店' });
+      state.transactions.push(existing);
+      const originalConfirm = window.confirm;
+      let message = '';
+      window.confirm = value => { message = value; return false; };
+      try {
+        document.querySelector('[data-action="accept-candidate"][data-id="editable-candidate"]').click();
+        return message.includes('同じ利用日・金額・店名') && !state.transactions.some(item => item.id === 'mail_editable-candidate');
+      } finally {
+        window.confirm = originalConfirm;
+        state.transactions.splice(state.transactions.indexOf(existing), 1);
+      }
+    });
+    assert(warned, '別カードにある同一候補を確認せず取り込んだ');
+    await row.locator('[data-action="accept-candidate"]').click();
+    const result = await page.evaluate(() => ({ transaction: window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_editable-candidate'), call: window.__TEST_CALLS__.find(item => item.fn === 'updateImportCandidate' && item.id === 'editable-candidate') }));
+    assert(result.transaction?.amount === 731 && result.transaction?.transactionDate === '2026-09-01' && result.transaction?.memo === '修正した店', '修正した内容で取引が作られない');
+    assert(result.call?.patch.amount === 731 && result.call?.patch.usedDate === '2026-09-01', '取込候補に修正内容が反映されない');
+    await closeModals(page);
+  });
+
+  await record('mail_statement_duplicate_is_not_counted', async () => {
+    await closeModals(page);
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      state.cards.push({ ...state.cards[0], id: 'statement-card', name: '請求額テストカード' });
+      state.transactions.push(api.createTransaction({ id: 'existing-statement-mail-test', kind: 'payment', amount: 12345, dueDate: '2026-10-13', transactionDate: '2026-10-13', cardId: 'statement-card', sourceAccountId: 'a1', entryType: 'statement', status: 'planned' }));
+      api.setImportCandidates([{ id: 'duplicate-statement-mail', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-09-02T01:00:00.000Z', usedDate: '', amount: 12345, cardHint: '', type: 'unknown', status: 'needs_review', fingerprint: 'bill-fp' }]);
+      api.setPage('imports');
+    });
+    const row = page.locator('.candidate-row').filter({ has: page.locator('[data-id="duplicate-statement-mail"]') });
+    await row.locator('[data-candidate-card]').selectOption('statement-card');
+    await row.locator('[data-candidate-field="date"]').fill('2026-10-13');
+    await row.locator('[data-candidate-field="entryType"]').selectOption('statement');
+    await row.locator('[data-action="accept-candidate"]').click();
+    const result = await page.evaluate(() => ({ added: window.__YORYOKU__.getState().transactions.some(item => item.id === 'mail_duplicate-statement-mail'), toast: document.querySelector('#toast').textContent }));
+    assert(!result.added && result.toast.includes('既存の総額を編集'), '同じ請求分の総額がもう一度登録された');
+  });
+
+  await record('remote_updates_preserve_open_editors', async () => {
+    await closeModals(page);
+    const original = await page.evaluate(() => structuredClone(window.__YORYOKU__.getState()));
+    try {
+      await page.evaluate(() => {
+        const api = window.__YORYOKU__, copy = structuredClone(api.getState());
+        copy.cards.push({ ...copy.cards[0], id: 'concurrent-edit-card', name: '同時編集カード', accountId: 'a1' });
+        copy.transactions.push(api.createTransaction({ id: 'concurrent-edit', kind: 'payment', amount: 731,
+          transactionDate: '2026-09-02', dueDate: '2026-10-13', cardId: 'concurrent-edit-card',
+          sourceAccountId: 'a1', entryType: 'itemized', status: 'planned', category: '生活費', memo: '同時編集検査' }));
+        window.__TEST_STATE_SINK__(copy, { initial: true });
+        api.setPage('records'); api.setRecordTab('transactions');
+      });
+      await page.locator('#record-search').fill('');
+      const clear = page.locator('[data-action="filter-category"][data-category=""]');
+      if (await clear.count()) await clear.click();
+      await page.locator('[data-record-filter="all"]').click();
+      const openEvent = () => page.locator('[data-action="edit-event"][data-id="concurrent-edit"]').click();
+      await openEvent();
+      await page.locator('#event-memo').fill('この画面の下書き');
+      await page.evaluate(() => {
+        const copy = structuredClone(window.__YORYOKU__.getState());
+        copy.transactions.find(x => x.id === 'concurrent-edit').category = '食費';
+        window.__TEST_STATE_SINK__(copy, { initial: true });
+      });
+      assert(await page.inputValue('#event-memo') === 'この画面の下書き', '受信時に編集内容が消えた');
+      await page.locator('#event-form button[type="submit"]').click();
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(x => x.id === 'concurrent-edit').category) === '食費', '古い編集画面が別画面のカテゴリを上書きした');
+      assert(await page.locator('#event-modal').isVisible() && await page.inputValue('#event-memo') === 'この画面の下書き', '競合時の下書きが残っていない');
+      await closeModals(page);
+      await openEvent();
+      await page.locator('#event-memo').fill('無関係の更新とは両立');
+      const otherBalance = await page.evaluate(() => {
+        const copy = structuredClone(window.__YORYOKU__.getState()), bank = copy.accounts.find(x => x.id === 'a2');
+        bank.currentBalance += 10;
+        window.__TEST_STATE_SINK__(copy, { initial: true });
+        return bank.currentBalance;
+      });
+      await page.locator('#event-form button[type="submit"]').click();
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(x => x.id === 'concurrent-edit').memo) === '無関係の更新とは両立', '別の記録の更新で保存を止めた');
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(x => x.id === 'a2').currentBalance) === otherBalance, '無関係の更新を失った');
+      await page.evaluate(() => window.__YORYOKU__.setPage('accounts'));
+      await page.locator('[data-action="edit-account"][data-id="a1"]').click();
+      await page.locator('#account-name').fill('この画面の口座名下書き');
+      const remoteBalance = await page.evaluate(() => {
+        const copy = structuredClone(window.__YORYOKU__.getState()), bank = copy.accounts.find(x => x.id === 'a1');
+        bank.currentBalance += 321; delete bank.balanceEvidence;
+        window.__TEST_STATE_SINK__(copy, { initial: true });
+        return bank.currentBalance;
+      });
+      await page.locator('#account-form button[type="submit"]').click();
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(x => x.id === 'a1').currentBalance) === remoteBalance, '古い口座編集が新しい残高を上書きした');
+      assert(await page.locator('#account-modal').isVisible() && await page.inputValue('#account-name') === 'この画面の口座名下書き', '口座の競合時に下書きが消えた');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(copy => window.__TEST_STATE_SINK__(copy, { initial: true }), original);
+    }
+  });
+
+  await record('usage_time_edit_clear_and_reload', async () => {
+    await closeModals(page);
+    const balances = await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      state.cards.push({ ...state.cards.find(x => x.id === 'c1'), id: 'usage-edit-card', name: '時刻編集専用カード', accountId: 'a1' });
+      state.transactions.push(api.createTransaction({ id: 'usage-time-edit', kind: 'payment', amount: 731,
+        transactionDate: '2026-09-02', transactionAt: '2026-09-01T23:13:25.000Z', dueDate: '2026-10-13',
+        cardId: 'usage-edit-card', sourceAccountId: 'a1', entryType: 'itemized', status: 'planned', category: 'カード利用', memo: '時刻訂正テスト' }));
+      api.setPage('records');
+      return JSON.stringify(state.accounts);
+    });
+    const open = async () => {
+      await page.evaluate(() => window.__YORYOKU__.setPage('records'));
+      await page.evaluate(() => window.__YORYOKU__.setRecordTab('transactions'));
+      await page.locator('#record-search').fill('');
+      const clearCategory = page.locator('[data-action="filter-category"][data-category=""]');
+      if (await clearCategory.count()) await clearCategory.click();
+      await page.locator('[data-record-filter="all"]').click();
+      if (await page.locator('[data-action="edit-event"][data-id="usage-time-edit"]').count() !== 1) {
+        const details = await page.evaluate(() => ({ tx: window.__YORYOKU__.getState().transactions.find(x => x.id === 'usage-time-edit'), search: document.querySelector('#record-search')?.value }));
+        throw new Error('時刻編集用の記録が表示されない: ' + JSON.stringify(details));
+      }
+      await page.locator('[data-action="edit-event"][data-id="usage-time-edit"]').click();
+    };
+    const save = async expected => {
+      await page.locator('#event-form button[type="submit"]').click();
+      await page.waitForFunction(value => window.__YORYOKU__.getState().transactions.find(x => x.id === 'usage-time-edit')?.transactionAt === value, expected);
+    };
+    await open();
+    assert(await page.inputValue('#event-usage-time') === '08:13', '保存済み時刻が日本時間で表示されない');
+    await save('2026-09-01T23:13:25.000Z');
+    await open();
+    await page.fill('#event-usage-time', '08:12');
+    await save('2026-09-01T23:12:00.000Z');
+    await page.reload({ waitUntil: 'networkidle' });
+    await open();
+    assert(await page.inputValue('#event-usage-time') === '08:12', '訂正時刻が再読込で消えた');
+    await page.fill('#event-usage-time', '');
+    await save('');
+    await open();
+    await page.fill('#event-usage-date', '2026-09-03');
+    await page.locator('#event-usage-date').dispatchEvent('change');
+    await page.fill('#event-usage-time', '23:59');
+    await save('2026-09-03T14:59:00.000Z');
+    const result = await page.evaluate(() => ({
+      tx: window.__YORYOKU__.getState().transactions.find(x => x.id === 'usage-time-edit'),
+      balances: JSON.stringify(window.__YORYOKU__.getState().accounts)
+    }));
+    assert(result.tx.transactionDate === '2026-09-03' && result.tx.amount === 731, '時刻訂正で日付や金額が壊れた');
+    assert(result.tx.category === 'カード利用', '時刻訂正で既存のカテゴリが変わった');
+    assert(result.balances === balances, '未払いの時刻訂正で口座残高が動いた');
+  });
+
+  await record('legacy_cached_html_boot', async () => {
+    await page.route('**/money/index.html?legacy-shell', async route => {
+      const response = await route.fetch();
+      const html = (await response.text()).replace(/<input id="restore-cloud-file"[^>]*>/, '')
+        .replace(/<label id="event-usage-time-wrap"[\s\S]*?<\/label>/, '');
+      await route.fulfill({ response, body: html });
+    });
+    await page.goto(`http://localhost:${PORT}/money/index.html?legacy-shell`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => Boolean(window.__YORYOKU__));
+    assert(await page.locator('#restore-cloud-file').count() === 1, '旧HTMLで復元用ファイル選択が作られない');
+    assert(await page.locator('#event-usage-time').count() === 1, '旧HTMLで利用時刻の訂正欄が作られない');
+    await page.unroute('**/money/index.html?legacy-shell');
+  });
+  await record('cloud_restore_file_confirmation', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+    const name = 'projects/test/databases/(default)/documents/workspaces/original';
+    const snapshot = {
+      workspaceId: 'original', readTime: '2026-09-02T00:00:00Z',
+      workspace: { name, createTime: '2026-09-01T00:00:00Z', updateTime: '2026-09-01T00:00:00Z',
+        fields: { ownerUid: { stringValue: 'test-user' }, memberUids: { arrayValue: { values: [{ stringValue: 'test-user' }] } } } },
+      collections: Object.fromEntries(['importCandidates', 'receipts', 'receiptItems', 'itemAliases'].map(key => [key, { complete: true, documents: [] }]))
+    };
+    await page.locator('#restore-cloud-file').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(snapshot)) });
+    await page.waitForFunction(() => window.__TEST_CALLS__?.some(call => call.fn === 'restoreCloudBackup'));
+    assert(await page.locator('#toast').textContent().then(text => text.includes('復元と内容の照合が完了')), '復元完了が表示されない');
+    const before = await page.evaluate(() => window.__TEST_CALLS__.filter(call => call.fn === 'restoreCloudBackup').length);
+    snapshot.workspace.fields.ownerUid.stringValue = 'other-user';
+    await page.locator('#restore-cloud-file').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(snapshot)) });
+    await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('所有者'));
+    assert(await page.evaluate(() => window.__TEST_CALLS__.filter(call => call.fn === 'restoreCloudBackup').length) === before, '別利用者の原本を復元した');
+  });
+  await record('cloud_snapshot_export', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+    const button = page.locator('[data-action="export-cloud"]');
+    const [file] = await Promise.all([page.waitForEvent('download'), button.click()]);
+    assert(file.suggestedFilename().startsWith('yoryoku-cloud-snapshot-'), '原本のファイル名が不正');
+    const snapshot = JSON.parse(fs.readFileSync(await file.path(), 'utf8'));
+    assert(snapshot.collections.importCandidates.complete, '候補の取得情報が書き出されていない');
+    let failedDownloads = 0;
+    const onDownload = () => failedDownloads++;
+    page.on('download', onDownload);
+    try {
+      await page.evaluate(() => { window.__TEST_BACKUP_FAIL__ = true; });
+      await button.click();
+      await page.getByText('原本を書き出せませんでした: 権限エラー', { exact: true }).waitFor();
+      assert(failedDownloads === 0, '取得失敗後にファイルが書き出された');
+      assert(await button.isEnabled(), '再実行できない');
+    } finally { page.off('download', onDownload); }
+  });
+  await record('recurring_plan_settings', async () => {
+    await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+    const form = page.locator('#recurring-plan-form');
+    const methods = await page.evaluate(() => {
+      const state = window.__YORYOKU__.getState();
+      const card = state.cards.find(item => state.accounts.some(account => account.id === item.accountId));
+      return { account: state.accounts[0].id, card: card.id, debit: card.accountId };
+    });
+    for (const [name, method] of [['水道テスト', 'account:' + methods.account], ['電気テスト', 'card:' + methods.card]]) {
+      await form.locator('[name=name]').fill(name);
+      await form.locator('[name=amount]').fill('4200');
+      await form.locator('[name=method]').selectOption(method);
+      await form.locator('[name=start]').fill('2026-11-20');
+      await form.locator('[name=interval]').selectOption('2');
+      await form.locator('[type=submit]').click();
+      await page.getByText(name, { exact: true }).waitFor();
+    }
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('yoryoku-finance-v2')).recurringPlans);
+    const water = saved.find(item => item.name === '水道テスト');
+    const electricity = saved.find(item => item.name === '電気テスト');
+    assert(water.intervalMonths === 2 && water.startDate === '2026-11-20' && water.sourceAccountId === methods.account && !water.cardId, '隔月口座払いの保存内容が不正');
+    assert(electricity.cardId === methods.card && electricity.sourceAccountId === methods.debit, 'カード払いの保存内容が不正');
+  });
+  await record('unsaved_recovery_export', async () => {
+    await page.evaluate(() => {
+      localStorage.setItem('okane-unsaved:test-user:test-workspace', '{"marker":"pending"}');
+      localStorage.setItem('okane-unsaved:test-user:test-workspace:archive:aaaa1111-bbbb-2222-cccc-3333dddd4444', '{"marker":"archive"}');
+      localStorage.setItem('okane-unsaved:other-user:test-workspace', '{"marker":"other-user"}');
+      localStorage.setItem('okane-unsaved:test-user:other-workspace', '{"marker":"other-workspace"}');
+      window.__YORYOKU__.setPage('settings');
+    });
+    const [file] = await Promise.all([page.waitForEvent('download'), page.locator('[data-action="export-recovery"]').click()]);
+    const payload = JSON.parse(fs.readFileSync(await file.path(), 'utf8'));
+    assert(payload.format === 'money-unsaved-recovery-v1', '退避ファイルの形式が不正');
+    assert(payload.snapshots.map(item => item.state.marker).join(',') === 'pending,archive', '退避データの対象が不正');
+    assert(await page.evaluate(() => localStorage.getItem('okane-unsaved:test-user:test-workspace')), '書き出しで退避データが消えた');
+  });
+  await record('next_debit_by_account', async () => {
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_DEBIT_STATE__ = { accounts: state.accounts, cards: state.cards, transactions: state.transactions, recurringPlans: state.recurringPlans, workEntries: state.workEntries };
+      state.accounts = [{ id: 'debit-a', name: '引落口座A', currentBalance: 50000, role: 'primary', isPrimary: true }, { id: 'debit-b', name: '引落口座B', currentBalance: 100000 }];
+      state.cards = [1, 2, 3].map(number => ({ id: 'debit-card-' + number, name: 'カード' + number, accountId: number === 3 ? 'debit-b' : 'debit-a', closingDay: 15, paymentDay: 10 }));
+      state.transactions = [30000, 25000, 10000].map((amount, index) => ({ id: 'debit-bill-' + index, kind: 'payment', status: 'planned', entryType: 'statement', cardId: state.cards[index].id, sourceAccountId: state.cards[index].accountId, amount, transactionDate: '2026-09-10', dueDate: '2026-09-10' }));
+      state.recurringPlans = []; state.workEntries = [];
+      api.setPage('cashflow');
+    });
+    try {
+      await page.getByText('引落の内訳', { exact: true }).click();
+      const result = await page.locator('[data-debit-assessment]').innerText();
+      assert(result.includes('不足の見込み') && result.includes('引落口座A') && result.includes('55,000'), '同日同口座を合算して不足判定できていない');
+      assert(result.includes('引落口座B') && result.includes('10,000'), '別口座の請求を分離していない');
+      await page.evaluate(() => {
+        const api = window.__YORYOKU__, state = api.getState();
+        window.__TEST_DEBIT_STATE__.settings = { ...state.settings };
+        state.settings.deadlineMode = 'card-closing';
+        state.settings.deadlineCardIds = [state.cards[0].id];
+        state.cards[0].closingDay = 5;
+        api.setPage('spendable');
+      });
+      const allowance = await page.locator('[data-spending-allowance]').innerText();
+      assert(allowance.includes('引落口座Aの参考額') && allowance.includes('55,000') && allowance.includes('予定入金は含めません'), '締め日後の支払いを引落口座別に表示できていない');
+    } finally {
+      await page.evaluate(() => Object.assign(window.__YORYOKU__.getState(), window.__TEST_DEBIT_STATE__));
+    }
+  });
+  await record('card_closing_deadline_settings', async () => {
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_DEADLINE_CARDS__ = state.cards;
+      state.cards = [
+        { id: 'deadline-early', name: '先に締まるカード', closingDay: 10 },
+        { id: 'deadline-late', name: '後で締まるカード', closingDay: 15 }
+      ];
+      api.setPage('settings');
+    });
+    const form = page.locator('#settings-form');
+    try {
+      await form.locator('#settings-deadline').selectOption('card-closing');
+      await form.locator('[name="deadline-card"]').first().check();
+      await form.locator('[name="deadline-card"]').last().check();
+      await form.locator('[type="submit"]').click();
+      const result = await page.evaluate(() => {
+        const api = window.__YORYOKU__;
+        return { deadline: api.getNextDeadline(), days: api.spendableAmount().dailyDays, ids: api.getState().settings.deadlineCardIds };
+      });
+      assert(result.deadline === '2026-09-10' && result.days === 9 && result.ids.length === 2, '選択カードの最早締め日または日数が不正');
+    } finally {
+      await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        state.cards = window.__TEST_DEADLINE_CARDS__;
+        state.settings.deadlineMode = 'legacy14'; state.settings.deadlineCardIds = [];
+      });
+    }
+  });
+  await record('linked_refund_import', async () => {
+    await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_REFUND_STATE__ = { cards: state.cards, transactions: state.transactions };
+      const account = state.accounts[0];
+      state.cards = [{ id: 'refund-card', name: '返金テストカード', accountId: account.id, closingDay: 15, paymentDay: 10 }];
+      state.transactions = [api.createTransaction({ id: 'refund-purchase', kind: 'payment', status: 'planned', entryType: 'itemized', amount: 3000, cardId: 'refund-card', sourceAccountId: account.id, transactionDate: '2026-09-02', dueDate: '2026-10-13' })];
+      api.setImportCandidates([{ id: 'refund-test', status: 'pending', type: 'refund', amount: 1000, fingerprint: 'refund-test' }]);
+      api.setPage('imports');
+    });
+    try {
+      await page.locator('[data-refund-target]').selectOption('refund-purchase');
+      await page.locator('[data-action="accept-candidate"][data-id="refund-test"]').click();
+      const result = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_refund-test'));
+      assert(result?.amount === -1000 && result.refundEvidence.targetId === 'refund-purchase' && result.dueDate === '2026-10-13', '元の利用に返金が紐付いていない');
+      const balance = await page.evaluate(() => {
+        const api = window.__YORYOKU__, state = api.getState(), accountId = state.accounts[0].id;
+        state.transactions.find(item => item.id === 'refund-purchase').status = 'absorbed';
+        state.transactions.push(api.createTransaction({ id: 'refund-statement', kind: 'payment', entryType: 'statement', status: 'planned',
+          amount: 20000, dueDate: '2026-11-10', cardId: 'refund-card', sourceAccountId: accountId,
+          statementEvidence: { source: 'issuer-manual', cardId: 'refund-card', accountId, amount: 20000, dueDate: '2026-11-10', cycle: '2026-10', checkedAt: '2026-09-02T00:00:00Z' } }));
+        api.setImportCandidates([{ id: 'later-refund-test', status: 'pending', type: 'refund', amount: 500, fingerprint: 'later-refund-test' }]);
+        return state.accounts[0].currentBalance;
+      });
+      await page.locator('[data-refund-target]').selectOption('refund-purchase');
+      await page.locator('[data-refund-statement]').selectOption('refund-statement');
+      await page.locator('[data-action="accept-candidate"][data-id="later-refund-test"]').click();
+      const later = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        const item = state.transactions.find(row => row.id === 'mail_later-refund-test');
+        return { status: item?.status, absorbedBy: item?.absorbedBy, amount: state.transactions.find(row => row.id === 'refund-statement').amount, balance: state.accounts[0].currentBalance };
+      });
+      assert(later.status === 'absorbed' && later.absorbedBy === 'refund-statement' && later.amount === 20000 && later.balance === balance, '別月の確認済み請求を二重に減額した');
+      await page.evaluate(() => window.__YORYOKU__.setImportCandidates([{ id: 'dated-refund-test', status: 'pending', type: 'refund', amount: 250, fingerprint: 'dated-refund-test' }]));
+      await page.locator('[data-refund-target]').selectOption('refund-purchase');
+      await page.locator('[data-refund-credit-date]').fill('2026-12-01');
+      await page.locator('[data-action="accept-candidate"][data-id="dated-refund-test"]').click();
+      const dated = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.id === 'mail_dated-refund-test'));
+      assert(dated?.status === 'planned' && dated.amount === -250 && dated.dueDate === '2027-01-12', '計上日から別月の引落日を求めていない');
+      const bankAccountId = await page.evaluate(() => {
+        const api = window.__YORYOKU__;
+        api.setImportCandidates([{ id: 'bank-refund-test', status: 'pending', type: 'refund', amount: 250, fingerprint: 'bank-refund-test' }]);
+        return api.getState().accounts[0].id;
+      });
+      await page.locator('[data-refund-target]').selectOption('refund-purchase');
+      await page.getByText('銀行口座に直接入金された場合', { exact: true }).click();
+      await page.locator('[data-refund-bank-account]').selectOption(bankAccountId);
+      await page.locator('[data-refund-bank-date]').fill('2026-09-02');
+      await page.locator('[data-refund-bank-reflected]').selectOption('yes');
+      await page.locator('[data-action="accept-candidate"][data-id="bank-refund-test"]').click();
+      await page.waitForFunction(() => window.__YORYOKU__.getState().transactions.some(item => item.id === 'mail_bank-refund-test'));
+      const bank = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        return { entry: state.transactions.find(item => item.id === 'mail_bank-refund-test'), balance: state.accounts[0].currentBalance };
+      });
+      assert(bank.entry.status === 'settled' && bank.entry.amount === 250 && bank.entry.sourceAccountId === bankAccountId
+        && bank.entry.refundEvidence.targetId === 'refund-purchase' && bank.balance === balance, '入金記録の紐付けまたは残高の二重反映防止に失敗した');
+    } finally {
+      await page.evaluate(() => { const api = window.__YORYOKU__; Object.assign(api.getState(), window.__TEST_REFUND_STATE__); api.setImportCandidates([]); });
+    }
+  });
+  await record('candidate_type_correction', async () => {
+    await closeModals(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const before = await page.evaluate(() => {
+      const api = window.__YORYOKU__;
+      api.setImportCandidates([{ id: 'wrong-cancel-type', type: 'cancel', status: 'needs_review', amount: 6300, usedDate: '2026-09-01', merchant: '種類訂正の検証店', sourcePackage: '01epos.jp', sourceLabel: 'エポスカード', cardHint: 'エポスカード', fingerprint: 'kind-test', detectedAt: '2026-09-02T00:00:00Z' }]);
+      api.setPage('imports');
+      return { transactions: JSON.stringify(api.getState().transactions), accounts: JSON.stringify(api.getState().accounts), corrections: (window.__TEST_CALLS__ || []).filter(c => c.fn === 'correctImportCandidateType').length };
+    });
+    try {
+      await page.locator('[data-action="correct-candidate-type"][data-id="wrong-cancel-type"]').click();
+      await page.locator('#candidate-type-form [type="submit"]').click();
+      assert(await page.locator('#candidate-type-modal').isVisible(), '通知未確認で訂正した');
+      assert(await page.evaluate(() => (window.__TEST_CALLS__ || []).filter(c => c.fn === 'correctImportCandidateType').length) === before.corrections, '確認なしでAPIを呼んだ');
+      await page.locator('#candidate-type-confirm').check();
+      await page.locator('#candidate-type-confirm').press('Tab');
+      if (process.env.MONEY_KIND_CORRECTION_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_KIND_CORRECTION_SCREENSHOT, fullPage: false });
+      await page.locator('#candidate-type-form [type="submit"]').click();
+      await page.locator('#candidate-type-modal').waitFor({ state: 'hidden' });
+      assert(await page.locator('.candidate-row').getByText('利用', { exact: true }).count() === 1, '種類表示が利用に変わらない');
+      assert(await page.locator('.candidate-row [data-refund-target]').count() === 0, '元の利用の指定を要求し続けた');
+      assert(await page.locator('.candidate-row [data-action="accept-candidate"]').count() === 1, '訂正後の取込操作がない');
+      const after = await page.evaluate(() => ({ transactions: JSON.stringify(window.__YORYOKU__.getState().transactions), accounts: JSON.stringify(window.__YORYOKU__.getState().accounts), call: window.__TEST_CALLS__.filter(c => c.fn === 'correctImportCandidateType').at(-1) }));
+      assert(after.transactions === before.transactions && after.accounts === before.accounts, '種類訂正だけで取引か残高を変更した');
+      assert(after.call.expected.type === 'cancel' && after.call.patch.type === 'purchase' && after.call.confirmed === true, '訂正条件を引き継いでいない');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(() => window.__YORYOKU__.setImportCandidates([]));
+    }
+  });
+  await record('absorbed_card_correction', async () => {
+    await closeModals(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const before = await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_CORRECTION_STATE__ = structuredClone(state);
+      state.cards = ['old', 'right'].map(id => ({ id, name: id === 'old' ? '旧カード' : '通知のカード', accountId: state.accounts[0].id, closingDay: 15, paymentDay: 10, paymentMonthOffset: 1 }));
+      const base = { kind: 'payment', sourceAccountId: state.accounts[0].id, dueDate: '2026-09-10', transactionDate: '2026-09-10', status: 'settled', entryType: 'statement', amount: 2000, category: 'カード' };
+      state.transactions = [{ ...base, id: 'old-bill', cardId: 'old' }, { ...base, id: 'right-bill', cardId: 'right' }, { ...base, id: 'wrong-detail', cardId: 'old', status: 'absorbed', entryType: 'itemized', transactionDate: '2026-08-10', amount: 500, absorbedBy: 'old-bill', memo: 'カード訂正の検証明細' }];
+      state.workEntries = []; state.recurringPlans = [];
+      api.setRecordTab('transactions'); api.setPage('records');
+      return { accounts: state.accounts, bills: state.transactions.slice(0, 2) };
+    });
+    try {
+      await page.locator('[data-action="range-mode"][data-mode="custom"]').click();
+      await page.locator('#record-start').fill('2026-08-01');
+      await page.locator('#record-end').fill('2026-09-30');
+      await page.locator('[data-action="toggle-details"][data-id="old-bill"]').click();
+      await page.locator('[data-action="correct-detail-card"][data-id="wrong-detail"]').click();
+      await page.locator('#card-correction-card').selectOption('right');
+      await page.locator('#card-correction-form [type="submit"]').click();
+      assert(await page.locator('#card-correction-modal').isVisible(), '根拠確認なしで保存した');
+      await page.locator('#card-correction-confirm').check();
+      await page.locator('#card-correction-confirm').press('Tab');
+      if (process.env.MONEY_CORRECTION_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_CORRECTION_SCREENSHOT, fullPage: false });
+      await page.locator('#card-correction-form [type="submit"]').click();
+      await page.locator('#card-correction-modal').waitFor({ state: 'hidden' });
+      const after = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        return { accounts: state.accounts, bills: state.transactions.slice(0, 2), detail: state.transactions[2] };
+      });
+      assert(JSON.stringify(after.accounts) === JSON.stringify(before.accounts), '残高を変更した');
+      assert(JSON.stringify(after.bills) === JSON.stringify(before.bills), '引落済み総額を変更した');
+      assert(after.detail.cardId === 'right' && after.detail.absorbedBy === 'right-bill' && after.detail.status === 'absorbed' && after.detail.amount === 500, '内訳のカード訂正に失敗した');
+      await page.locator('[data-action="toggle-details"][data-id="right-bill"]').click();
+      await page.locator('[data-action="correct-detail-time"][data-id="wrong-detail"]').click();
+      await page.locator('#detail-time-value').fill('12:34');
+      await page.locator('#detail-time-confirm').check();
+      if (process.env.MONEY_TIME_CORRECTION_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_TIME_CORRECTION_SCREENSHOT, fullPage: false });
+      await page.locator('#detail-time-form [type="submit"]').click();
+      await page.locator('#detail-time-modal').waitFor({ state: 'hidden' });
+      const timed = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(t => t.id === 'wrong-detail'));
+      assert(timed.transactionAt === '2026-08-10T03:34:00.000Z', '日本時間の利用時刻を保存できない');
+      assert(JSON.stringify({ ...timed, transactionAt: undefined, updatedAt: after.detail.updatedAt }) === JSON.stringify(after.detail), '時刻以外の明細を変更した');
+      await page.locator('[data-action="correct-detail-time"][data-id="wrong-detail"]').click();
+      await page.locator('#detail-time-value').fill('');
+      await page.locator('#detail-time-confirm').check();
+      await page.locator('#detail-time-form [type="submit"]').click();
+      await page.locator('#detail-time-modal').waitFor({ state: 'hidden' });
+      const cleared = await page.evaluate(() => {
+        const state = window.__YORYOKU__.getState();
+        return { accounts: state.accounts, bills: state.transactions.slice(0, 2), detail: state.transactions[2] };
+      });
+      assert(cleared.detail.transactionAt === '', '不明な時刻を空欄へ戻せない');
+      assert(cleared.detail.status === 'absorbed' && cleared.detail.absorbedBy === 'right-bill', '引落状態を戻してしまった');
+      assert(JSON.stringify(cleared.accounts) === JSON.stringify(before.accounts) && JSON.stringify(cleared.bills) === JSON.stringify(before.bills), '時刻訂正で残高や請求総額を変更した');
+      assert(await page.locator('body').evaluate(e => e.scrollWidth <= document.documentElement.clientWidth + 1), '訂正後の画面に横スクロールがある');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(() => { Object.assign(window.__YORYOKU__.getState(), window.__TEST_CORRECTION_STATE__); localStorage.setItem('yoryoku-finance-v2', JSON.stringify(window.__TEST_CORRECTION_STATE__)); });
+    }
+  });
+  await record('unsettled_card_cancellation', async () => {
+    await closeModals(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const before = await page.evaluate(() => {
+      const api = window.__YORYOKU__, state = api.getState();
+      window.__TEST_CANCEL_STATE__ = structuredClone(state);
+      state.cards = [{ id: 'cancel-card', name: '取消検証カード', accountId: state.accounts[0].id, closingDay: 15, paymentDay: 10, paymentMonthOffset: 1 }];
+      state.transactions = [{ id: 'cancel-detail', kind: 'payment', entryType: 'itemized', amount: 9600, status: 'planned', cardId: 'cancel-card', sourceAccountId: state.accounts[0].id, transactionDate: '2026-08-20', dueDate: '2026-09-10', memo: '取消の検証明細', category: 'カード', transactionAt: '', absorbedBy: '', updatedAt: '2026-09-01T00:00:00Z' }];
+      state.workEntries = []; state.recurringPlans = [];
+      api.setRecordTab('transactions'); api.setPage('records');
+      return { accounts: structuredClone(state.accounts), detail: structuredClone(state.transactions[0]) };
+    });
+    try {
+      await page.locator('[data-record-filter="all"]').click();
+      await page.locator('[data-action="range-mode"][data-mode="custom"]').click();
+      await page.locator('#record-start').fill('2026-08-01');
+      await page.locator('#record-end').fill('2026-09-30');
+      await page.locator('[data-action="card-cancellation"][data-id="cancel-detail"]').click();
+      await page.locator('#card-cancel-form [type="submit"]').click();
+      assert(await page.locator('#card-cancel-modal').isVisible(), '原本未確認で取消を保存した');
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions[0].status) === 'planned', '確認前に状態を変えた');
+      await page.locator('#card-cancel-confirm').check();
+      await page.evaluate(() => { window.__YORYOKU__.getState().transactions[0].memo = '他の画面の更新'; });
+      await page.locator('#card-cancel-form [type="submit"]').click();
+      assert(await page.locator('#card-cancel-modal').isVisible(), '古い確認内容を保存した');
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions[0].status) === 'planned', '競合後に取消した');
+      await closeModals(page);
+      await page.evaluate(memo => { window.__YORYOKU__.getState().transactions[0].memo = memo; window.__YORYOKU__.setPage('records'); }, before.detail.memo);
+      await page.locator('[data-action="card-cancellation"][data-id="cancel-detail"]').click();
+      await page.locator('#card-cancel-confirm').check();
+      if (process.env.MONEY_CANCELLATION_SCREENSHOT) await page.screenshot({ path: process.env.MONEY_CANCELLATION_SCREENSHOT, fullPage: false });
+      await page.locator('#card-cancel-form [type="submit"]').click();
+      await page.locator('#card-cancel-modal').waitFor({ state: 'hidden' });
+      const after = await page.evaluate(() => ({ detail: window.__YORYOKU__.getState().transactions[0], accounts: window.__YORYOKU__.getState().accounts }));
+      assert(after.detail.status === 'cancelled', '取消済みにならない');
+      assert(JSON.stringify({ ...after.detail, status: before.detail.status, updatedAt: before.detail.updatedAt }) === JSON.stringify(before.detail), '取消以外の取引内容を変更した');
+      assert(JSON.stringify(after.accounts) === JSON.stringify(before.accounts), '返金の銀行入金を作った');
+      await page.locator('[data-action="card-cancellation"][data-id="cancel-detail"]').click();
+      await page.locator('#card-cancel-confirm').check();
+      await page.locator('#card-cancel-form [type="submit"]').click();
+      await page.locator('#card-cancel-modal').waitFor({ state: 'hidden' });
+      assert(await page.evaluate(() => window.__YORYOKU__.getState().transactions[0].status) === 'planned', '取消を戻せない');
+    } finally {
+      await closeModals(page);
+      await page.evaluate(() => { Object.assign(window.__YORYOKU__.getState(), window.__TEST_CANCEL_STATE__); localStorage.setItem('yoryoku-finance-v2', JSON.stringify(window.__TEST_CANCEL_STATE__)); });
+    }
+  });
   await record('mobile_overflow', async () => {
     await page.setViewportSize({ width: 360, height: 800 });
     const pages = ['home', 'spendable', 'cashflow', 'plans', 'records', 'accounts', 'shift', 'settings', 'imports'];
@@ -1087,7 +1938,8 @@ const closeModals = page => page.evaluate(() => {
   await browser.close();
   server.close();
 
-  const output = { checks, console_errors: consoleErrors, failed_details: failures };
+  if (process.env.UI_CHECK && !Object.keys(checks).length) throw new Error('指定された画面検査がありません');
+  const output = { checks, console_errors: consoleErrors, failed_details: failures, selection: process.env.UI_CHECK || 'all' };
   console.log(JSON.stringify(output, null, failures.length || consoleErrors.length ? 2 : 0));
   process.exit(failures.length || consoleErrors.length ? 1 : 0);
 })();

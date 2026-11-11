@@ -1,0 +1,173 @@
+/* 旧データから検証用シナリオを構築する。読み取り専用・本番未接続。 */
+(function attach(root) {
+  'use strict';
+  const engine = typeof module !== 'undefined' && module.exports ? require('./finance-engine.js') : root.FinanceEngine;
+  const refunds = () => typeof module !== 'undefined' && module.exports ? require('./redesign-refund.js') : root.RedesignRefund;
+  function validDate(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }
+  function buildLegacyScenario(state, today, endDate, options = {}) {
+    if (!validDate(today) || !validDate(endDate) || endDate < today) throw new Error('試算期間が不正です');
+    if (!state || !Array.isArray(state.accounts) || !Array.isArray(state.transactions) || !Array.isArray(state.cards) || !Array.isArray(state.recurringPlans)) throw new Error('旧データの必要な一覧が不足しています');
+    const accountIds = new Set();
+    const accounts = state.accounts.map(account => {
+      if (!account.id || accountIds.has(account.id) || !Number.isSafeInteger(account.currentBalance)) throw new Error('旧口座の識別子または残高が不正です');
+      accountIds.add(account.id);
+      const proof = account.balanceEvidence;
+      const balanceVerified = proof?.source === 'bank-manual' && proof.amount === account.currentBalance
+        && validDate(proof.date) && proof.date <= today;
+      return { id: account.id, balance: account.currentBalance, balanceVerified };
+    });
+    if (!accounts.length) throw new Error('旧口座がありません');
+    const cards = new Map();
+    for (const card of state.cards) {
+      if (!card.id || cards.has(card.id) || !accountIds.has(card.accountId)) throw new Error('カードの引落口座または識別子を確認してください');
+      cards.set(card.id, card);
+    }
+    const issues = [{ type: 'legacy_evidence_unverified' }];
+    if (options.candidates === undefined) issues.push({ type: 'mail_candidates_unavailable' });
+    else {
+      if (!Array.isArray(options.candidates)) throw new Error('メール候補の一覧が不正です');
+      const seenCandidates = new Set();
+      const transactionIds = new Set(state.transactions.map(item => item?.id));
+      for (const candidate of options.candidates) {
+        if (!candidate || typeof candidate.id !== 'string' || !candidate.id || seenCandidates.has(candidate.id)) throw new Error('メール候補の識別子が不正または重複しています');
+        seenCandidates.add(candidate.id);
+        if (['pending', 'needs_review'].includes(candidate.status)) issues.push({ type: 'mail_candidate_unreviewed', id: candidate.id });
+        else if (candidate.status === 'accepted' && !transactionIds.has(`mail_${candidate.id}`)) issues.push({ type: 'accepted_mail_without_transaction', id: candidate.id });
+        else if (!['accepted', 'ignored'].includes(candidate.status)) issues.push({ type: 'mail_candidate_status_unknown', id: candidate.id });
+      }
+    }
+    const holidayOptions = { overrides: state.settings?.holidayOverrides || {} };
+    const planIds = new Set(), mappedPlans = [];
+    for (const plan of state.recurringPlans) {
+      if (!plan || !plan.id || planIds.has(plan.id)) throw new Error('定期予定の識別子が不正または重複しています');
+      planIds.add(plan.id);
+      if (plan.isActive === false) continue;
+      if (!Number.isInteger(plan.dayOfMonth) || plan.dayOfMonth < 1 || plan.dayOfMonth > 31 || engine.recurringInterval(plan) === null || !Number.isSafeInteger(plan.amount) || plan.amount < 0 || (plan.cardId && (plan.kind !== 'payment' || !cards.has(plan.cardId)))) {
+        issues.push({ type: 'recurring_plans_not_mapped', id: plan.id });
+        continue;
+      }
+      if (!plan.amount) issues.push({ type: 'recurring_amount_unknown', id: plan.id });
+      mappedPlans.push(plan);
+    }
+    const ids = new Set(), cardTransactions = [], events = [];
+    const salaryMonths = new Set(), recurringDates = new Set();
+    const monthlyPlans = new Map(mappedPlans.map(plan => [plan.id, plan]));
+    for (const item of state.transactions) {
+      if (item?.recurringPlanId && item.status !== 'cancelled') {
+        if (!validDate(item.dueDate)) throw new Error('定期支払いの日付を確認してください');
+        const plan = monthlyPlans.get(item.recurringPlanId);
+        const occurrence = engine.recurringOccurrenceDate(item);
+        const key = JSON.stringify([item.recurringPlanId, plan ? occurrence.slice(0, 7) : occurrence]);
+        if (recurringDates.has(key)) throw new Error('同じ日の定期支払いが重複しています');
+        recurringDates.add(key);
+        if (plan) {
+          const [year, month, day] = item.dueDate.split('-').map(Number);
+          const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+          if (occurrence !== item.dueDate || day !== Math.min(plan.dayOfMonth, lastDay)) issues.push({ type: 'legacy_recurring_date_changed', id: item.id });
+        }
+      }
+      if (!item?.salaryPaymentMonth || item.status === 'cancelled') continue;
+      if (salaryMonths.has(item.salaryPaymentMonth)) throw new Error('同じ月の給与記録が重複しています');
+      salaryMonths.add(item.salaryPaymentMonth);
+    }
+    const virtual = engine.expandScheduledTransactions(mappedPlans, today, endDate, state.transactions, { cards: state.cards, holidayOptions });
+    for (const item of [...state.transactions, ...virtual]) {
+      if (!item || !item.id || ids.has(item.id)) throw new Error('旧取引の識別子が不正または重複しています');
+      ids.add(item.id);
+      if (!['planned', 'settled', 'cancelled', 'absorbed'].includes(item.status)) throw new Error('旧取引の状態が不明です');
+      const settlementDate = item.debitEvidence?.date || item.dueDate;
+      if (item.status === 'settled' && !validDate(settlementDate)) throw new Error('実行済み取引の日付を確認してください');
+      if (item.status === 'settled' && settlementDate > today) throw new Error('未来の取引が実行済みです');
+      if (item.status !== 'planned') continue;
+      if (item.affectsForecast === false) { issues.push({ type: 'excluded_transaction', id: item.id }); continue; }
+      if (!Number.isSafeInteger(item.amount)) throw new Error('旧取引の金額を確認してください');
+      if (item.amount < 0 && item.kind === 'payment') {
+        if (item.cardId && !cards.has(item.cardId)) throw new Error('返金先のカードを確認してください');
+        const proof = item.refundEvidence;
+        if (proof?.noticeId && ['refund', 'cancel'].includes(proof.type)) {
+          const prepared = refunds().preparePendingRefund({
+            state: { ...state, transactions: state.transactions.filter(entry => entry.id !== item.id) },
+            candidate: { id: proof.noticeId, type: proof.type, status: 'pending', fingerprint: proof.fingerprint },
+            targetId: proof.targetId, amount: -item.amount, confirmed: true, creditDate: proof.creditDate
+          });
+          if (refunds().matchesPreparedRefund(item, prepared)) {
+            cardTransactions.push(item);
+            continue;
+          }
+        }
+        issues.push({ type: 'legacy_refund_unverified', id: item.id });
+        continue;
+      }
+      if (item.amount < 0 && item.kind !== 'adjustment') throw new Error('旧取引の金額を確認してください');
+      if (item.cardId) {
+        if (item.kind !== 'payment' || !cards.has(item.cardId)) throw new Error('カード取引の種類またはカードを確認してください');
+        if (item.entryType == null || item.entryType === '') {
+          issues.push({ type: 'legacy_card_entry_type_missing', id: item.id });
+          // 旧形式の既定値を請求総額と決めつけず、未照合の明細として扱う。
+          cardTransactions.push({ ...item, entryType: 'itemized' });
+        } else {
+          if (!['statement', 'itemized'].includes(item.entryType)) throw new Error('カード取引の明細種別を確認してください');
+          cardTransactions.push(item);
+        }
+        continue;
+      }
+      const base = { id: `legacy:${item.id}`, date: item.dueDate, status: 'planned', amount: Math.abs(item.amount), accountId: item.sourceAccountId };
+      if (item.kind === 'income' || item.kind === 'reimbursement') events.push({ ...base, kind: 'income' });
+      else if (item.kind === 'adjustment') events.push(item.amount < 0 ? { ...base, kind: 'income' } : { ...base, kind: 'expense', amountConfirmed: false });
+      else if (item.kind === 'payment') events.push({ ...base, kind: 'expense', amountConfirmed: false });
+      else if (['transfer', 'saving', 'nisa'].includes(item.kind)) {
+        if (item.destinationAccountId && item.transferType !== 'external') events.push({ ...base, kind: 'transfer', toAccountId: item.destinationAccountId });
+        else events.push({ ...base, kind: 'expense', amountConfirmed: false });
+      } else throw new Error('旧取引の種類を確認してください');
+    }
+    const namedCards = state.cards.map(card => {
+      if (typeof card.name === 'string' && card.name.trim()) return card;
+      issues.push({ type: 'card_name_missing', cardId: card.id });
+      return { ...card, name: card.id };
+    });
+    const capped = engine.capUnsettledCardCredits(cardTransactions, namedCards, holidayOptions);
+    if (capped.some((item, index) => item.amount !== cardTransactions[index].amount)) {
+      issues.push({ type: 'card_credit_carryover_unverified' });
+    }
+    const groups = engine.groupCardCharges(capped, namedCards, holidayOptions);
+    for (const group of groups) {
+      if (group.statements.length > 1) throw new Error('同じ請求期間に複数の総額があります');
+      const entries = [...group.adopted, ...group.suppressed];
+      const recorded = entries.filter(item => item.isVirtual !== true);
+      const dates = new Set((recorded.length ? recorded : entries).map(item => item.dueDate));
+      if (dates.size !== 1 || !group.dueDate) throw new Error('カードの引落日が一致しません');
+      if (!Number.isSafeInteger(group.adoptedTotal) || !Number.isSafeInteger(group.suppressedTotal)) throw new Error('カード請求額が不正です');
+      // 旧明細にはメールの重複照合や利用日時の根拠が保存されていない。
+      // 総額が無い場合、明細合計を確定額とせず上限側に残す。
+      const scheduled = group.itemized.filter(item => item.isVirtual === true);
+      if (scheduled.length) issues.push({ type: 'card_recurring_inclusion_unverified', cardId: group.cardId, cycle: group.billingCycle });
+      // 請求総額に含まれるか不明な定期予定は、別の口座支出や追加額として重ねない。
+      const suppressedActual = group.suppressed.filter(item => item.isVirtual !== true).reduce((total, item) => total + item.amount, 0);
+      const detailsOnly = group.source === 'itemized';
+      const statement = group.statements[0];
+      const amountConfirmed = !detailsOnly && statement.sourceAccountId === group.accountId
+        && engine.hasConfirmedCardStatement(statement, group.billingCycle);
+      // 発行会社の確定総額を照合できた期間は、同じ期間の利用通知を追加請求にしない。
+      const additionalPossible = amountConfirmed ? 0 : detailsOnly ? group.adoptedTotal : suppressedActual;
+      events.push({ id: `legacy-card:${group.key}`, date: dates.values().next().value, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed, additionalPossible });
+      if (detailsOnly) issues.push({ type: 'legacy_card_details_unverified', cardId: group.cardId, cycle: group.billingCycle });
+      if (!amountConfirmed) issues.push({ type: 'card_group_unverified', cardId: group.cardId, cycle: group.billingCycle });
+    }
+    if (!Array.isArray(state.workEntries) || !state.settings?.wage) issues.push({ type: 'salary_data_missing' });
+    else {
+      const wage = state.settings.wage;
+      const recordedMonths = engine.salaryMonthsOutsideForecast(state.transactions, wage);
+      const forecasts = engine.collectSalaryEvents(state.workEntries, wage, today, endDate, { overrides: state.settings.holidayOverrides || {}, recordedMonths });
+      if (forecasts.length && !accountIds.has(wage.depositAccountId)) issues.push({ type: 'salary_account_unknown' });
+      else for (const salary of forecasts) events.push({ id: `legacy-salary:${salary.paymentMonth}`, date: salary.paymentDate, status: 'planned', amount: salary.totalAmount, accountId: wage.depositAccountId, kind: 'income' });
+    }
+    return { scenario: { today, endDate, coverageVerified: false, accounts, events }, issues };
+  }
+  const api = { buildLegacyScenario };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  root.RedesignLegacyAdapter = api;
+})(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -87,5 +87,7 @@ node tests/ui/audit-layout.js
 
 ### 既知の設計
 
+不具合の再現中は、PowerShellで `$env:UI_CHECK='usage_time_edit_clear_and_reload'` のように検査名を指定して `npm run test:ui` を実行できます。複数はカンマ区切りです。出力の `selection` が実行範囲を示します。存在しない名前は失敗します。全件確認の前には `Remove-Item Env:UI_CHECK` で指定を解除してください。CIでは指定せず全件を実行します。
+
 `.card` にはパディングが無く、`.hero-card` `.list-card-header` `.list-row` のように**バリアント側で余白を指定する**設計です。
 新しくカードを追加するときは、必ず余白を持つクラスを併記してください。忘れると文字がカードの端に張り付きます。

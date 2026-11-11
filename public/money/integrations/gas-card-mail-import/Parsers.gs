@@ -39,7 +39,7 @@ var AMOUNT_PATTERNS = [
 ];
 
 /** 「【ご利用金額】 279円」のように、金額そのものにラベルが付いている場合 */
-var AMOUNT_LABEL_PATTERN = /【?\s*(?:ご利用金額|ご利用額|利用金額|ご請求金額|請求金額|お支払金額|支払金額|決済金額)\s*】?\s*[：:]?\s*[¥￥]?\s*([0-9,]+)\s*(?:円|JPY)?/;
+var AMOUNT_LABEL_PATTERN = /【?\s*(?:ご利用金額|ご利用額|利用金額|ご請求金額|請求金額|ご請求額|請求額|お支払い?金額|支払い?金額|決済金額)\s*】?\s*[：:]?\s*[¥￥]?\s*([0-9,]+)\s*(?:円|JPY)?/;
 
 /** 「【ご利用日時(日本時間)】」「ご利用日時：」のような利用日ラベル */
 var USED_AT_LABEL_PATTERN = /【?\s*(?:ご利用日時|ご利用年月日|ご利用日|利用日時|利用日)\s*(?:\([^)\n]{0,12}\)|（[^）\n]{0,12}）)?\s*】?\s*[：:]?\s*/;
@@ -67,22 +67,37 @@ var IGNORE_LINE_WORDS = ['ポイント', '残高', '利用可能枠', '限度額
  * 戻り値: { amount, usedDate, cardHint, merchant, type, confident, issuerLabel, note } または null
  */
 function parseCardMail(mail) {
+  var subject = normalizeText(mail.subject);
+  // 特典の上限額や、利用後に届く抽選案内は取引を表さない。
+  // 実際の返金完了通知は残し、従来どおり元取引との照合を要求する。
+  var promotion = /キャンペーン|もれなく|最大[\d,]+円キャッシュバック|抽選チケット|すぐチャン/.test(subject);
+  var completedRefund = /(?:返金|キャッシュバック|取消|取り消し|キャンセル)(?:完了|処理完了)/.test(subject);
+  if (promotion && !completedRefund) return null;
   var text = normalizeText(mail.subject + '\n' + mail.body);
   var issuer = findIssuer(mail.sender);
-  var type = detectType(text);
+  var type = detectType(text, normalizeText(mail.subject));
 
   var amounts = extractAmounts(text);
   var primary = findPrimaryAmount(text, issuer);
   var usedDate = extractUsedDate(text, mail.receivedAt);
+  var usageMoment = extractUsageMoment(mail.body, usedDate);
   var cardHint = extractCardHint(text, issuer);
   var merchant = extractMerchant(text, primary);
 
-  // カード利用のお知らせらしさが無いメールは候補にしない
-  if (!issuer && amounts.length === 0 && !primary) return null;
+  // 会員向けの広告・振替案内を利用明細として扱わない。
+  // 未対応の差出人は、日付と金額の両方に利用ラベルがある場合のみ要確認で残す。
+  var hasUsageDateLabel = USED_AT_LABEL_PATTERN.test(text);
+  var hasAmountLabel = AMOUNT_LABEL_PATTERN.test(text);
+  var transactionSubject = /利用|決済|返金|取消|キャンセル|取り消し/.test(normalizeText(mail.subject));
+  if (!issuer && !(hasUsageDateLabel && hasAmountLabel)) return null;
+  // 金額が1つ書かれていても、開催日と料金だけでは利用の証拠にならない。
+  // 複数金額の既存通知は、従来どおり下段で要確認に残す。
+  if (issuer && !transactionSubject && !hasUsageDateLabel && !hasAmountLabel && amounts.length <= 1) return null;
 
   var amount = primary ? primary.value : (amounts.length ? amounts[0] : null);
   var note = '';
   var confident = true;
+  var statementNotice = /請求|支払/.test(normalizeText(mail.subject)) && type !== 'refund' && type !== 'cancel';
 
   if (amount === null) {
     confident = false;
@@ -103,14 +118,44 @@ function parseCardMail(mail) {
     note = note || '未対応の差出人です。内容を確認してください。';
   }
 
+  if (statementNotice) {
+    type = 'unknown';
+    confident = false;
+    note = note ? note + ' 請求総額か利用明細か確認してください。' : '請求総額か利用明細か確認してください。';
+  }
+
+  if (!usedDate) {
+    confident = false;
+    note = note ? note + ' 利用日も確認してください。' : '利用日を読み取れませんでした。内容を確認してください。';
+  }
+
   if (type === 'refund' || type === 'cancel') {
     confident = false;
     note = note || '返金・取消の可能性があります。対象の取引を確認してください。';
   }
 
+  // 外貨通知の数字を円として保存しない。換算額や請求先は別途確認する。
+  var currencyMatch = text.normalize('NFKC').match(/(?:ご利用金額|利用金額|決済金額)[ \t]*】?[ \t]*[:：]?[ \t]*[\d,.]+[ \t]*([A-Z]{3})\b/i);
+  if (currencyMatch && currencyMatch[1].toUpperCase() !== 'JPY') {
+    amount = null;
+    confident = false;
+    note = '外貨の利用通知です。円の請求額を確認してください。';
+  }
+
+  // 利用先が確認用の表記と一致する場合だけ保留する。額だけでは判断しない。
+  // 実際の売上・解放を確認できないので、返金やゼロ円にも置き換えない。
+  var descriptor = String(merchant || '').normalize('NFKC').replace(/\s*\(買物\)\s*$/, '').trim();
+  if (/^GOOGLE\s*\*\s*(?:WALLET\s+TEMP|TEMPORARY\s+HOLD)$/i.test(descriptor) && type === 'purchase') {
+    type = 'unknown';
+    confident = false;
+    note = (note ? note + ' ' : '') + 'カード確認の一時的な利用通知の可能性があります。カード会社の明細で売上か保留かを確認してください。通知額は保持し、購入・返金とは断定していません。';
+  }
+
   return {
     amount: amount,
     usedDate: usedDate,
+    usedTime: usageMoment.time,
+    usedTimeZone: usageMoment.timeZone,
     cardHint: cardHint,
     merchant: merchant,
     type: type,
@@ -118,6 +163,21 @@ function parseCardMail(mail) {
     issuerLabel: issuer ? issuer.label : '',
     note: note
   };
+}
+
+/** 利用日のラベルと同じ行にある時刻だけを見る。受信時刻や年の推定は使わない。 */
+function extractUsageMoment(body, usedDate) {
+  var empty = { time: '', timeZone: '' };
+  var text = normalizeText(body || '').normalize('NFKC');
+  var labels = text.match(/(?:ご利用日時|利用日時|ご利用日|利用日)/g) || [];
+  if (labels.length !== 1 || !usedDate) return empty;
+  var line = text.split(/\r?\n/).filter(function (row) { return /(?:ご利用日時|利用日時|ご利用日|利用日)/.test(row); })[0] || '';
+  var match = line.match(/(?:ご利用日時|利用日時|ご利用日|利用日)[ \t]*(\([^)]{1,12}\))?[ \t]*】?[ \t]*[:：]?[ \t]*(20\d{2})[\/\-年][ \t]*(\d{1,2})[\/\-月][ \t]*(\d{1,2})日?[ \t]+(\d{1,2}):(\d{2})(?![\d:])/);
+  if (!match || !isValidCalendarDate(match[2], match[3], match[4]) || Number(match[5]) > 23 || Number(match[6]) > 59) return empty;
+  var date = pad4(match[2]) + '-' + pad2(match[3]) + '-' + pad2(match[4]);
+  if (date !== usedDate) return empty;
+  var timeZone = match[1] === '(日本時間)' && !/(?:UTC|GMT|[+-]\d{1,2}:?\d{2})/i.test(line) ? 'Asia/Tokyo' : '';
+  return { time: pad2(match[5]) + ':' + pad2(match[6]), timeZone: timeZone };
 }
 
 /**
@@ -139,8 +199,8 @@ function findPrimaryAmount(text, issuer) {
   if (usedAt) {
     var offset = usedAt.index + usedAt[0].length;
     var after = text.slice(offset);
-    var found = extractAmounts(after);
-    if (found.length) return { value: found[0], source: 'afterDate', index: offset + after.indexOf(String(found[0])) };
+    var found = findFirstAmount(after);
+    if (found) return { value: found.value, source: 'afterDate', index: offset + found.index };
   }
   return null;
 }
@@ -150,19 +210,32 @@ function toAmount(value) {
 }
 
 function findIssuer(sender) {
-  var lower = String(sender || '').toLowerCase();
+  var address = String(sender || '').toLowerCase().trim();
+  var brackets = address.match(/<([^<>]+)>/);
+  if (brackets) address = brackets[1].trim();
+  var match = address.match(/@([a-z0-9.-]+)$/);
+  if (!match) return null;
+  var domain = match[1];
   for (var i = 0; i < ISSUERS.length; i += 1) {
-    if (lower.indexOf(ISSUERS[i].domain) !== -1) return ISSUERS[i];
+    var expected = ISSUERS[i].domain;
+    if (domain === expected || domain.slice(-(expected.length + 1)) === '.' + expected) return ISSUERS[i];
   }
   return null;
 }
 
-function detectType(text) {
+function detectType(text, subject) {
+  // 通常の利用通知の注意書きにある「キャンセル」は取消の実行を表さない。
+  var evidence = subject || '';
+  // 三井住友のテキスト本文は、件名が同じでも「利用取引」で買物と取消を分ける。
+  var operation = text.normalize('NFKC').match(/^[ \t◇◆・]*(?:【[ \t]*)?(?:ご?利用取引|取引区分)[ \t]*(?:】[ \t]*)?[:：][ \t]*(取消|キャンセル|取り消し|返金|買物|購入)[ \t]*$/m);
+  if (operation && /取消|キャンセル|取り消し|返金/.test(operation[1])) evidence += '\n' + operation[1];
+  var explicit = text.match(/(?:ご?返金|ご?取消|お取消|取り消し|キャンセル)(?:金額|額|日|日時|完了|処理完了)\s*[：:】]?/g);
+  evidence += '\n' + (explicit || []).join('\n');
   for (var i = 0; i < CANCEL_WORDS.length; i += 1) {
-    if (text.indexOf(CANCEL_WORDS[i]) !== -1) return 'cancel';
+    if (evidence.indexOf(CANCEL_WORDS[i]) !== -1) return 'cancel';
   }
   for (var j = 0; j < REFUND_WORDS.length; j += 1) {
-    if (text.indexOf(REFUND_WORDS[j]) !== -1) return 'refund';
+    if (evidence.indexOf(REFUND_WORDS[j]) !== -1) return 'refund';
   }
   if (text.indexOf('利用') !== -1) return 'purchase';
   return 'unknown';
@@ -199,6 +272,71 @@ function extractAmounts(text) {
   return found;
 }
 
+/** 行順と表記中の位置を保ち、候補にすべき最初の金額を返す。 */
+function findFirstAmount(text) {
+  var lines = String(text).split('\n');
+  var offset = 0;
+  for (var i = 0; i < lines.length; i += 1) {
+    var line = lines[i];
+    var ignored = IGNORE_LINE_WORDS.some(function (word) { return line.indexOf(word) !== -1; });
+    var first = null;
+    if (!ignored) {
+      AMOUNT_PATTERNS.forEach(function (pattern) {
+        pattern.lastIndex = 0;
+        var match = pattern.exec(line);
+        while (match) {
+          var value = toAmount(match[1]);
+          if (value > 0 && value < 100000000 && (!first || match.index < first.index)) {
+            first = { value: value, index: match.index };
+          }
+          match = pattern.exec(line);
+        }
+      });
+    }
+    if (first) return { value: first.value, index: offset + first.index };
+    offset += line.length + 1;
+  }
+  return null;
+}
+
+function isValidCalendarDate(year, month, day) {
+  var date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return date.getUTCFullYear() === Number(year) && date.getUTCMonth() + 1 === Number(month) && date.getUTCDate() === Number(day);
+}
+
+/**
+ * 実際の利用通知で確認した形式だけを、自動処理の候補とする。
+ * これはメールの記載内容が確定請求や正当な送信者だという保証ではない。
+ * カードの本人確認と、重複・競合の解決は別途必要。
+ */
+function assessNoticeEvidence(mail, parsed) {
+  var issuer = findIssuer(mail.sender);
+  var subject = normalizeText(mail.subject || '').normalize('NFKC');
+  var body = normalizeText(mail.body || '').normalize('NFKC');
+  var reject = function (reason) { return { safe: false, reason: reason }; };
+  if (!issuer || !parsed || parsed.type !== 'purchase') return reject('通知の種類を確認してください。');
+  var dates = body.match(/(?:ご利用日時(?:\([^\n)]*\))?|ご利用日)\s*[】:：]?\s*20\d{2}[\/\-年]\s*\d{1,2}[\/\-月]\s*\d{1,2}(?!\d)/g) || [];
+  if (dates.length !== 1 || !parsed.usedDate) return reject('利用日を確認してください。');
+  var bodyDate = dates[0].match(/(20\d{2})[\/\-年]\s*(\d{1,2})[\/\-月]\s*(\d{1,2})(?!\d)/);
+  if (!bodyDate || !isValidCalendarDate(bodyDate[1], bodyDate[2], bodyDate[3]) ||
+      pad4(bodyDate[1]) + '-' + pad2(bodyDate[2]) + '-' + pad2(bodyDate[3]) !== parsed.usedDate) return reject('本文と解析結果の利用日を確認してください。');
+
+  if (issuer.label === 'JCB' && subject.indexOf('JCBカード/ショッピングご利用のお知らせ') !== -1) {
+    var amounts = body.match(/(?:【\s*)?ご利用金額\s*(?:】\s*)?[:：]?\s*[¥￥]?\s*[\d,]+\s*円/g) || [];
+    if (amounts.length !== 1) return reject('利用金額の位置を確認してください。');
+    var value = amounts[0].match(/[\d,]+/);
+    return value && toAmount(value[0]) === parsed.amount ? { safe: true, reason: '' } : reject('利用金額を確認してください。');
+  }
+  if (issuer.label === '三井住友カード' && subject.indexOf('ご利用のお知らせ【三井住友カード】') !== -1) {
+    var detail = body.match(/ご利用日時\s*[:：]\s*20\d{2}\/\d{1,2}\/\d{1,2}[^\n]*\n\s*[^\n]{1,80}\(買物\)\s*(?:\n\s*)?([\d,]+)\s*円/g) || [];
+    if (detail.length !== 1) return reject('利用明細の金額を確認してください。');
+    var detailAmount = detail[0].match(/([\d,]+)\s*円\s*$/);
+    return detailAmount && toAmount(detailAmount[1]) === parsed.amount ? { safe: true, reason: '' } : reject('利用明細の金額を確認してください。');
+  }
+  // エポスの通知はクレジット以外のカードも含むためカードを自動特定できない。
+  return reject('通知形式またはカードの種類を確認してください。');
+}
+
 /** 利用日を推定する。年が書かれていない場合は受信日の年を使う。 */
 function extractUsedDate(text, receivedAt) {
   // 利用日ラベルがあれば、そこから後ろだけを見る
@@ -207,7 +345,7 @@ function extractUsedDate(text, receivedAt) {
   if (usedAt) scope = text.slice(usedAt.index + usedAt[0].length, usedAt.index + usedAt[0].length + 40);
 
   var full = scope.match(DATE_PATTERNS[0]) || text.match(DATE_PATTERNS[0]);
-  if (full) return pad4(full[1]) + '-' + pad2(full[2]) + '-' + pad2(full[3]);
+  if (full) return isValidCalendarDate(full[1], full[2], full[3]) ? pad4(full[1]) + '-' + pad2(full[2]) + '-' + pad2(full[3]) : '';
 
   var short = scope.match(DATE_PATTERNS[1]) || text.match(DATE_PATTERNS[1]);
   if (short) {
@@ -217,7 +355,7 @@ function extractUsedDate(text, receivedAt) {
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       // 年末年始のまたぎを補正する（受信が1月で利用が12月など）
       if (receivedAt.getMonth() === 0 && month === 12) year -= 1;
-      return pad4(year) + '-' + pad2(month) + '-' + pad2(day);
+      return isValidCalendarDate(year, month, day) ? pad4(year) + '-' + pad2(month) + '-' + pad2(day) : '';
     }
   }
   return '';
@@ -230,11 +368,15 @@ function extractUsedDate(text, receivedAt) {
 function extractCardHint(text, issuer) {
   if (issuer && issuer.cardHint) {
     var matched = text.match(issuer.cardHint);
-    if (matched) return clean(matched[1] || matched[0]);
+    if (matched) return cleanCardHint(matched[1] || matched[0]);
   }
   var labeled = text.match(CARD_LABEL_PATTERN);
-  if (labeled) return clean(labeled[1]);
+  if (labeled) return cleanCardHint(labeled[1]);
   return issuer ? issuer.label : '';
+}
+
+function cleanCardHint(value) {
+  return clean(value).replace(/(?:[0-9][\s-]*){4,}/g, '').trim();
 }
 
 /**

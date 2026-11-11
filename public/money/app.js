@@ -12,6 +12,27 @@
   const today = () => finance.jstToday();
   const nowIso = () => new Date().toISOString();
   const uid = (prefix = 'id') => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  const modalEditContexts = new Map();
+
+  function editSessionKey() {
+    const session = cloud?.getSession?.();
+    return JSON.stringify([session?.user?.uid || '', session?.workspace?.id || '']);
+  }
+
+  function modalEditText(readCurrent) {
+    return window.RedesignSyncCoordinator.canonical(JSON.parse(JSON.stringify(readCurrent() ?? null)));
+  }
+
+  function rememberModalEdit(id, readCurrent) {
+    modalEditContexts.set(id, { readCurrent, baseline: modalEditText(readCurrent), session: editSessionKey() });
+  }
+
+  function canSaveModalEdit(id) {
+    const context = modalEditContexts.get(id);
+    if (context && context.session === editSessionKey() && context.baseline === modalEditText(context.readCurrent)) return true;
+    showToast('別の画面で内容が更新されました。この画面の入力は残っています。開き直して確認してください');
+    return false;
+  }
 
   const ROLE_LABELS = {
     primary: '基準口座',
@@ -51,6 +72,11 @@
   let cloud = null;
   let syncStatus = 'saved';
   let currentPage = 'home';
+  let mailSection = 'pending';
+  let planMonth = '';
+  let planDate = '';
+  let detailPeriod = '';
+  let dailyCheckScope = 'all';
   let planFilter = 'all';
   let planDetailCardFilter = '';
   let recordFilter = 'settled';
@@ -66,6 +92,9 @@
   let searchQuery = '';
   let whatIfAmount = 0;
   let importCandidates = [];
+  let candidatesLoaded = false;
+  const candidateCardSelections = new Map();
+  const candidateEdits = new Map();
   // レシートは state に入れない（1ドキュメント方式の上限に当たるため）。Firestoreの購読結果をここに置く。
   let receipts = [];
   let receiptItems = [];
@@ -98,10 +127,8 @@
       recurringPlans: [],
       settings: {
         defenseLine: 150000,
-        // 判定期限のモード。現在は 'legacy14'（毎月14日締め）しか選択肢がなく、
-        // getNextDeadline() は14日を直接使っている。つまり保存はされるが、値を変えても効かない。
-        // 別の締め日を足すときは getNextDeadline() がこの値を読むように直すこと。
         deadlineMode: 'legacy14',
+        deadlineCardIds: [],
         cashflowHorizonDays: 90,
         // ふりかえりを始める曜日（0=日曜）。この曜日以降、対象が残っている間はホームに案内を出す。
         reviewDayOfWeek: 0,
@@ -187,6 +214,10 @@
       lendingAmount: Number(source.lendingAmount || 0),
       affectsForecast: source.affectsForecast !== false,
       recurringPlanId: source.recurringPlanId || '',
+      ...(source.scheduledDate ? { scheduledDate: source.scheduledDate } : {}),
+      ...(source.statementEvidence ? { statementEvidence: source.statementEvidence } : {}),
+      ...(source.debitEvidence ? { debitEvidence: source.debitEvidence } : {}),
+      ...(source.refundEvidence ? { refundEvidence: source.refundEvidence } : {}),
       // シフトから作った給与の取引だけが持つ。どの支給月か（'YYYY-MM'）と、手で直したか（2026-09-15）
       salaryPaymentMonth: source.salaryPaymentMonth || '',
       salaryManual: source.salaryManual === true,
@@ -264,6 +295,7 @@
           name: account.name || '名称未設定',
           role: account.role || 'other',
           currentBalance: Number(account.currentBalance || 0),
+          ...(account.balanceEvidence ? { balanceEvidence: account.balanceEvidence } : {}),
           includeInSpendable: account.includeInSpendable !== false && !['savings', 'investment'].includes(account.role),
           reserveAmount: Number(account.reserveAmount || 0),
           isPrimary: Boolean(account.isPrimary)
@@ -391,10 +423,10 @@
     }
   }
 
-  function persist() {
+  function persist(acceptance) {
     state.meta.updatedAt = nowIso();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    if (cloud) cloud.queueSave(state);
+    return cloud?.queueSave(state, acceptance);
   }
 
   /** 空状態の共通マークアップ。title / body は既にエスケープ済みの文字列を渡すこと。 */
@@ -456,11 +488,17 @@
 
   const daysBetween = (from, to) => finance.daysBetween(from, to);
 
-  /**
-   * 「今使える金額」の判定期限。毎月14日締め。
-   * settings.deadlineMode は現状この関数から読んでいない（選択肢が 'legacy14' の1つだけのため）。
-   */
+  function selectedDeadlinePeriod(baseDate = today()) {
+    if (state.settings.deadlineMode !== 'card-closing') return null;
+    const selected = Array.isArray(state.settings.deadlineCardIds) ? state.settings.deadlineCardIds : [];
+    const selectedCardIds = state.cards.filter(card => selected.includes(card.id)).map(card => card.id);
+    if (!selectedCardIds.length) return null;
+    return window.RedesignDeadline.periodForCards({ today: baseDate, cards: state.cards, selectedCardIds });
+  }
+
   function getNextDeadline(baseDate = today()) {
+    const period = selectedDeadlinePeriod(baseDate);
+    if (period) return period.deadline;
     const date = new Date(`${baseDate}T12:00:00`);
     const year = date.getFullYear();
     const month = date.getMonth();
@@ -587,7 +625,6 @@
     if (!remoteState || typeof remoteState !== 'object') return;
     const normalized = normalizeState(remoteState);
     normalized.mode = 'cloud';
-    if (!meta.initial && normalized.meta.updatedAt === state?.meta?.updatedAt) return;
     state = normalized;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     $('#auth-screen').hidden = true;
@@ -639,7 +676,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=37" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=93" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -673,20 +710,29 @@
     $('#onboarding').hidden = true;
     $('#app-shell').hidden = false;
     $('#floating-add').hidden = false;
-    $('#storage-badge').textContent = state.meta.demo ? 'サンプルデータ' : 'この端末に保存';
+    $('#storage-badge').textContent = state.mode === 'cloud' ? 'クラウドの家計' : state.meta.demo ? 'サンプルデータ' : 'この端末に保存';
     $('#today-label').textContent = formatToday();
     renderPage();
   }
 
   function renderPage() {
     detailCache = new Map();
-    const titles = { home: 'ホーム', plans: '予定', records: '記録', accounts: '口座', shift: 'シフト', settings: '設定', spendable: '今使える金額', cashflow: '支払い能力チェック', imports: '取込候補' };
+    const titles = { home: '資金繰り・試算', daily: '余力の内訳', checks: '確認すること', plans: '予定', records: recordTab === 'receipts' ? 'レシート' : '記録', accounts: '口座・カード', shift: 'シフト・給与', settings: '設定', spendable: '今使える金額', cashflow: '支払いの見通し', imports: 'メール確認' };
     $('#page-title').textContent = titles[currentPage] || titles.home;
-    $$('.nav-link[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === currentPage));
-    const renderers = { home: renderHome, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
-    const warning = ['home', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
+    const pending = pendingCandidates().length;
+    $('#money-mail-count').hidden = pending === 0;
+    $('#money-mail-count').textContent = `${pending}件`;
+    $$('.nav-link[data-page]').forEach(button => {
+      const active = button.dataset.page === currentPage && !button.dataset.sectionTarget
+        && (currentPage !== 'plans' || (button.dataset.planSection || 'all') === planFilter)
+        && (currentPage !== 'records' || (button.dataset.recordSection || 'transactions') === recordTab);
+      button.classList.toggle('active', active);
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+    const renderers = { home: renderHome, daily: renderDailyDetails, checks: renderDailyCheckDetails, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
+    const warning = ['home', 'daily', 'checks', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
     $('#page-container').innerHTML = warning + renderers[currentPage]();
-    if (currentPage === 'home') requestAnimationFrame(animateHeroAmount);
     if (currentPage === 'spendable') requestAnimationFrame(() => {
       animateHeroAmount();
       updateWhatIf(whatIfAmount);
@@ -705,7 +751,7 @@
     const targetNode = $('[data-count-amount]');
     if (!targetNode) return;
     const target = Number(targetNode.dataset.countAmount || 0);
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { targetNode.textContent = formatDisplayedAmount(target); return; }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.kurashiMotion === 'off') { targetNode.textContent = formatDisplayedAmount(target); return; }
     const startedAt = performance.now();
     const duration = 420;
     const step = now => {
@@ -763,6 +809,7 @@
     return {
       today: today(),
       deadline: getNextDeadline(),
+      inclusiveDeadline: Boolean(selectedDeadlinePeriod()),
       horizonDays: Number(state.settings.cashflowHorizonDays || 90),
       accounts: state.accounts,
       cards: state.cards,
@@ -887,7 +934,103 @@
     return `<section class="card notice-card home-mail-import"><strong>メール取り込み</strong><p>${count ? `未確認の取込候補が${count}件あります。` : '未確認の取込候補は0件です。'}カード利用のお知らせメールの内容を確認して、取り込むか判断できます。取り込むまで金額には反映されません。</p><button class="button button-quiet button-small" data-page="imports">メール取込を確認</button></section>`;
   }
 
+  const DAILY_STATUS = {
+    safe: { label: '支払い可能', tone: 'good' },
+    review: { label: '確認が必要', tone: 'warn' },
+    shortfall: { label: '不足の見込み', tone: 'bad' }
+  };
+
+  function dailyOverview() {
+    if (!window.DailyFinance) throw new Error('更新した画面を読み込めていません。アプリを再読み込みしてください。');
+    return window.DailyFinance.overview({ state, today: today(), candidates: candidatesLoaded ? importCandidates : undefined });
+  }
+
+  function renderDailyError(error) {
+    return `<section class="card daily-error" role="alert"><h1>試算を確認できません</h1><p>${esc(error.message)}</p><p>以前の計算値へ切り替えて表示することはありません。</p><button class="button button-primary" data-page="accounts">口座を確認</button><button class="button button-quiet" data-page="settings">設定を確認</button></section>`;
+  }
+
+  function renderDailyChecks(view) {
+    const rows = [
+      view.unverifiedAccounts && ['accounts', `残高未確認 ${view.unverifiedAccounts}口座`, '対象の口座を開いて、銀行で見た残高を記録'],
+      view.overdue && ['overdue', `期限を過ぎた予定 ${view.overdue}件`, '該当する予定を開いて、実行済みかを確認'],
+      view.unconfirmedBills && ['bills', `請求額が未確認 ${view.unconfirmedBills}件`, '対象のカード・引落日ごとに総額を確認'],
+      view.pending && ['imports', `メールの未確認候補 ${view.pending}件`, '取り込むまで試算には含まれません']
+    ].filter(Boolean);
+    return `<section class="card daily-checks"><h2>確認すること</h2>${rows.map(([scope, title, note]) => `<button class="daily-check" data-page="${scope === 'imports' ? 'imports' : 'checks'}" data-check="${scope}"><span><strong>${esc(title)}</strong><small>${esc(note)}</small></span><span aria-hidden="true">›</span></button>`).join('') || '<p>現在の記録に確認待ちの項目はありません。</p>'}<p class="form-note">登録していない支払いは自動検出できず、試算にも含まれません。</p></section>`;
+  }
+
+  function renderDailyCheckDetails() {
+    let view;
+    try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
+    const show = scope => dailyCheckScope === 'all' || dailyCheckScope === scope;
+    const accounts = show('accounts') ? state.accounts.filter(a => view.unverifiedAccountIds.includes(a.id)).map(a => `<article class="card daily-details" data-check-item="account"><h2>${esc(a.name)}</h2><p>登録残高 ${formatDisplayedAmount(a.currentBalance)}。銀行で確認した額と一致するか、まだ記録されていません。</p><p>銀行アプリの残高を見てから、金額を入力し「今日の銀行明細と一致」にチェックして保存してください。</p><button class="button button-primary" data-action="edit-account" data-id="${esc(a.id)}">残高を確認・修正</button></article>`).join('') : '';
+    const groups = finance.groupCardCharges(state.transactions, state.cards, holidayOptions());
+    const bills = show('bills') ? view.unconfirmedEvents.map(event => {
+      const group = groups.find(g => `legacy-card:${g.key}` === event.id);
+      const card = group ? creditCard(group.cardId) : state.cards.find(c => event.id.startsWith(`legacy-card:${c.id}:`));
+      const statements = group?.statements || [];
+      const bill = statements.length === 1 ? statements[0] : null;
+      return `<article class="card daily-details" data-check-item="bill"><h2>${esc(card?.name || 'カード請求')}・${formatDate(event.date, true)}引落</h2><p>${esc(accountName(event.accountId))}からの支払い</p><p>${bill ? `登録した請求総額 ${formatAbsoluteYen(bill.amount)}` : `利用明細からの見込み ${formatAbsoluteYen(event.amount + (event.additionalPossible || 0))}。請求総額はまだ登録されていません。`}</p><p>カード会社の明細で、この引落日の総額を確認してください。請求額の確認だけでは口座残高は減りません。</p><div class="daily-quick">${bill ? `<button class="button button-primary" data-action="confirm-statement" data-id="${esc(bill.id)}">請求額を確認済みに</button><button class="button button-quiet" data-action="edit-event" data-id="${esc(bill.id)}">金額を修正</button>` : card ? `<button class="button button-primary" data-action="daily-add-statement" data-card="${esc(card.id)}" data-date="${esc(event.date)}">請求総額を登録</button>` : '<button class="button button-quiet" data-page="accounts">カードの設定を確認</button>'}</div></article>`;
+    }).join('') : '';
+    const overdue = show('overdue') ? view.overdueEvents.map(event => {
+      const transaction = state.transactions.find(t => `legacy:${t.id}` === event.id);
+      return `<article class="card daily-details" data-check-item="overdue"><h2>${formatDate(event.date, true)}・${esc(transaction?.memo || '未確定の予定')}</h2><p>${esc(accountName(event.accountId))}・${formatAbsoluteYen(event.amount)}</p><p>この日を過ぎていますが、実行済みになっていません。実際の入出金を確認してから修正してください。</p>${transaction ? `<button class="button button-primary" data-action="edit-event" data-id="${esc(transaction.id)}">この予定を確認・修正</button>` : '<button class="button button-quiet" data-page="plans">関連する予定を確認</button>'}</article>`;
+    }).join('') : '';
+    const names = { accounts: '残高を確認する口座', bills: '請求額を確認する支払い', overdue: '期限を過ぎた予定', all: '確認すること' };
+    return `<div class="daily-home"><div class="page-heading"><h1>${names[dailyCheckScope] || names.all}</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>${accounts}${bills}${overdue}${accounts || bills || overdue ? '' : '<section class="card daily-details"><p>この項目に確認待ちの記録はありません。</p></section>'}</div>`;
+  }
+
+  function renderGuidance(label, message) {
+    return `<details class="operation-note">
+      <summary class="note-toggle"><span class="note-mark" aria-hidden="true">!</span>${esc(label)}</summary>
+      <p class="note-glass">${esc(message)}</p>
+    </details>`;
+  }
+
+  function accountBalanceNote(item) {
+    const evidence = item.balanceEvidence;
+    const verified = evidence?.source === 'bank-manual' && evidence.amount === item.currentBalance && evidence.date;
+    const amount = formatDisplayedAmount(item.currentBalance);
+    return renderGuidance('銀行残高の確認', verified
+      ? `銀行で確認した残高：${amount}（${formatDate(evidence.date)}確認）`
+      : `登録した残高：${amount}（銀行の残高は未確認です）`);
+  }
+
   function renderHome() {
+    let view;
+    try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
+    const { allowance, primary, period } = view;
+    if (typeof window.__appStatus === 'function') window.__appStatus(`資金繰り：${DAILY_STATUS[view.assessment.futureStatus].label}`);
+    const shortage = allowance.amount < 0;
+    const paymentRows = allowance.paymentEvents.slice().sort((a, b) => a.date.localeCompare(b.date)).map(event => {
+      const original = state.transactions.find(item => item.id === event.id.replace(/^legacy:/, ''));
+      const label = original?.memo || (event.cardPayment ? 'カード引落' : event.kind === 'transfer' ? '振替' : '支払い');
+      return `<div><dt>${esc(label)} · ${formatDate(event.date)}</dt><dd>${formatDisplayedAmount(-event.amount - (event.additionalPossible || 0))}</dd></div>`;
+    }).join('');
+    const note = `${formatDate(period.deadline)}までに使える額の目安です。${formatDate(allowance.endDate)}までの支払い額と予備額は差し引いてあります。入金予定額は含みません。`;
+    const verified = view.scenario.accounts.find(account => account.id === primary.id)?.balanceVerified;
+    const accountDetail = verified ? `確認日 ${formatDate(primary.balanceEvidence.date)}` : '銀行残高は未確認';
+    return `<div class="prototype-flow daily-home" data-daily-home>
+      <div class="page-heading"><div><p class="eyebrow">${formatDate(today(), true)}</p><h1>資金繰り・試算</h1></div></div>
+      <section class="sheet amount-sheet daily-hero"><p class="date-label">${formatDate(period.deadline, true)}まで</p><p class="amount daily-amount${shortage ? ' negative' : ''}">${formatDisplayedAmount(allowance.amount)}</p>${shortage ? renderGuidance('説明', `支払い額と予備額を確保すると、${formatAbsoluteYen(allowance.amount)}不足する見込みです。`) : ''}</section>
+      <section class="sheet" data-calculation><h2 class="section-heading">金額の計算</h2>${renderGuidance('説明', note)}<dl class="ledger"><div><dt>口座残高</dt><dd>${formatDisplayedAmount(allowance.openingBalance)}</dd></div>${paymentRows}<div><dt>予備額</dt><dd>${formatDisplayedAmount(-allowance.reserve)}</dd></div><div class="ledger-total"><dt>計</dt><dd>${formatDisplayedAmount(allowance.amount)}</dd></div></dl></section>
+      <section class="sheet daily-checks"><h2 class="section-heading">確認事項</h2><button class="check-row" data-action="prototype-account"><span>口座残高<small>${esc(accountDetail)}</small></span><span class="check-count">${state.accounts.length}口座 ›</span></button><button class="check-row" data-action="prototype-bills"><span>請求額</span><span class="check-count">${view.unconfirmedBills}件 ›</span></button><button class="check-row" data-page="imports"><span>メール</span><span class="check-count">${view.pending}件 ›</span></button></section>
+    </div>`;
+  }
+
+  function renderDailyDetails() {
+    let view;
+    try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
+    const a = view.allowance;
+    return `<div class="daily-home"><div class="page-heading"><h1>余力の内訳</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
+      <section class="card daily-details"><span class="eyebrow">${esc(view.primary.name)}・${formatDate(a.endDate, true)}までの支払いを確保</span><h2>この金額になる理由</h2>
+      <dl class="daily-formula"><div><dt>登録した口座残高</dt><dd>${formatDisplayedAmount(a.openingBalance)}</dd></div><div><dt>締め日までの支払い</dt><dd>−${formatAbsoluteYen(a.throughDeadline)}</dd></div><div><dt>締め日後〜${formatDate(a.endDate)}の支払い</dt><dd>−${formatAbsoluteYen(a.afterDeadline)}</dd></div><div><dt>最低限残す予備額</dt><dd>−${formatAbsoluteYen(a.reserve)}</dd></div><div class="daily-total"><dt>余力の参考額</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl>
+      ${renderGuidance('使える額の計算', `${formatDate(view.period.deadline)}までに使える額の目安です。${formatDate(a.endDate)}までの支払い額と予備額は差し引いてあります。入金予定額は含みません。`)}<button class="button button-quiet" data-page="settings">予備額・基準カードを設定</button></section>
+      <section class="card daily-details"><h2>2つの見方を比べる</h2><dl class="daily-formula"><div><dt>締め日までの支払いだけを確保</dt><dd>${formatDisplayedAmount(view.throughDeadlineOnly)}</dd></div><div><dt>その後の支払いも確保</dt><dd>${formatDisplayedAmount(a.amount)}</dd></div></dl><p>ホームには後者を表示します。前者を使い切ると、締め日後の引落に足りなくなる可能性があります。</p></section>
+      ${renderDailyChecks(view)}</div>`;
+  }
+
+  function renderLegacyHome() {
     const spendable = spendableAmount();
     publishSwitcherStatus(spendable);
     const check = cashflowCheck();
@@ -914,7 +1057,8 @@
       <div class="page-heading"><div><span class="eyebrow">ホーム</span><h1>ホーム</h1></div></div>
       ${renderReviewPrompt()}
 
-      <section class="card hero-card">
+      <section class="card hero-card ledger-page">
+        <div class="ledger-page-heading"><span>わたしの家計手帳</span><span class="ledger-bookmark" aria-hidden="true">${Number(today().slice(5, 7))}月</span></div>
         <span class="eyebrow">今使える金額・${formatDate(spendable.deadline, true)}まで／あと${spendable.days}日</span>
         <h1 data-count-amount="${spendable.total}">${formatDisplayedAmount(spendable.total)}</h1>
         <div class="hero-daily"><span>1日あたりの目安</span><strong>${formatDisplayedAmount(spendable.daily)}</strong><small>残り${spendable.dailyDays}日で均等に使う場合</small></div>
@@ -925,16 +1069,11 @@
 
       ${renderMailImportPrompt()}
 
-      <section class="card check-summary-card">
-        <div class="list-card-header"><div><span class="eyebrow">支払い能力チェック</span><h2>${formatDate(check.endDate)}までの見通し</h2></div><span class="status-pill ${checkStatus.className}"><span class="status-dot" aria-hidden="true"></span>${checkStatus.label}</span></div>
-        <p class="check-detail">${checkStatus.detail}</p>
-        <div class="summary-strip">
-          <div class="stat-card"><span>期間内の最低予測残高</span><strong class="${check.minBalance < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(check.minBalance)}</strong></div>
-          <div class="stat-card"><span>最も危険な日</span><strong>${formatDate(check.minBalanceDate, true)}</strong></div>
-          <div class="stat-card"><span>${check.shortfallDate ? '不足が発生する日' : '最低残高を下回る日'}</span><strong>${check.shortfallDate ? formatDate(check.shortfallDate, true) : (check.belowDefenseDate ? formatDate(check.belowDefenseDate, true) : 'なし')}</strong></div>
-        </div>
-        <div class="hero-actions"><button class="button button-quiet button-small" data-page="cashflow">日付ごとの推移を見る</button></div>
-      </section>
+      <button type="button" class="card cashflow-status-card ${checkStatus.className}" data-page="cashflow">
+        <span class="cashflow-status-top"><span class="eyebrow">将来の支払いの見通し</span><span class="cashflow-status-action">詳しく見る <span aria-hidden="true">›</span></span></span>
+        <span class="cashflow-status-title"><span class="status-dot" aria-hidden="true"></span>${esc(checkStatus.label)}</span>
+        <span class="cashflow-status-detail">${esc(checkStatus.detail)} ${formatDate(check.endDate)}までの予定から計算しています。</span>
+      </button>
 
       <section class="card list-card">
         <div class="list-card-header"><div><span class="eyebrow">次の重要な支払い</span><h2>これからの予定</h2></div><button class="button button-quiet button-small" data-page="plans">すべて見る</button></div>
@@ -999,6 +1138,26 @@
     }).join('');
   }
 
+  function renderSpendingAllowance(deadline) {
+    if (!selectedDeadlinePeriod()) return '';
+    const funding = primaryAccount();
+    try {
+      const { scenario } = savedPaymentScenario(deadline);
+      const result = window.RedesignReadiness.spendingAllowance(scenario, {
+        deadline, accountId: funding.id, reserve: Number(state.settings.defenseLine || 0)
+      });
+      return `<section class="card info-card" data-spending-allowance>
+        <h2>締め日後の支払いも残す試算</h2>
+        <p>${esc(funding.name)}の参考額 <strong>${formatDisplayedAmount(result.amount)}</strong></p>
+        <p>締め日までの支払い ${formatAbsoluteYen(result.throughDeadline)}・締め日後から${formatDate(result.endDate, true)}まで ${formatAbsoluteYen(result.afterDeadline)}</p>
+        <p>予備額 ${formatAbsoluteYen(result.reserve)}・予定入金は含めません。</p>
+        <p class="check-detail">口座残高・請求額・未確認の候補を照合してください。</p>
+      </section>`;
+    } catch (_) {
+      return '<section class="card info-card" data-spending-allowance><h2>締め日後の支払いも残す試算</h2><p>要確認。口座や支払いの記録を確認してください。</p></section>';
+    }
+  }
+
   function renderSpendable() {
     const result = spendableAmount();
     if (!result) return '<div class="page-heading"><div><span class="eyebrow">今使える金額</span><h1>今使える金額</h1></div></div><section class="card empty"><div><strong>口座がありません</strong>口座を追加すると計算できます。</div></section>';
@@ -1023,6 +1182,7 @@
         <div class="hero-actions"><button class="button button-quiet button-small" data-action="open-future">将来の期間で試算</button></div>
       </section>
 
+      ${renderSpendingAllowance(result.deadline)}
       <section class="card breakdown-card">
         <div class="section-title"><h2>計算内訳</h2><small>${formatDate(result.deadline)}まで</small></div>
         <div class="breakdown-list">${breakdownRows}</div>
@@ -1093,100 +1253,251 @@
     return candidate.usedDate || finance.jstDateStringOf(candidate.detectedAt) || today();
   }
 
-  /**
-   * 取込候補の利用時刻(UTCのISO文字列)を求める。明細を新しい順に並べるために使う。
-   * メール本文から読み取った利用日と受信日が一致するときだけ、受信時刻を利用時刻とみなす。
-   * ずれている場合は時刻が不明なので空にして、日付だけで並べる。
-   */
-  function candidateInstant(candidate) {
-    const detectedAt = candidate.detectedAt || '';
-    if (!detectedAt) return '';
-    const detectedDate = finance.jstDateStringOf(detectedAt);
-    if (!detectedDate) return '';
-    if (candidate.usedDate && candidate.usedDate !== detectedDate) return '';
-    return new Date(detectedAt).toISOString();
+  /** 本文に日本時間と明記された場合だけ、利用時刻を保存する。 */
+  function confirmedCandidateInstant(candidate, date) {
+    if (candidate.usedTimeSource !== 'mail-body' || candidate.usedTimeZone !== 'Asia/Tokyo' || candidate.usedDate !== date) return '';
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(candidate.usedTime || '')) return '';
+    const instant = new Date(`${date}T${candidate.usedTime}:00+09:00`);
+    return Number.isFinite(instant.getTime()) ? instant.toISOString() : '';
   }
 
-  /** カード名の候補から登録済みカードを推測する */
-  function guessCardId(candidate) {
-    const hint = String(candidate.cardHint || candidate.sourceLabel || '').trim();
-    if (!hint) return state.cards[0]?.id || '';
-    const matched = state.cards.find(card => hint.includes(card.name) || card.name.includes(hint));
-    return matched?.id || state.cards[0]?.id || '';
+  /** 本人が登録した対応だけを使い、カードの名前や登録順から推測しない。 */
+  function matchedCardId(candidate) {
+    const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s　]+/g, '');
+    const source = String(candidate.sourcePackage || '').trim().toLowerCase();
+    const hint = normalize(candidate.cardHint);
+    if (!source || source === 'unknown' || !hint || hint === normalize(candidate.sourceLabel)) return '';
+    const mappings = Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : [];
+    const matches = mappings.filter(item => item.source === source && normalize(item.hint) === hint && state.cards.some(card => card.id === item.cardId));
+    return matches.length === 1 ? matches[0].cardId : '';
   }
+
+  function rememberCandidateCard(candidateId, cardId) {
+    const candidate = importCandidates.find(item => item.id === candidateId);
+    const card = state.cards.find(item => item.id === cardId);
+    const source = String(candidate?.sourcePackage || '').trim().toLowerCase();
+    const hint = String(candidate?.cardHint || '').trim();
+    const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s　]+/g, '');
+    if (!candidate || !card) { showToast('先に取り込むカードを選択してください'); return; }
+    if (!source || source === 'unknown' || !hint || normalize(hint) === normalize(candidate.sourceLabel)) {
+      showToast('メールだけではカードの種類を特定できません'); return;
+    }
+    const mappings = Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : [];
+    const previous = mappings.find(item => item.source === source && normalize(item.hint) === normalize(hint));
+    if (previous && previous.cardId !== card.id && !window.confirm('このメールのカード名に登録された対応を変更しますか？')) return;
+    state.settings.mailCardMappings = mappings.filter(item => !(item.source === source && normalize(item.hint) === normalize(hint)));
+    state.settings.mailCardMappings.push({ source, hint, cardId: card.id });
+    persist(); renderPage(); showToast('このメールのカード名と選んだカードの対応を保存しました');
+  }
+
+  function forgetCandidateCard(index) {
+    const mappings = Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : [];
+    if (!Number.isInteger(index) || index < 0 || index >= mappings.length) return;
+    state.settings.mailCardMappings = mappings.filter((_, i) => i !== index);
+    persist(); renderPage(); showToast('カードの対応を解除しました');
+  }
+
+  const MAIL_SECTIONS = [['pending', '未取り込み'], ['accepted', '取り込み済み'], ['ignored', '無視']];
 
   function renderImports() {
     const rows = importCandidates
-      .slice()
+      .filter(candidate => mailSection === 'pending' ? ['pending', 'needs_review'].includes(candidate.status) : candidate.status === mailSection)
       .sort((a, b) => String(b.detectedAt || '').localeCompare(String(a.detectedAt || '')))
       .map(candidate => {
         const status = CANDIDATE_STATUS[candidate.status] || CANDIDATE_STATUS.pending;
         const actionable = ['pending', 'needs_review'].includes(candidate.status);
+        const needsOriginal = ['refund', 'cancel'].includes(candidate.type);
         const duplicate = importCandidates.some(other => other.id !== candidate.id && other.fingerprint && other.fingerprint === candidate.fingerprint);
+        const selectedCard = candidateCardSelections.has(candidate.id) ? candidateCardSelections.get(candidate.id) : matchedCardId(candidate);
+        const draft = candidateEdits.get(candidate.id) || {};
+        const amountValue = draft.amount ?? (candidate.amount || '');
+        const dateValue = draft.date ?? candidate.usedDate ?? '';
+        const merchantValue = draft.merchant ?? candidate.merchant ?? '';
+        const entryTypeValue = draft.entryType ?? (['purchase', 'refund', 'cancel'].includes(candidate.type) ? 'itemized' : '');
         return `<div class="candidate-row">
           <div class="candidate-main">
             <div class="candidate-head"><strong>${candidate.amount ? formatAbsoluteYen(candidate.amount) : '金額を確認'}</strong><span class="badge ${status.className}">${status.label}</span><span class="badge badge-muted">${CANDIDATE_TYPE[candidate.type] || '不明'}</span>${duplicate ? '<span class="badge badge-warn">重複の可能性</span>' : ''}</div>
-            <small>${formatDate(candidateDate(candidate), true)}${candidate.merchant ? `・${esc(candidate.merchant)}` : ''}・${esc(candidate.cardHint || 'カード不明')}・${esc(candidate.sourceLabel || candidate.sourcePackage || '取込元不明')}</small>
+            <small>${candidate.usedDate ? '利用日 ' + formatDate(candidateDate(candidate), true) : '受信日 ' + formatDate(candidateDate(candidate), true) + '（利用日未確認）'}${candidate.merchant ? `・${esc(candidate.merchant)}` : ''}・${esc(candidate.cardHint || 'カード不明')}・${esc(candidate.sourceLabel || candidate.sourcePackage || '取込元不明')}</small>
             ${candidate.note ? `<small>${esc(candidate.note)}</small>` : ''}
+            ${actionable && ['cancel', 'refund', 'unknown'].includes(candidate.type) ? `<button class="mini-button" data-action="correct-candidate-type" data-id="${esc(candidate.id)}">利用通知として訂正</button>` : ''}
+            ${actionable && needsOriginal ? renderRefundTarget() : ''}
+            ${actionable ? `<div class="candidate-edit-fields"><label><span>金額</span><input type="number" min="1" step="1" inputmode="numeric" data-candidate-field="amount" data-candidate-id="${esc(candidate.id)}" value="${esc(amountValue)}"></label><label><span>利用日／引落日</span><input type="date" data-candidate-field="date" data-candidate-id="${esc(candidate.id)}" value="${esc(dateValue)}"></label><label><span>内容の種類</span><select data-candidate-field="entryType" data-candidate-id="${esc(candidate.id)}"><option value="">種類を選択</option><option value="itemized" ${entryTypeValue === 'itemized' ? 'selected' : ''}>1件の利用</option><option value="statement" ${entryTypeValue === 'statement' ? 'selected' : ''}>請求総額</option></select></label><label><span>利用先・メモ</span><input type="text" maxlength="40" data-candidate-field="merchant" data-candidate-id="${esc(candidate.id)}" value="${esc(merchantValue)}"></label></div><small>1件の利用は利用日、請求総額は引落日を入力してください。</small>` : ''}
           </div>
-          ${actionable ? `<div class="list-actions">
-            <button class="mini-button primary" data-action="accept-candidate" data-id="${candidate.id}">取り込む</button>
+          ${actionable ? `<div class="candidate-actions"><label class="candidate-card-select"><span>取り込むカード</span><select data-candidate-card="${esc(candidate.id)}" aria-label="取り込むカード"><option value="">カードを選択</option>${state.cards.map(card => `<option value="${esc(card.id)}" ${card.id === selectedCard ? 'selected' : ''}>${esc(card.name)}</option>`).join('')}</select></label><button class="mini-button" data-action="remember-candidate-card" data-id="${esc(candidate.id)}">このカードの対応を覚える</button><div class="list-actions">
+            <button class="mini-button primary" data-action="accept-candidate" data-id="${esc(candidate.id)}">取り込む</button>
             <button class="mini-button" data-action="ignore-candidate" data-id="${candidate.id}">無視</button>
             <button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button>
-          </div>` : `<div class="list-actions"><button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button></div>`}
+          </div></div>` : `<div class="list-actions"><button class="mini-button danger" data-action="delete-candidate" data-id="${candidate.id}">削除</button></div>`}
         </div>`;
       }).join('');
 
     return `
-      <div class="page-heading"><div><span class="eyebrow">取込候補</span><h1>通知・メールからの取込候補</h1></div><button class="button button-quiet button-small" data-page="settings">設定へ戻る</button></div>
-      <section class="card info-card">
-        <p class="check-detail">カード利用のお知らせメールから作られた候補です。<strong>取り込むまでは、今使える金額にも支払い能力チェックにも反映されません。</strong>内容を確認して取り込むと、正式なカード取引になります。</p>
-      </section>
-      <section class="card list-card">
-        <div class="list-card-header"><div><span class="eyebrow">${pendingCandidates().length}件が未確認</span><h2>候補一覧</h2></div></div>
-        <div class="candidate-list">${rows || emptyBlock('取込候補はありません', 'カード利用のお知らせメールが取り込まれると、ここに表示されます。')}</div>
-      </section>`;
+      <div class="prototype-flow">
+        <div class="page-heading"><div><p class="eyebrow">${formatDate(today(), true)}</p><h1>メール確認</h1></div></div>
+        <div class="mail-tabs" role="group" aria-label="メールの状態">${MAIL_SECTIONS.map(([value, label]) => `<button type="button" data-mail-section="${value}" aria-pressed="${value === mailSection}">${label}</button>`).join('')}</div>
+        ${mailSection === 'pending' && rows ? renderGuidance('説明', 'まだ取り込んでいない候補は試算に含まれていません。カード、金額、日付と内容を確認してください。') : ''}
+        <div class="candidate-list">${rows || '<p class="sheet">0件</p>'}</div>
+        ${state.settings.mailCardMappings?.length ? `<details class="sheet"><summary>メールとカードの対応</summary>${state.settings.mailCardMappings.map((item, i) => `<div>${esc(item.hint)} → ${esc(state.cards.find(card => card.id === item.cardId)?.name || '削除されたカード')} <button class="mini-button" data-action="forget-candidate-card" data-index="${i}">対応を解除</button></div>`).join('')}</details>` : ''}
+      </div>`;
   }
 
   /** 候補を正式なカード取引へ変換する。承認するまで計算には含めない。 */
-  async function acceptCandidate(id) {
+  function renderRefundTarget() {
+    const options = state.transactions.filter(item => item.cardId && item.entryType === 'itemized' && ['planned', 'settled', 'absorbed'].includes(item.status) && item.amount > 0)
+      .map(item => `<option value="${esc(item.id)}">${esc(cardName(item.cardId))}・${esc(item.transactionDate)}・${esc(item.memo)}・${formatAbsoluteYen(item.amount)}</option>`).join('');
+    const statements = state.transactions.filter(item => {
+      const card = item.statementEvidence ? creditCard(item.cardId) : null;
+      return card && ['planned', 'settled'].includes(item.status)
+        && finance.hasConfirmedCardStatement(item, finance.cardBillingCycleOf(item, card, holidayOptions()));
+    }).map(item => `<option value="${esc(item.id)}">${esc(cardName(item.cardId))}・${esc(item.dueDate)}・${formatAbsoluteYen(item.amount)}</option>`).join('');
+    return `<label>元のカード利用<select data-refund-target><option value="">選択してください</option>${options}</select></label>
+      <label>返金が含まれる請求<select data-refund-statement><option value="">元の利用と同じ未確定の請求に反映</option>${statements}</select></label>
+      <label>カード会社の返金計上日<input type="date" data-refund-credit-date></label>
+      <small>別の請求期間で総額が未登録なら、明細にある計上日を入力します。確認済みの総額に含まれている場合は請求だけを選びます。</small>
+      <details><summary>銀行口座に直接入金された場合</summary>
+        <label>入金先口座<select data-refund-bank-account><option value="">選択してください</option>${state.accounts.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select></label>
+        <label>実際の入金日<input type="date" data-refund-bank-date></label>
+        <label>アプリの口座残高への反映<select data-refund-bank-reflected><option value="">選択してください</option><option value="yes">反映済み</option><option value="no">未反映</option></select></label>
+        <small>銀行明細で入金を確認し、上の請求先とカード会社の計上日は空欄にしてください。</small>
+      </details>`;
+  }
+
+  async function acceptPendingRefund(candidate, edits) {
+    const amount = Number(edits?.amount);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || !edits?.refundTarget) {
+      showToast('返金額と元の利用を選んでください');
+      return;
+    }
+    try {
+      const { bankCredit } = edits;
+      if (bankCredit) await cloud?.flushPendingSave?.();
+      const todayDate = today();
+      const result = window.RedesignRefund.preparePendingRefund({ state, candidate, targetId: edits.refundTarget, amount, confirmed: true, destinationStatementId: edits.destinationStatementId, creditDate: edits.creditDate, bankCredit, today: todayDate });
+      if (result.status !== 'ready') {
+        showToast(bankCredit ? '返金額・入金先・入金日・残高への反映を確認してください' : '返金額・元の利用・反映先の請求期間を確認してください');
+        return;
+      }
+      const row = result.transaction;
+      const bankAccount = bankCredit && account(bankCredit.accountId);
+      const delta = bankCredit && !bankCredit.balanceAlreadyIncludesCredit ? amount : 0;
+      if (bankAccount && (!Number.isSafeInteger(bankAccount.currentBalance) || !Number.isSafeInteger(bankAccount.currentBalance + delta))) throw new Error('入金先の残高を確認してください');
+      const confirmation = bankAccount
+        ? `${bankAccount.name}の銀行明細で、${formatDate(row.dueDate, true)}に${formatAbsoluteYen(amount)}の入金を確認しましたか？ ${delta ? 'アプリの口座残高に加えます。' : '入金記録だけを保存します。'}`
+        : cardName(row.cardId) + 'の元の利用に ' + formatAbsoluteYen(amount)
+        + (edits.destinationStatementId ? ' の返金が ' + formatDate(row.dueDate, true) + ' の確認済み請求総額に含まれていることを、カード会社の明細で確認しましたか？' : edits.creditDate ? ' の返金計上日が ' + formatDate(edits.creditDate, true) + ' であることをカード会社の明細で確認しましたか？' : ' を返金し、同じ未確定の請求期間に反映することをカード会社の明細で確認しましたか？');
+      if (!window.confirm(confirmation)) return;
+      if (delta) adjustAccount(bankCredit.accountId, delta);
+      state.transactions.push(createTransaction({ ...row, memo: edits.merchant || candidate.merchant || 'カード返金' }));
+      const patch = { ...stripCandidate(candidate), amount, status: 'accepted' };
+      if (persist({ id: candidate.id, patch, refundTarget: edits.refundTarget, destinationStatementId: edits.destinationStatementId || '', creditDate: edits.creditDate || '', ...(bankCredit ? { bankCredit, today: todayDate } : {}) }) === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast('返金を元の利用に紐付けました');
+    } catch (error) { showToast(error.message || '返金を同期できませんでした'); }
+    renderPage();
+  }
+
+  function openCandidateTypeCorrection(id) {
+    if (!$('#candidate-type-modal')) { showToast('画面を更新してから、通知の訂正を開き直してください'); return; }
+    const candidate = importCandidates.find(item => item.id === id);
+    if (!candidate || !['pending', 'needs_review'].includes(candidate.status) || !['cancel', 'refund', 'unknown'].includes(candidate.type)) return;
+    rememberModalEdit('candidate-type-modal', () => importCandidates.find(item => item.id === id));
+    clearTimeout(toastTimer); $('#toast')?.classList.remove('show');
+    $('#candidate-type-id').value = id;
+    $('#candidate-type-description').textContent = `${candidate.usedDate || '利用日未確認'} ${candidate.merchant || candidate.sourceLabel || ''} ${candidate.amount ? formatAbsoluteYen(candidate.amount) : '金額未確認'}`;
+    $('#candidate-type-confirm').checked = false;
+    $('#candidate-type-modal').hidden = false;
+  }
+
+  async function saveCandidateTypeCorrection(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('candidate-type-modal') || !$('#candidate-type-confirm').checked) return;
+    const button = event.target.querySelector('[type="submit"]');
+    try {
+      const id = $('#candidate-type-id').value, candidate = importCandidates.find(item => item.id === id);
+      if (!candidate || !cloud?.correctImportCandidateType) throw new Error('候補を開き直して確認してください');
+      button.disabled = true;
+      const patch = await cloud.correctImportCandidateType(id, stripCandidate(candidate), true);
+      importCandidates = importCandidates.map(item => item.id === id ? { ...item, ...patch } : item);
+      closeModal('candidate-type-modal'); renderPage(); showToast('種類を利用へ訂正しました。カード・金額・利用日を確認して取り込んでください');
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
+  }
+
+  async function acceptCandidate(id, selectedCardId, edits) {
     const candidate = importCandidates.find(item => item.id === id);
     if (!candidate || !['pending', 'needs_review'].includes(candidate.status)) return;
+    if (['refund', 'cancel'].includes(candidate.type)) {
+      return acceptPendingRefund(candidate, edits);
+    }
     // クラウドの候補更新を待つ間の連打や、再読込後の再取込を防ぐ。
     const transactionId = `mail_${id}`;
     if (state.transactions.some(item => item.id === transactionId)) return;
     if (!state.cards.length) { showToast('先にクレジットカードを登録してください'); return; }
-    if (!Number(candidate.amount)) { showToast('金額が読み取れていません。予定を手入力してください'); return; }
+    const amount = Number(edits ? edits.amount : candidate.amount);
+    if (!Number.isSafeInteger(amount) || amount <= 0) { showToast('利用金額を入力してください'); return; }
+    const entryType = edits ? edits.entryType : 'itemized';
+    if (!['itemized', 'statement'].includes(entryType)) { showToast('内容の種類を選択してください'); return; }
 
-    const cardId = guessCardId(candidate);
+    // 画面からの取込は選択欄の値を必ず使う。一致しないカードへの自動割当を避ける。
+    const cardId = selectedCardId === undefined ? matchedCardId(candidate) : selectedCardId;
+    if (!cardId || !state.cards.some(item => item.id === cardId)) { showToast('取り込むカードを選択してください'); return; }
     const card = creditCard(cardId);
-    const transactionDate = candidateDate(candidate);
-    const dueDate = card
+    if (!card?.accountId || !state.accounts.some(item => item.id === card.accountId)) { showToast('カードの引落口座を設定してください'); return; }
+    const transactionDate = edits ? edits.date : candidate.usedDate;
+    const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(transactionDate || '');
+    const checkedDate = dateParts ? new Date(`${transactionDate}T00:00:00Z`) : null;
+    if (!dateParts || !checkedDate || !Number.isFinite(checkedDate.getTime()) || checkedDate.toISOString().slice(0, 10) !== transactionDate) { showToast('利用日を確認してください'); return; }
+    const merchant = edits ? String(edits.merchant || '').trim().slice(0, 40) : (candidate.merchant || '');
+    const similar = state.transactions.some(item => item.id !== transactionId && item.origin === 'mail-import'
+      && item.cardId === cardId && item.transactionDate === transactionDate
+      && Math.abs(Number(item.amount || 0)) === amount
+      && !['cancelled', 'ignored'].includes(item.status));
+    if (similar && !window.confirm('同じカード・利用日・金額の取引があります。別の利用として取り込みますか？')) return;
+    const merchantKey = finance.normalizeItemName(merchant);
+    const otherCard = entryType === 'itemized' && merchantKey && state.transactions.find(item =>
+      item.origin === 'mail-import' && item.entryType === 'itemized' && item.kind === 'payment'
+      && item.cardId && item.cardId !== cardId && item.transactionDate === transactionDate
+      && item.amount === amount && ['planned', 'settled', 'absorbed'].includes(item.status)
+      && finance.normalizeItemName(item.memo) === merchantKey);
+    if (otherCard && (selectedCardId === undefined || !window.confirm(
+      `${cardName(otherCard.cardId)}に同じ利用日・金額・店名の記録があります。別の決済だと確認できた場合だけ取り込んでください。`
+    ))) return;
+    const dueDate = entryType === 'statement' ? transactionDate : card
       ? finance.calculateCardPaymentDate(transactionDate, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions())
       : transactionDate;
-    const isNegative = ['refund', 'cancel'].includes(candidate.type);
 
     const transaction = createTransaction({
       id: transactionId,
       kind: 'payment',
-      amount: Math.abs(Number(candidate.amount || 0)) * (isNegative ? -1 : 1),
+      amount,
       transactionDate,
-      transactionAt: candidateInstant(candidate),
-      dateEstimated: !candidate.usedDate,
+      transactionAt: entryType === 'statement' ? '' : confirmedCandidateInstant(candidate, transactionDate),
+      dateEstimated: edits ? false : !candidate.usedDate,
       dueDate,
-      sourceAccountId: card?.accountId || primaryAccount()?.id || '',
+      sourceAccountId: card.accountId,
       cardId,
-      entryType: 'itemized',
+      entryType,
       origin: 'mail-import',
       category: 'カード利用',
-      memo: candidate.merchant || candidate.cardHint || 'メール取込'
+      memo: merchant || candidate.cardHint || 'メール取込'
     });
 
+    const statementError = cardStatementRegistrationError(transaction, null);
+    if (statementError) { showToast(statementError); return; }
     state.transactions.push(transaction);
     absorbSettledStatementDetails(state);
-    persist();
-    try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), status: 'accepted' }); }
-    catch (error) { console.warn('取込候補の更新に失敗しました', error); }
+    const sameDate = candidate.usedDate === transactionDate;
+    const timePatch = Object.prototype.hasOwnProperty.call(candidate, 'usedTime')
+      ? { usedTime: sameDate ? candidate.usedTime || '' : '', usedTimeZone: sameDate ? candidate.usedTimeZone || '' : '', usedTimeSource: sameDate ? candidate.usedTimeSource || '' : '' } : {};
+    const patch = { ...stripCandidate(candidate), ...timePatch, amount, usedDate: transactionDate, merchant, status: 'accepted' };
+    try {
+      if (persist({ id, patch }) === false) throw new Error('クラウド保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+    } catch (_) {
+      renderPage();
+      showToast('メール候補と取引を同期できませんでした。端末内に変更を保管しています。');
+      return;
+    }
     renderPage();
     showToast(transaction.status === 'absorbed' ? '請求総額の内訳にまとめました。予定の明細タブから確認できます' : '取り込みました。内容は予定の明細タブから編集できます');
     if (transaction.status !== 'absorbed') openEventModal(transaction.id);
@@ -1194,9 +1505,9 @@
 
   async function ignoreCandidate(id) {
     const candidate = importCandidates.find(item => item.id === id);
-    if (!candidate) return;
-    try { await cloud?.updateImportCandidate(id, { ...stripCandidate(candidate), status: 'ignored' }); showToast('無視しました'); }
-    catch (error) { showToast('取込候補を更新できませんでした'); }
+    if (!candidate || !['pending', 'needs_review'].includes(candidate.status)) return;
+    try { await cloud.updateImportCandidate(id, { status: 'ignored' }); showToast('無視しました'); }
+    catch (error) { showToast(error.message || '取込候補を更新できませんでした'); }
   }
 
   async function deleteCandidate(id) {
@@ -1207,15 +1518,19 @@
 
   /** Rulesが許可するフィールドだけに絞る */
   function stripCandidate(candidate) {
-    const allowed = ['sourcePackage', 'sourceLabel', 'detectedAt', 'usedDate', 'amount', 'cardHint', 'merchant', 'type', 'status', 'fingerprint', 'note', 'createdAt', 'createdBy'];
+    const allowed = ['sourcePackage', 'sourceLabel', 'detectedAt', 'usedDate', 'usedTime', 'usedTimeZone', 'usedTimeSource', 'amount', 'cardHint', 'merchant', 'type', 'status', 'fingerprint', 'note', 'createdAt', 'createdBy'];
     const next = {};
     allowed.forEach(key => { if (candidate[key] !== undefined) next[key] = candidate[key]; });
     return next;
   }
 
   function handleImportCandidates(items) {
-    importCandidates = Array.isArray(items) ? items : [];
-    if (['imports', 'settings', 'home'].includes(currentPage)) renderPage();
+    candidatesLoaded = Array.isArray(items);
+    importCandidates = candidatesLoaded ? items : [];
+    const visibleIds = new Set(importCandidates.map(item => item.id));
+    for (const id of candidateCardSelections.keys()) if (!visibleIds.has(id)) candidateCardSelections.delete(id);
+    for (const id of candidateEdits.keys()) if (!visibleIds.has(id)) candidateEdits.delete(id);
+    if (['imports', 'settings', 'home', 'daily', 'checks', 'cashflow'].includes(currentPage)) renderPage();
   }
 
   /* ================= レシート明細（買ったものと、その結末） =================
@@ -1958,7 +2273,7 @@
     const foodTotal = food ? food.amount : 0;
     const slices = waste.total ? chartSlices(waste) : [];
 
-    return `<section class="card chart-card waste-card">
+    return `<section class="card chart-card waste-card" id="review">
       <div class="list-card-header"><div><span class="eyebrow">ムダ支出</span><h2>${esc(rangeLabel(range))}に捨てたもの</h2></div><strong class="value-negative">${formatAbsoluteYen(waste.total)}</strong></div>
       <div class="summary-strip">
         <div class="stat-card"><span>廃棄額</span><strong class="value-negative">${formatAbsoluteYen(waste.total)}</strong></div>
@@ -2053,7 +2368,99 @@
 
   /* ================= 機能A｜支払い能力チェック（詳細） ================= */
 
+  function savedPaymentScenario(minimumEndDate = '') {
+    const start = today();
+    const configuredEnd = dateAdd(start, window.DailyFinance.forecastDays(state.settings) - 1);
+    return window.RedesignLegacyAdapter.buildLegacyScenario(state, start, configuredEnd < minimumEndDate ? minimumEndDate : configuredEnd, {
+      candidates: candidatesLoaded ? importCandidates : undefined
+    });
+  }
+
+  function renderDebitAssessment() {
+    const labels = { safe: '支払い可能', review: '要確認', shortfall: '不足の見込み' };
+    try {
+      const { scenario } = savedPaymentScenario();
+      const result = window.RedesignReadiness.calculateReadiness(scenario);
+      const rows = result.nextPayments.map(payment => {
+        const possible = payment.cardAdditionalPossible
+          ? '・追加の可能性 ' + formatAbsoluteYen(payment.cardAdditionalPossible) : '';
+        return miniRow({
+          title: esc(accountName(payment.accountId)),
+          sub: esc(labels[payment.status] + possible),
+          amount: payment.cardAmount,
+          direction: 'out'
+        });
+      }).join('');
+      return `<section class="card info-card" data-debit-assessment>
+        <h2>次回カード引落の確認</h2>
+        <p>${result.nextDate ? formatDate(result.nextDate, true) + '・' : ''}<strong>${labels[result.nextStatus]}</strong></p>
+        ${rows || '<p>次回引落の記録を確認してください。</p>'}
+        <p>今後${window.DailyFinance.forecastDays(state.settings)}日間の支払い <strong>${labels[result.futureStatus]}</strong></p>
+        <p class="check-detail">保存済みの記録から試算しています。口座残高、請求額、未確認の取込候補を照合してください。</p>
+      </section>`;
+    } catch (_) {
+      return '<section class="card info-card" data-debit-assessment><h2>次回カード引落の確認</h2><p>要確認。口座・請求・振替の記録を確認してください。</p></section>';
+    }
+  }
+
+  function renderForecastBars(view) {
+    const points = view.assessment.balancesByDate.map(point => ({ date: point.date, value: point.balances[view.primary.id] }));
+    const magnitude = Math.max(10000, ...points.map(point => Math.abs(point.value)));
+    const unit = Math.ceil(magnitude / 30000) * 10000;
+    const top = Math.max(unit, Math.ceil(Math.max(...points.map(point => point.value)) / unit) * unit);
+    const bottom = Math.min(0, Math.floor(Math.min(...points.map(point => point.value)) / unit) * unit);
+    const y = value => (top - value) * 160 / (top - bottom) + 12;
+    const width = Math.max(290, points.length * 42 + 55);
+    const ticks = [];
+    for (let amount = top; amount >= bottom; amount -= unit) {
+      ticks.push(`<line x1="51" x2="${width}" y1="${y(amount)}" y2="${y(amount)}" class="${amount === 0 ? 'forecast-zero' : 'forecast-gridline'}"/><text x="46" y="${y(amount) + 4}" text-anchor="end">${amount ? amount / 10000 + '万' : '0円'}</text>`);
+    }
+    const bars = points.map((point, index) => {
+      const x = 56 + index * (width - 56) / points.length;
+      return `<rect x="${x}" y="${y(Math.max(0, point.value))}" width="24" height="${Math.abs(y(0) - y(point.value))}" class="${point.value < 0 ? 'forecast-negative' : 'forecast-positive'}"><title>${formatDate(point.date)} ${formatDisplayedAmount(point.value)}</title></rect><text x="${x + 12}" y="190" text-anchor="middle">${formatDate(point.date)}</text>`;
+    });
+    return `<div class="table-scroll"><svg class="forecast-bars" role="img" aria-label="${esc(view.primary.name)}の予測残高。${esc(points.map(point => `${formatDate(point.date)} ${formatDisplayedAmount(point.value)}`).join('、'))}" width="${width}" height="200" viewBox="0 0 ${width} 200">${ticks.join('')}${bars.join('')}</svg></div>`;
+  }
+
   function renderCashflow() {
+    let view;
+    try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
+    const { assessment, scenario } = view;
+    const status = DAILY_STATUS[assessment.futureStatus];
+    const reasons = {
+      incomplete_source_data: '未登録の支払いがないか確認が必要です。',
+      projected_shortfall: '予定どおりでも残高が不足する見込みです。',
+      same_day_income_unconfirmed: '同日の入金が引落に間に合うか未確認です。',
+      depends_on_planned_income: '予定の入金が届かない場合、支払いに足りません。',
+      amount_unconfirmed: '請求額が確定していない支払いがあります。',
+      overdue: '日付が過ぎた未確定の入出金があります。'
+    };
+    const events = scenario.events.filter(e => e.status === 'planned' && e.date >= scenario.today && e.date <= scenario.endDate).sort((a, b) => a.date.localeCompare(b.date));
+    const timeline = assessment.timeline.map(row => `<tr><td>${formatDate(row.date)}</td><td>${esc(accountName(row.accountId))}</td><td class="num">${formatAbsoluteYen(row.cardAmount + row.cardAdditionalPossible)}</td><td class="num">${formatDisplayedAmount(row.projectedBalance)}</td><td>${DAILY_STATUS[row.status].label}</td></tr>`).join('');
+    const reasonsShown = [...new Set(assessment.issues.map(issue => reasons[issue.type]).filter(Boolean))];
+    const shortfall = assessment.issues.find(issue => issue.type === 'projected_shortfall');
+    const first = assessment.balancesByDate[0];
+    const forecastRows = assessment.balancesByDate.map((point, index) => {
+      const value = point.balances[view.primary.id];
+      const previous = assessment.balancesByDate[index - 1]?.balances[view.primary.id];
+      return `<tr><td>${formatDate(point.date)}${index === 0 ? '<br>現在の口座残高' : ''}</td><td>${index ? formatSigned(value - previous) : '—'}</td><td class="${value < 0 ? 'negative' : ''}">${formatDisplayedAmount(value)}</td></tr>`;
+    }).join('');
+    return `<div class="prototype-flow daily-home"><div class="page-heading"><div><p class="eyebrow">${formatDate(today(), true)}</p><h1>支払いの見通し</h1></div></div>
+      <section class="sheet"><p class="date-label">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}</p><div class="forecast-head"><p>${formatDate(first.date)} · 現在の口座残高</p><strong>${formatDisplayedAmount(first.balances[view.primary.id])}</strong></div>${renderForecastBars(view)}
+      ${renderGuidance('予測残高について', '登録した入出金がすべて予定どおりに行われた場合の残高です。')}
+      ${assessment.issues.some(issue => issue.type === 'same_day_income_unconfirmed') ? renderGuidance('同日の入金と引落', '引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。') : ''}
+      ${shortfall ? renderGuidance('残高不足について', `${formatDate(shortfall.date)}の時点で、残高が${formatAbsoluteYen(shortfall.amount)}不足する見込みです。`) : ''}</section>
+      <section class="sheet"><h2 class="section-heading">入出金と残高</h2><div class="table-scroll"><table class="timeline-table"><thead><tr><th scope="col">日付 / 内容</th><th scope="col">入出金</th><th scope="col">残高</th></tr></thead><tbody>${forecastRows}</tbody></table></div></section>
+      <details class="sheet"><summary>引落の内訳</summary>
+      <section class="card check-hero daily-details ${status.tone}" data-daily-outlook><span class="eyebrow">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}・${view.horizonDays}日間</span><h2>${status.label}</h2>
+      <div class="summary-strip"><div class="stat-card"><span>最初の不足見込み</span><strong>${shortfall ? formatDate(shortfall.date, true) : '未確認条件を確認'}</strong></div><div class="stat-card"><span>次のカード引落</span><strong>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '未登録'}</strong></div></div>
+      <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></section>
+      <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2>${renderGuidance('予測残高について', '登録した入出金がすべて予定どおりに行われた場合の残高です。')}${assessment.issues.some(issue => issue.type === 'same_day_income_unconfirmed') ? renderGuidance('同日の入金と引落', '引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。') : ''}<div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
+      <section class="card daily-details"><h2>登録済みの入出金予定</h2><div class="daily-events">${events.map(e => `<div><span><strong>${formatDate(e.date, true)}</strong><small>${esc(accountName(e.accountId))}・${e.cardPayment ? 'カード請求' : e.kind === 'income' ? '予定入金' : e.kind === 'transfer' ? '予定振替' : '支払い'}</small></span><strong class="${e.kind === 'income' ? 'value-positive' : 'value-negative'}">${e.kind === 'income' ? '+' : '−'}${formatAbsoluteYen(e.amount + (e.additionalPossible || 0))}</strong></div>`).join('') || '<p>期間内の予定はありません。</p>'}</div><button class="button button-quiet" data-page="plans">予定を確認・修正</button></section>
+      ${renderDailyChecks(view)}</details></div>`;
+  }
+
+  function renderLegacyCashflow() {
     const check = cashflowCheck();
     if (!check) return '<div class="page-heading"><div><span class="eyebrow">支払い能力チェック</span><h1>支払い能力チェック</h1></div></div><section class="card empty"><div><strong>口座がありません</strong>口座を追加すると計算できます。</div></section>';
 
@@ -2079,8 +2486,9 @@
     return `
       <div class="page-heading"><div><span class="eyebrow">支払い能力チェック</span><h1>支払い能力チェック</h1></div><button class="button button-quiet button-small" data-page="home">ホームへ戻る</button></div>
 
+      ${renderDebitAssessment()}
       <section class="card check-hero ${status.className}">
-        <span class="eyebrow">${formatDate(check.startDate)}〜${formatDate(check.endDate)}・${check.days}日間／判定は${esc(check.primaryAccountName || '生活費口座')}</span>
+        <span class="eyebrow">${formatDate(check.startDate)}〜${formatDate(check.endDate)}・${check.days}日間／基準口座の試算 ${esc(check.primaryAccountName || '生活費口座')}</span>
         <h1>${status.label}</h1>
         <p class="hero-subtitle">${status.detail}</p>
         <div class="summary-strip">
@@ -2128,7 +2536,22 @@
     const cardIds = [...new Set(details.map(item => item.cardId))]
       .sort((a, b) => cardName(a).localeCompare(cardName(b), 'ja'));
     if (!cardIds.includes(planDetailCardFilter)) planDetailCardFilter = cardIds[0] || '';
-    const selected = finance.sortByUsageDesc(details.filter(item => item.cardId === planDetailCardFilter));
+    const card = state.cards.find(item => item.id === planDetailCardFilter);
+    const cycle = item => finance.cardBillingCycleOf(item, card);
+    const cardDetails = finance.sortByUsageDesc(details.filter(item => item.cardId === planDetailCardFilter));
+    const periods = [...new Set(cardDetails.map(cycle).filter(Boolean))].sort().reverse();
+    const endOfCycle = month => {
+      const { endDate } = finance.calendarMonthRange(month);
+      const day = Math.min(Number(card?.closingDay) || 31, Number(endDate.slice(-2)));
+      return `${month}-${String(day).padStart(2, '0')}`;
+    };
+    const usagePeriod = month => {
+      const previous = new Date(`${endOfCycle(finance.shiftMonthKey(month, -1))}T00:00:00Z`);
+      previous.setUTCDate(previous.getUTCDate() + 1);
+      return `${formatDate(previous.toISOString().slice(0, 10))}〜${formatDate(endOfCycle(month))}（${month.slice(0, 4)}年）`;
+    };
+    if (!periods.includes(detailPeriod)) detailPeriod = '';
+    const selected = detailPeriod ? cardDetails.filter(item => cycle(item) === detailPeriod) : cardDetails;
     const pending = selected.filter(item => item.status === 'planned');
     const included = selected.filter(item => item.status === 'absorbed');
     const cardButtons = cardIds.map(id => {
@@ -2137,9 +2560,28 @@
     }).join('');
     return `
       <section class="card info-card"><p class="check-detail">カード利用の明細を、カードごとに表示します。請求総額がある分はその内訳として扱い、金額には重ねて計上しません。確定済みの内訳もここで確認できます。</p></section>
-      ${cardButtons ? `<div class="filters" role="group" aria-label="カードを選ぶ">${cardButtons}</div>` : ''}
+      ${periods.length ? `<label class="detail-period">利用期間<select id="detail-period"><option value="">すべて</option>${periods.map(period => `<option value="${esc(period)}" ${period === detailPeriod ? 'selected' : ''}>${usagePeriod(period)}</option>`).join('')}</select></label>` : ''}
+      ${cardButtons ? `<div class="filters card-detail-nav" role="group" aria-label="カードを選ぶ">${cardButtons}</div>` : ''}
       <div class="summary-strip"><div class="stat-card"><span>表示中の明細</span><strong>${selected.length}件</strong></div><div class="stat-card"><span>未確定の明細</span><strong>${pending.length}件</strong></div><div class="stat-card"><span>請求総額の内訳</span><strong>${included.length}件</strong></div></div>
       <section class="card list-card plan-detail-list"><div class="list-card-header"><h2>${planDetailCardFilter ? `${esc(cardName(planDetailCardFilter))}の明細` : 'カードの明細'}</h2><small class="muted">利用日の新しい順</small></div><div class="list">${renderTransactionRows(selected, false, 'usage') || emptyBlock('明細はありません', 'カード利用の明細を登録すると、カード別に表示されます。')}</div></section>`;
+  }
+
+  function renderPlanCalendar(transactions) {
+    const month = planMonth || today().slice(0, 7);
+    const { startDate, endDate } = finance.calendarMonthRange(month);
+    const firstWeekday = new Date(`${startDate}T00:00:00Z`).getUTCDay();
+    const plansByDate = new Map();
+    for (const plan of transactions) {
+      if (!plansByDate.has(plan.dueDate)) plansByDate.set(plan.dueDate, new Set());
+      plansByDate.get(plan.dueDate).add(plan.kind);
+    }
+    const cells = Array.from({ length: Number(endDate.slice(-2)) }, (_, index) => {
+      const day = index + 1;
+      const date = `${month}-${String(day).padStart(2, '0')}`;
+      const kinds = [...(plansByDate.get(date) || [])];
+      return `<button type="button" data-plan-day="${date}" aria-pressed="${date === planDate}" aria-label="${formatDate(date, true)}${kinds.length ? '、' + kinds.map(kind => kindMeta(kind).label).join('、') : ''}">${day}<span class="plan-markers" aria-hidden="true">${kinds.map(kind => `<span class="plan-marker" data-kind="${esc(kind)}">${icon(kindMeta(kind).icon)}</span>`).join('')}</span></button>`;
+    });
+    return `<section class="card daily-details plan-calendar"><div class="list-card-header"><button type="button" class="mini-button" data-plan-month-step="-1" aria-label="前の月">‹</button><h2>${month.replace('-', '年')}月</h2><button type="button" class="mini-button" data-plan-month-step="1" aria-label="次の月">›</button></div><div class="plan-grid">${[...'日月火水木金土'].map(day => `<span aria-hidden="true">${day}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(firstWeekday)}${cells.join('')}</div></section>`;
   }
 
   function renderPlans() {
@@ -2147,8 +2589,7 @@
     const mainPlans = planned.filter(transaction => transaction.entryType !== 'itemized');
     const details = state.transactions.filter(transaction => transaction.kind === 'payment'
       && transaction.entryType === 'itemized' && ['planned', 'absorbed'].includes(transaction.status));
-    const filters = [['all', 'すべて'], ['details', `明細 ${details.length}件`], ['payment', '支払い'], ['income', '収入'], ['saving', '貯金'], ['nisa', 'NISA'], ['transfer', '振込']];
-    const filtered = mainPlans.filter(transaction => planFilter === 'all' || transaction.kind === planFilter);
+    const filtered = mainPlans.filter(transaction => !planDate || transaction.dueDate === planDate);
     const deadline = getNextDeadline();
     const within = effectivePlannedTransactions().filter(transaction => transaction.dueDate <= deadline && transaction.dueDate >= today());
     const spendableIds = new Set(state.accounts.filter(item => !['savings', 'investment'].includes(item.role)
@@ -2157,9 +2598,10 @@
       .filter(delta => spendableIds.has(delta.accountId))
       .reduce((amount, delta) => amount + delta.delta, 0), 0);
     return `
-      <div class="page-heading"><div><span class="eyebrow">予定</span><h1>予定</h1></div></div>
-      <div class="filters">${filters.map(([value, label]) => `<button class="filter-button ${planFilter === value ? 'active' : ''}" data-plan-filter="${value}">${label}</button>`).join('')}</div>
+      <div class="page-heading"><h1>${planFilter === 'details' ? '明細' : '予定'}</h1></div>
+      <div class="plan-view-toolbar">${planFilter === 'details' ? '<button type="button" class="button button-quiet" data-page="plans">予定</button>' : '<button type="button" class="button button-quiet" data-page="plans" data-plan-section="details">明細</button><button type="button" class="button button-primary" data-action="add-event">予定を追加</button>'}</div>
       ${planFilter === 'details' ? renderPlanDetails(details) : `
+        ${renderPlanCalendar(mainPlans)}
         <div class="summary-strip"><div class="stat-card"><span>${formatDate(deadline)}までの計算対象</span><strong>${within.length}件</strong></div><div class="stat-card"><span>期限内の収支見込み</span><strong class="${withinAmount >= 0 ? 'value-positive' : 'value-negative'}">${formatSigned(withinAmount)}</strong></div><div class="stat-card"><span>登録済みの予定</span><strong>${mainPlans.length}件</strong></div></div>
         <section class="card list-card"><div class="list-card-header"><h2>予定一覧</h2><small class="muted">確定すると残高に反映</small></div><div class="list">${renderTransactionRows(filtered, false) || emptyBlock('この種類の予定はありません', 'ホームの「予定を追加」から登録できます。')}</div></section>`}`;
   }
@@ -2318,7 +2760,7 @@
       <section class="accounts-grid">${accounts.map(item => {
         const protectedAccount = ['savings', 'investment'].includes(item.role);
         const pending = pendingExp(item.id);
-        return `<article class="account-card ${protectedAccount ? 'account-protected' : ''}"><div class="account-top"><div><div class="account-role">${roleLabel(item.role)}</div><div class="account-name">${esc(item.name)}${item.isPrimary ? ' <span class="badge badge-settled">基準</span>' : ''}</div></div><div class="list-actions"><button class="mini-button" data-action="edit-account" data-id="${item.id}" aria-label="${esc(item.name)}を編集">編集</button><button class="mini-button danger" data-action="delete-account" data-id="${item.id}" aria-label="${esc(item.name)}を削除">削除</button></div></div><div class="account-balance">${formatDisplayedAmount(item.currentBalance)}</div><div class="account-bottom"><span>${protectedAccount ? '計算に含めない' : item.includeInSpendable ? '計算に含める' : '計算から除外'}</span><span>${pending ? `予定 ${formatFlowAmount(pending, 'out')}` : '予定なし'}</span></div></article>`;
+        return `<article class="account-card ${protectedAccount ? 'account-protected' : ''}"><div class="account-top"><div><div class="account-role">${roleLabel(item.role)}</div><div class="account-name">${esc(item.name)}${item.isPrimary ? ' <span class="badge badge-settled">基準</span>' : ''}</div></div><div class="list-actions"><button class="mini-button" data-action="edit-account" data-id="${item.id}" aria-label="${esc(item.name)}を編集">編集</button><button class="mini-button danger" data-action="delete-account" data-id="${item.id}" aria-label="${esc(item.name)}を削除">削除</button></div></div><div class="account-balance">${formatDisplayedAmount(item.currentBalance)}</div>${accountBalanceNote(item)}<div class="account-bottom"><span>${protectedAccount ? '計算に含めない' : item.includeInSpendable ? '計算に含める' : '計算から除外'}</span><span>${pending ? `予定 ${formatFlowAmount(pending, 'out')}` : '予定なし'}</span></div></article>`;
       }).join('') || '<div class="card empty" style="grid-column:1/-1"><div><strong>口座を追加してください</strong>口座を登録すると計算できます。</div></div>'}</section>
       <section class="card cards-section"><div class="list-card-header"><div><span class="eyebrow">支払い方法</span><h2>クレジットカード</h2></div><button class="button button-quiet button-small" data-action="add-card">カードを追加</button></div><div class="credit-card-grid">${cards.map(item => `<article class="credit-card-item"><div class="credit-card-mark">${icon('card')}</div><div class="credit-card-main"><strong>${esc(item.name)}</strong><small>${esc(accountName(item.accountId))}から引落し</small><span>${item.closingDay ? `${item.closingDay}日締め` : '月末締め'} ・ ${item.paymentDay ? `${item.paymentDay}日払い` : '支払日未設定'}</span></div><div class="list-actions"><button class="mini-button" data-action="edit-card" data-id="${item.id}">編集</button><button class="mini-button danger" data-action="delete-card" data-id="${item.id}">削除</button></div></article>`).join('') || emptyBlock('カードは未登録です', '追加すると、支払いをカード別に記録できます。')}</div></section>`;
   }
@@ -2445,16 +2887,79 @@
       </section>`;
   }
 
+  let recurringEditId = '';
+  function renderRecurringSettings() {
+    const plan = state.recurringPlans.find(item => item.id === recurringEditId);
+    const method = plan?.cardId ? 'card:' + plan.cardId : plan?.sourceAccountId ? 'account:' + plan.sourceAccountId : '';
+    const options = [
+      ...state.accounts.map(account => ['account:' + account.id, account.name + '（口座）']),
+      ...state.cards.map(card => ['card:' + card.id, card.name + '（カード）'])
+    ];
+    const rows = state.recurringPlans.filter(item => !item.kind || item.kind === 'payment').map(item =>
+      `<div class="settings-inline"><span>${esc(item.name || '定期予定')}${item.isActive === false ? '（停止中）' : ''}</span><button class="button button-quiet button-small" data-action="edit-recurring" data-id="${esc(item.id)}">編集</button></div>`
+    ).join('');
+    return `<section class="settings-card" id="recurring"><h2>定期支払い</h2>${rows}
+      <form id="recurring-plan-form" class="form-stack">
+        <label><span>名前</span><input name="name" required maxlength="40" value="${esc(plan?.name || '')}"></label>
+        <label><span>見込み金額（円）</span><input name="amount" type="number" min="1" step="1" required value="${esc(plan?.amount ?? '')}"></label>
+        <label><span>支払い方法</span><select name="method" required><option value="">選択してください</option>${options.map(([value, name]) => `<option value="${esc(value)}" ${method === value ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
+        <label><span>開始日</span><input name="start" type="date" required value="${esc(plan?.startDate || '')}"><small>カード払いは利用日を指定します。月末に同じ日がない月は末日に計上します。</small></label>
+        <label><span>間隔</span><select name="interval">${Array.from({ length: 12 }, (_, index) => index + 1).map(interval => `<option value="${interval}" ${(plan?.intervalMonths ?? 1) === interval ? 'selected' : ''}>${interval === 1 ? '毎月' : interval === 2 ? '隔月' : interval + 'か月ごと'}</option>`).join('')}</select></label>
+        ${plan ? `<label class="check-row"><input name="active" type="checkbox" ${plan.isActive === false ? '' : 'checked'}><span>計算に含める</span></label>` : ''}
+        <button class="button button-primary" type="submit">${plan ? '変更を保存' : '定期支払いを追加'}</button>
+        ${plan ? '<button class="button button-quiet" type="button" data-action="cancel-recurring-edit">編集を閉じる</button>' : ''}
+      </form>
+    </section>`;
+  }
+
+  async function saveRecurringPlan(event) {
+    event.preventDefault();
+    const form = event.target;
+    const fields = new FormData(form);
+    const name = String(fields.get('name') || '').trim();
+    const amount = Number(fields.get('amount'));
+    const startDate = String(fields.get('start') || '');
+    const intervalMonths = Number(fields.get('interval'));
+    const method = String(fields.get('method') || '');
+    const card = method.startsWith('card:') ? creditCard(method.slice(5)) : null;
+    const accountId = card ? card.accountId : method.startsWith('account:') ? method.slice(8) : '';
+    const date = new Date(startDate);
+    if (!name || !Number.isSafeInteger(amount) || amount < 1 || (!Number.isInteger(intervalMonths) || intervalMonths < 1 || intervalMonths > 12)
+        || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !Number.isFinite(date.getTime())
+        || date.toISOString().slice(0, 10) !== startDate || !state.accounts.some(account => account.id === accountId)) {
+      showToast('名前、金額、支払い方法、開始日を確認してください');
+      return;
+    }
+    const previous = state.recurringPlans.find(plan => plan.id === recurringEditId);
+    if (recurringEditId && !previous) { showToast('編集する定期支払いが見つかりません'); return; }
+    form.querySelector('[type=submit]').disabled = true;
+    const next = { ...previous, id: previous?.id || uid('recurring'), name, amount, kind: 'payment',
+      startDate, dayOfMonth: previous && previous.startDate === startDate ? previous.dayOfMonth : Number(startDate.slice(8)),
+      intervalMonths, sourceAccountId: accountId, cardId: card?.id || '', isActive: !previous || fields.has('active') };
+    if (previous) state.recurringPlans = state.recurringPlans.map(plan => plan.id === next.id ? next : plan);
+    else state.recurringPlans.push(next);
+    recurringEditId = '';
+    try {
+      if (persist() === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast('定期支払いを保存しました');
+    } catch (_) {
+      showToast('定期支払いを同期できませんでした');
+    }
+    renderPage();
+  }
+
   function renderSettings() {
     const wage = state.settings.wage;
     return `
       <div class="page-heading"><div><span class="eyebrow">設定</span><h1>設定</h1></div></div>
       <div class="settings-grid"><div class="stack">
         <section class="settings-card"><h2>メールからの取込候補</h2><p>カード利用のお知らせメールから作られた候補です。取り込むまで計算には反映されません。</p><div class="settings-inline"><strong>${pendingCandidates().length}件が未確認</strong><button class="button button-quiet button-small" data-page="imports">確認する</button></div></section>
-        <section class="settings-card"><h2>計算設定</h2><p>今使える金額の計算に使う基準です。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>毎月14日締め</option></select></label><label><span>支払い能力チェックの期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日先まで</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日先まで</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日先まで</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日先まで</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
+        <section class="settings-card"><h2>計算設定</h2><p>ホームは選択した基準カードの締め日で試算します。未選択なら15日締めのカード、該当カードがなければ全カードが基準です。毎月14日締めは従来方式の詳細だけに適用します。</p><form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>従来の試算のみ：毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>基準カードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<small>複数選んだ場合は一番早い締め日を使います。対象カードがなくなった場合は毎月14日が期限になります。</small><label><span>支払いの予測期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日間</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日間</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日間</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日間</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select><small class="field-hint">この曜日以降、ふりかえりの対象が残っている間はホームに案内を出します。</small></label><button class="button button-primary" type="submit">保存</button></form></section>
         <section class="settings-card"><h2>給与設定</h2><p>勤務月は1日から末日までの暦月、支給は翌月の給料日です。給料日が土日祝のときは前営業日へ繰り上げます。</p><form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><p class="form-note">同じ給与を通常の「収入」にも登録すると二重計算になるため、どちらか一方を使ってください。</p><button class="button button-primary" type="submit">給与設定を保存</button></form></section>
+        ${renderRecurringSettings()}
         ${renderAliasSettings()}
-        <section class="settings-card"><h2>バックアップ</h2><p>Firestoreへ自動保存します。手元にも残したい場合はJSONを書き出せます。</p><div class="field-grid field-grid-2"><button class="button button-quiet" data-action="export">JSONを書き出す</button><button class="button button-quiet" data-action="import">JSONを読み込む</button></div></section>
+        <section class="settings-card"><h2>バックアップ</h2><p>Firestoreへ自動保存します。手元にも残したい場合はJSONを書き出せます。</p><div class="field-grid field-grid-2"><button class="button button-quiet" data-action="export">JSONを書き出す</button><button class="button button-quiet" data-action="import">JSONを読み込む</button></div><button class="button button-quiet" data-action="export-cloud" ${cloud?.readCloudBackup ? '' : 'disabled'}>クラウドの原本を書き出す</button><button class="button button-quiet" data-action="restore-cloud" ${cloud?.restoreCloudBackup ? '' : 'disabled'}>クラウド原本から新しい家計へ復元</button><button class="button button-quiet" data-action="resume-cloud-restore" ${cloud?.restoreCloudBackup ? '' : 'disabled'}>復元を確認・再開</button><button class="button button-quiet" data-action="export-recovery" ${cloud?.readUnsavedRecovery ? '' : 'disabled'}>未保存データを書き出す</button></section>
       </div><div class="stack">${renderCloudSettings()}<section class="settings-card"><h2>データ</h2><p>端末内にもキャッシュを残し、通信復帰後に同期します。</p><div class="formula-box"><div class="formula-row"><span>保存場所</span><strong>Cloud Firestore</strong></div><div class="formula-row"><span>最終更新</span><strong>${new Date(state.meta.updatedAt).toLocaleString('ja-JP')}</strong></div></div></section><section class="settings-card danger-zone"><h2>データをリセット</h2><p>この共有スペースの口座・予定・記録を削除して、初期設定に戻します。</p><button class="button button-danger button-full" data-action="reset">すべて削除</button></section></div></div>`;
   }
 
@@ -2497,7 +3002,7 @@
   function renderStatementDetailPanel(statement, details) {
     const total = details.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const diff = Number(statement.amount || 0) - total;
-    const rows = details.map(item => `<div class="detail-row"><div class="detail-when">${esc(formatUsageMoment(item))}</div><div class="detail-name">${esc(item.memo || 'カード利用')}${item.transactionAt ? '' : '<span class="detail-flag">時刻なし</span>'}</div><div class="detail-amount">${formatAbsoluteYen(Math.abs(Number(item.amount || 0)))}</div></div>`).join('');
+    const rows = details.map(item => `<div class="detail-row"><div class="detail-when">${esc(formatUsageMoment(item))}</div><div class="detail-name">${esc(item.memo || 'カード利用')}${item.transactionAt ? '' : '<span class="detail-flag">時刻なし</span>'}${item.status === 'absorbed' ? `<button type="button" class="mini-button" data-action="correct-detail-card" data-id="${esc(item.id)}">カードを訂正</button><button type="button" class="mini-button" data-action="correct-detail-time" data-id="${esc(item.id)}">利用時刻を訂正</button>` : ''}</div><div class="detail-amount">${formatAbsoluteYen(Math.abs(Number(item.amount || 0)))}</div></div>`).join('');
     const note = diff === 0
       ? '請求総額と明細の合計が一致しています。'
       : diff > 0
@@ -2530,9 +3035,19 @@
       const salaryBadge = transaction.salaryPaymentMonth
         ? `<span class="badge badge-muted">${transaction.status === 'settled' ? 'シフトの給与' : transaction.salaryManual ? 'シフトの給与・直した額' : 'シフトからの見込み'}</span>`
         : '';
-      const settleButton = transaction.status === 'planned' ? `<button class="mini-button" data-action="settle-event" data-id="${transaction.id}">確定</button>` : '';
+      const statement = transaction.kind === 'payment' && transaction.cardId && transaction.entryType === 'statement';
+      const card = statement ? creditCard(transaction.cardId) : null;
+      const confirmed = transaction.statementEvidence && card?.accountId === transaction.sourceAccountId
+        && finance.hasConfirmedCardStatement(transaction, finance.cardBillingCycleOf(transaction, card, holidayOptions()));
+      const confirmButton = statement && transaction.status === 'planned'
+        ? confirmed ? '<span class="badge badge-settled">請求額確認済み</span>' : `<button class="mini-button" data-action="confirm-statement" data-id="${esc(transaction.id)}">請求額を確認</button>`
+        : '';
+      const settleButton = transaction.status === 'planned' ? `<button class="mini-button" data-action="settle-event" data-id="${transaction.id}">${statement ? '引落を記録' : '確定'}</button>` : '';
       const detailPanel = expanded ? renderStatementDetailPanel(transaction, details) : '';
-      const actions = transaction.status === 'absorbed' ? '' : `${settleButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button>`;
+      const cancelButton = transaction.kind === 'payment' && transaction.cardId && transaction.entryType === 'itemized'
+        && ['planned', 'cancelled'].includes(transaction.status) && transaction.amount > 0
+        ? `<button class="mini-button" data-action="card-cancellation" data-id="${esc(transaction.id)}">${transaction.status === 'cancelled' ? '取消を戻す' : '取消を記録'}</button>` : '';
+      const actions = transaction.status === 'absorbed' ? '' : `${confirmButton}${settleButton}${cancelButton}<button class="mini-button" data-action="edit-event" data-id="${transaction.id}">編集</button><button class="mini-button danger" data-action="delete-event" data-id="${transaction.id}">削除</button>`;
       const shownDate = dateMode === 'usage' ? formatUsageMoment(transaction) : formatDate(transaction.dueDate);
       return `<div class="list-row-wrap"><div class="list-row"><div class="list-date">${esc(shownDate)}</div><div class="list-main"><strong>${esc(transaction.memo || label)}</strong><small><span class="badge ${meta.badge}"><span class="kind-icon">${icon(meta.icon)}</span>${esc(label)}</span> ${route} ${statusBadge} ${grainBadge} ${salaryBadge}</small></div><div class="list-side"><strong class="list-amount ${amountClass}">${formatTransactionAmount(transaction)}</strong>${!compact && actions ? `<div class="list-actions">${actions}</div>` : ''}</div></div>${detailPanel}</div>`;
     }).join('');
@@ -2594,6 +3109,7 @@
 
   /** 請求総額を選んだときに、内数として外れる明細を明示する */
   function updateEntryTypeNote() {
+    $('#event-usage-time-wrap').hidden = eventEntryTypeValue() !== 'itemized';
     const note = $('#event-entry-type-note');
     if (!note) return;
     const cardId = $('#event-card').value;
@@ -2652,14 +3168,127 @@
     $('#event-recipient').required = isTransfer && !isInternalTransfer;
     $('#event-source-label').textContent = ['income', 'reimbursement'].includes(kind) ? '入金先口座' : '出金元口座';
     $('#event-destination-label').textContent = isInternalTransfer ? '移動先口座' : '移動先口座（任意）';
-    $('#event-form-note').textContent = kind === 'income'
-      ? '予定収入は、期限までの使える額に加算します。'
-      : isTransfer
-        ? (isInternalTransfer ? '自分の別口座へ移動します。使える金額は変わりません。' : '他人口座への振込です。期限までの使える金額から差し引きます。')
-        : ['saving', 'nisa'].includes(kind) ? '予定で保存します。確定すると残高に反映します。' : '予定で保存します。確定すると残高に反映します。';
+    const status = $('#event-status').value;
+    const editingSettled = state.transactions.some(item => item.id === $('#event-id').value && item.status === 'settled');
+    $('#event-form-note').textContent = status === 'settled'
+      ? (editingSettled ? '訂正すると口座残高も変わります。' : '入出金を確定すると登録した口座残高に反映されます。')
+      : '予定を保存すると見通しに反映されます。';
+  }
+
+  function openCardCancellation(id) {
+    if (!$('#card-cancel-modal')) { showToast('画面を更新してから取消操作を開き直してください'); return; }
+    const item = state.transactions.find(entry => entry.id === id);
+    const cancelled = item?.status !== 'cancelled';
+    try { finance.setUnsettledCardCancellation(id, state.transactions, state.cards, { ...holidayOptions(), cancelled, confirmed: true }); }
+    catch (error) { showToast(error.message); return; }
+    clearTimeout(toastTimer); $('#toast')?.classList.remove('show');
+    rememberModalEdit('card-cancel-modal', () => ({ item: state.transactions.find(entry => entry.id === id), transactions: state.transactions, accounts: state.accounts, cards: state.cards }));
+    $('#card-cancel-id').value = id;
+    $('#card-cancel-next').value = cancelled ? 'cancelled' : 'planned';
+    $('#card-cancel-description').textContent = `${formatDate(item.transactionDate, true)} ${cardName(item.cardId)} ${item.memo || 'カード利用'} ${formatAbsoluteYen(item.amount)}`;
+    $('#card-cancel-title').textContent = cancelled ? 'カード利用の取消を記録' : 'カード利用の取消を戻す';
+    $('#card-cancel-explanation').textContent = cancelled ? '取消完了を原本で確認した利用を、支払予定から外します。' : '誤って記録した取消を戻し、元の利用を支払予定に復帰させます。';
+    $('#card-cancel-confirm-label').textContent = cancelled ? 'カード会社または加盟店の取消完了を確認しました' : '取消の記録が誤りで、元の支払予定へ戻すことを確認しました';
+    $('#card-cancel-save').textContent = cancelled ? '取消を記録して保存' : '取消を戻して保存';
+    $('#card-cancel-confirm').checked = false;
+    $('#card-cancel-modal').hidden = false;
+  }
+
+  async function saveCardCancellation(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('card-cancel-modal') || !$('#card-cancel-confirm').checked) return;
+    const button = event.target.querySelector('[type="submit"]');
+    try {
+      button.disabled = true;
+      const id = $('#card-cancel-id').value;
+      const cancelled = $('#card-cancel-next').value === 'cancelled';
+      const next = finance.setUnsettledCardCancellation(id, state.transactions, state.cards, { ...holidayOptions(), cancelled, confirmed: true });
+      state.transactions = state.transactions.map(item => item.id === id ? { ...next, updatedAt: nowIso() } : item);
+      if (persist() === false) throw new Error('クラウド保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      closeModal('card-cancel-modal'); renderPage();
+      showToast(cancelled ? '取消を記録しました。元の明細と口座残高は保持しています' : '元の支払予定へ戻しました。口座残高は変更していません');
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
+  }
+
+  function openDetailTime(id) {
+    if (!$('#detail-time-modal')) { showToast('画面を更新してから、時刻の訂正を開き直してください'); return; }
+    const item = state.transactions.find(entry => entry.id === id);
+    if (!item || item.status !== 'absorbed' || item.entryType !== 'itemized') return;
+    clearTimeout(toastTimer); $('#toast')?.classList.remove('show');
+    rememberModalEdit('detail-time-modal', () => ({ item: state.transactions.find(entry => entry.id === id), transactions: state.transactions, accounts: state.accounts, cards: state.cards }));
+    $('#detail-time-id').value = id;
+    $('#detail-time-description').textContent = `${formatDate(item.transactionDate, true)} ${item.memo || 'カード利用'} ${formatAbsoluteYen(item.amount)}`;
+    $('#detail-time-value').value = finance.jstDateStringOf(item.transactionAt) === item.transactionDate ? finance.jstTimeStringOf(item.transactionAt) : '';
+    $('#detail-time-confirm').checked = false;
+    $('#detail-time-modal').hidden = false;
+  }
+
+  async function saveDetailTime(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('detail-time-modal') || !$('#detail-time-confirm').checked) return;
+    const button = event.target.querySelector('[type="submit"]');
+    try {
+      const current = state.transactions.find(item => item.id === $('#detail-time-id').value);
+      if (!current || current.status !== 'absorbed' || current.entryType !== 'itemized') throw new Error('訂正する明細を開き直してください');
+      const instant = finance.editedUsageInstant({ date: current.transactionDate, time: $('#detail-time-value').value, previous: current.transactionAt || '' });
+      button.disabled = true;
+      if (instant !== current.transactionAt) {
+        state.transactions = state.transactions.map(item => item.id === current.id ? { ...item, transactionAt: instant, updatedAt: nowIso() } : item);
+        if (persist() === false) throw new Error('クラウド保存を開始できませんでした');
+        await cloud?.flushPendingSave?.();
+      }
+      closeModal('detail-time-modal'); renderPage(); showToast('利用時刻を訂正しました。金額と引落状態は変更していません');
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
+  }
+
+  function openCardCorrection(id) {
+    if (!$('#card-correction-modal')) { showToast('画面を更新してから、カードの訂正を開き直してください'); return; }
+    const item = state.transactions.find(entry => entry.id === id);
+    if (!item || item.status !== 'absorbed') return;
+    clearTimeout(toastTimer); $('#toast')?.classList.remove('show');
+    rememberModalEdit('card-correction-modal', () => ({ item: state.transactions.find(entry => entry.id === id), cards: state.cards, transactions: state.transactions, accounts: state.accounts }));
+    $('#card-correction-id').value = id;
+    $('#card-correction-detail').textContent = `${formatDate(item.transactionDate, true)} ${item.memo || 'カード利用'} ${formatAbsoluteYen(item.amount)}`;
+    $('#card-correction-card').innerHTML = '<option value="">選択してください</option>' + state.cards.filter(card => card.id !== item.cardId).map(card => `<option value="${esc(card.id)}">${esc(card.name)}</option>`).join('');
+    $('#card-correction-confirm').checked = false;
+    $('#card-correction-modal').hidden = false;
+  }
+
+  async function saveCardCorrection(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('card-correction-modal') || !$('#card-correction-confirm').checked) return;
+    const button = event.target.querySelector('[type="submit"]');
+    try {
+      const corrected = finance.correctAbsorbedCard($('#card-correction-id').value, $('#card-correction-card').value, state.transactions, state.cards, holidayOptions());
+      button.disabled = true;
+      state.transactions = state.transactions.map(item => item.id === corrected.id ? { ...corrected, updatedAt: nowIso() } : item);
+      if (persist() === false) throw new Error('クラウド保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      closeModal('card-correction-modal'); renderPage(); showToast('明細のカードを訂正しました。請求総額と残高は変更していません');
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
+  }
+
+  function openDailyStatement(cardId, dueDate) {
+    const card = creditCard(cardId);
+    if (!card || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate || '')) return;
+    openEventModal();
+    $('#event-card').value = card.id;
+    $('#event-entry-type').value = 'statement';
+    syncCardSourceAccount(false);
+    $('#event-date').value = dueDate;
+    $('#event-usage-date').value = dueDate;
+    $('#event-amount').value = '';
+    $('#event-memo').value = `${card.name}の請求総額`;
+    updateEntryTypeNote();
+    $('#event-form-note').textContent = 'カード会社で確認した、この引落日の請求総額を入力してください。利用明細の合計を確定額として自動入力はしません。';
   }
 
   function openEventModal(id = '', presetKind = 'payment', presetStatus = '') {
+    rememberModalEdit('event-modal', () => ({ transaction: id ? state.transactions.find(item => item.id === id) || null : null, cards: state.cards }));
     const modal = $('#event-modal');
     const transaction = id ? state.transactions.find(item => item.id === id) : null;
     $('#event-modal-title').textContent = transaction
@@ -2669,6 +3298,7 @@
     $('#event-kind').value = transaction?.kind || presetKind;
     $('#event-date').value = transaction?.dueDate || dateAdd(today(), 7);
     $('#event-usage-date').value = transaction?.transactionDate || '';
+    $('#event-usage-time').value = finance.jstTimeStringOf(transaction?.transactionAt);
     $('#event-entry-type').value = transaction?.entryType === 'itemized' ? 'itemized' : 'statement';
     $('#event-status').value = transaction?.status === 'settled' ? 'settled' : 'planned';
     $('#event-status-wrap').hidden = !transaction;
@@ -2679,7 +3309,13 @@
     $('#event-card').value = transaction?.cardId || '';
     $('#event-transfer-type').value = transaction?.transferType || 'internal';
     $('#event-recipient').value = transaction?.destinationName || '';
-    $('#event-category').value = transaction?.category || '生活費';
+    const categorySelect = $('#event-category');
+    const savedCategory = transaction?.category || '生活費';
+    // 取込済みの既存カテゴリも選択肢に残し、別の項目の編集で消さない。
+    if (![...categorySelect.options].some(option => option.value === savedCategory)) {
+      categorySelect.add(new Option(savedCategory, savedCategory));
+    }
+    categorySelect.value = savedCategory;
     $('#event-exclude').checked = transaction?.affectsForecast === false;
     populateAccountSelect('#event-source');
     populateAccountSelect('#event-destination', true);
@@ -2698,7 +3334,7 @@
     if (presetStatus === 'settled') $('#event-amount').select();
   }
 
-  function closeModal(id) { const modal = $(`#${id}`); if (modal) modal.hidden = true; }
+  function closeModal(id) { const modal = $(`#${id}`); if (modal) modal.hidden = true; modalEditContexts.delete(id); }
 
   function setAddMenu(open) {
     const menu = $('#add-menu');
@@ -2712,7 +3348,9 @@
 
   function adjustAccount(accountId, delta) {
     const target = account(accountId);
-    if (target) target.currentBalance = Number(target.currentBalance || 0) + Number(delta || 0);
+    if (!target || !Number(delta)) return;
+    target.currentBalance = Number(target.currentBalance || 0) + Number(delta);
+    delete target.balanceEvidence;
   }
 
   /** 個別明細の確定額と同じ請求期間の総額を、残高から二度引かないための入力チェック。 */
@@ -2773,6 +3411,7 @@
    * （「今使える金額」の集計も同じ関数を使うので、符号が食い違うことがない）
    */
   function applyEffect(transaction, sign = 1) {
+    if (transaction.debitEvidence?.balanceAlreadyIncludesDebit === true) return;
     finance.accountDeltasFor(transaction)
       .forEach(({ accountId, delta }) => adjustAccount(accountId, delta * sign));
   }
@@ -2815,7 +3454,7 @@
   function releaseStatementDetails(statementId) {
     let released = 0;
     state.transactions.forEach(item => {
-      if (item.absorbedBy !== statementId) return;
+      if (item.absorbedBy !== statementId || item.refundEvidence?.destinationStatementId === statementId) return;
       if (item.status === 'absorbed') item.status = 'planned';
       item.absorbedBy = '';
       item.updatedAt = nowIso();
@@ -2826,14 +3465,23 @@
 
   function saveEvent(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('event-modal')) return;
     if (!state.accounts.length) { closeModal('event-modal'); showToast('先に口座を追加してください'); return; }
     const id = $('#event-id').value;
     const current = id ? state.transactions.find(item => item.id === id) : null;
+    if (current && (hasLinkedRefund(current) || hasRefundDestination(current.id))) { showToast('返金と紐付いた取引は直接変更できません'); return; }
+    const usageDate = eventUsageDateValue();
+    let transactionAt = current?.transactionDate === usageDate ? current?.transactionAt || '' : '';
+    if (eventEntryTypeValue() === 'itemized') {
+      try {
+        transactionAt = finance.editedUsageInstant({ date: usageDate, time: $('#event-usage-time').value, previous: current?.transactionAt || '' });
+      } catch (error) { showToast(error.message); return; }
+    }
     const next = createTransaction({
       id: id || '', kind: $('#event-kind').value, amount: Number($('#event-amount').value || 0), dueDate: $('#event-date').value,
-      transactionDate: eventUsageDateValue(), transactionAt: current?.transactionAt || '', absorbedBy: current?.absorbedBy || '', dateEstimated: false,
+      transactionDate: usageDate, transactionAt, absorbedBy: current?.absorbedBy || '', dateEstimated: false,
       entryType: eventEntryTypeValue(), origin: current?.origin || '',
-      status: eventStatusValue(current), sourceAccountId: $('#event-source').value, destinationAccountId: $('#event-destination').value || '', transferType: $('#event-transfer-type').value || 'internal', destinationName: $('#event-recipient').value.trim(), cardId: $('#event-kind').value === 'payment' ? ($('#event-card').value || '') : '', category: $('#event-category').value, memo: $('#event-memo').value.trim(), lendingAmount: Math.min(Number($('#event-lending').value || 0), Number($('#event-amount').value || 0)), affectsForecast: !$('#event-exclude').checked, recurringPlanId: current?.recurringPlanId || '', settledAt: current?.settledAt || '', createdAt: current?.createdAt || '', updatedAt: nowIso(),
+      status: eventStatusValue(current), sourceAccountId: $('#event-source').value, destinationAccountId: $('#event-destination').value || '', transferType: $('#event-transfer-type').value || 'internal', destinationName: $('#event-recipient').value.trim(), cardId: $('#event-kind').value === 'payment' ? ($('#event-card').value || '') : '', category: $('#event-category').value, memo: $('#event-memo').value.trim(), lendingAmount: Math.min(Number($('#event-lending').value || 0), Number($('#event-amount').value || 0)), affectsForecast: !$('#event-exclude').checked, recurringPlanId: current?.recurringPlanId || '', scheduledDate: current?.scheduledDate, settledAt: current?.settledAt || '', createdAt: current?.createdAt || '', updatedAt: nowIso(),
       salaryPaymentMonth: current?.salaryPaymentMonth || '', salaryManual: current?.salaryManual === true
     });
     // シフトから作った給与を、金額か日付を変えて保存したか、一度でも確定したら、もうシフトでは上書きしない
@@ -2844,6 +3492,12 @@
     // 確定した給与はもう見込みではないので、自動で付けたメモの「（シフトからの見込み）」を外す
     if (next.salaryPaymentMonth && next.status === 'settled') next.memo = next.memo.replace('（シフトからの見込み）', '');
     if (!next.amount || !next.dueDate || !next.sourceAccountId) { showToast('日付・金額・口座を入力してください'); return; }
+    if (current?.statementEvidence) {
+      next.statementEvidence = current.statementEvidence;
+      const card = next.cardId ? creditCard(next.cardId) : null;
+      const cycle = card ? finance.cardBillingCycleOf(next, card, holidayOptions()) : '';
+      if (!finance.hasConfirmedCardStatement(next, cycle)) delete next.statementEvidence;
+    }
     const statementError = cardStatementRegistrationError(next, current);
     if (statementError) { showToast(statementError); return; }
     const overlapError = cardSettlementOverlapError(next);
@@ -2853,6 +3507,17 @@
     if (next.status === 'settled') {
       const settleError = validateSettlement(next);
       if (settleError) { showToast(settleError); return; }
+    }
+    if (next.status === 'settled' && current?.debitEvidence) {
+      if (!['kind', 'amount', 'dueDate', 'cardId', 'sourceAccountId', 'entryType'].every(key => next[key] === current[key])) {
+        showToast('引落記録の金額や口座を変更するには、先に未確定に戻してください');
+        return;
+      }
+      next.debitEvidence = current.debitEvidence;
+    }
+    if (next.status === 'settled' && current?.status !== 'settled' && next.kind === 'payment' && next.cardId && next.entryType === 'statement') {
+      showToast('引落を記録する操作から銀行明細を入力してください');
+      return;
     }
     const wasSettled = current?.status === 'settled';
     const willSettle = next.status === 'settled';
@@ -2878,9 +3543,95 @@
         : (current ? '予定を更新しました' : '予定を追加しました'));
   }
 
+  async function confirmStatement(id) {
+    const transaction = state.transactions.find(item => item.id === id);
+    if (transaction?.kind !== 'payment' || transaction.entryType !== 'statement' || transaction.status !== 'planned') return;
+    const card = creditCard(transaction.cardId);
+    if (!card || card.accountId !== transaction.sourceAccountId || !Number.isSafeInteger(transaction.amount) || transaction.amount <= 0) {
+      showToast('カード、引落口座、請求額を確認してください');
+      return;
+    }
+    const cycle = finance.cardBillingCycleOf(transaction, card, holidayOptions());
+    if (!window.confirm(card.name + '・' + formatAbsoluteYen(transaction.amount) + '（引落日 ' + formatDate(transaction.dueDate, true) + '）\nカード会社で確認した請求額を保存します。')) return;
+    transaction.statementEvidence = { source: 'issuer-manual', cardId: card.id, accountId: card.accountId,
+      dueDate: transaction.dueDate, amount: transaction.amount, cycle, checkedAt: nowIso() };
+    try {
+      if (persist() === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast('請求額の確認を保存しました');
+    } catch (_) { showToast('請求額の確認を同期できませんでした'); }
+    renderPage();
+  }
+
+  function openDebitForm(transaction) {
+    rememberModalEdit('debit-modal', () => ({ transaction: state.transactions.find(item => item.id === transaction.id) || null, account: account(transaction.sourceAccountId) || null }));
+    const form = $('#debit-form');
+    form.reset();
+    form.elements.namedItem('transactionId').value = transaction.id;
+    form.elements.namedItem('date').value = today();
+    $('#debit-summary').textContent = cardName(transaction.cardId) + '・確認済み請求額 ' + formatAbsoluteYen(transaction.amount);
+    $('#debit-modal').hidden = false;
+    form.elements.namedItem('amount').focus();
+  }
+
+  async function saveDebit(event) {
+    event.preventDefault();
+    if (!canSaveModalEdit('debit-modal')) return;
+    const fields = new FormData(event.target);
+    const transaction = state.transactions.find(item => item.id === fields.get('transactionId'));
+    if (transaction?.status !== 'planned') { closeModal('debit-modal'); return; }
+    const card = creditCard(transaction.cardId);
+    const bank = account(transaction.sourceAccountId);
+    const included = fields.get('included');
+    try {
+      if (!card || !bank || card.accountId !== bank.id || !['yes', 'no'].includes(included)) throw new Error('引落口座と残高の反映状況を確認してください');
+      const overlap = validateSettlement(transaction);
+      if (overlap) throw new Error(overlap);
+      const result = window.RedesignBillLifecycle.recordDebit({
+        account: { id: bank.id, balance: bank.currentBalance, revision: 0 },
+        bill: { id: transaction.id, accountId: bank.id, amount: transaction.amount, status: transaction.status,
+          amountConfirmed: finance.hasConfirmedCardStatement(transaction, finance.cardBillingCycleOf(transaction, card, holidayOptions())) }
+      }, {
+        operationId: 'bank-debit:' + transaction.id, amount: Number(fields.get('amount')), date: fields.get('date'), today: today(),
+        bankConfirmed: true, balanceAlreadyIncludesDebit: included === 'yes', expectedRevision: 0
+      });
+      if (bank.currentBalance !== result.account.balance) delete bank.balanceEvidence;
+      bank.currentBalance = result.account.balance;
+      transaction.status = result.bill.status;
+      transaction.debitEvidence = result.bill.settlement;
+      transaction.settledAt = result.bill.settlement.date;
+      transaction.updatedAt = nowIso();
+      absorbStatementDetails(transaction);
+      closeModal('debit-modal');
+      if (persist() === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast('引落を記録しました');
+    } catch (error) { showToast(error.message); }
+    renderPage();
+  }
+
+  function hasLinkedRefund(transaction) {
+    return Boolean(transaction.refundEvidence || state.transactions.some(item => item.refundEvidence?.targetId === transaction.id));
+  }
+
+  function hasRefundDestination(id) {
+    return state.transactions.some(item => item.refundEvidence?.destinationStatementId === id);
+  }
+
   function settleEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction || transaction.status !== 'planned') return;
+    if (hasLinkedRefund(transaction)) { showToast('返金を含む請求総額から引落を記録してください'); return; }
+    if (transaction.kind === 'payment' && transaction.cardId && transaction.entryType === 'statement') {
+      const card = creditCard(transaction.cardId);
+      if (!card || card.accountId !== transaction.sourceAccountId
+          || !finance.hasConfirmedCardStatement(transaction, finance.cardBillingCycleOf(transaction, card, holidayOptions()))) {
+        showToast('引落を記録する前にカード会社の請求額を確認してください');
+        return;
+      }
+      openDebitForm(transaction);
+      return;
+    }
     // 給与の見込みはシフトからの計算なので、実際の支給額と違うことが多い。
     // そのまま確定させず、確定済みにした編集画面を開いて額を直してもらう（2026-09-15）
     if (transaction.salaryPaymentMonth) { openEventModal(id, transaction.kind, 'settled'); return; }
@@ -2895,8 +3646,11 @@
   function deleteEvent(id) {
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction) return;
-    const salaryNote = transaction.salaryPaymentMonth ? '\nこの月の給与は、シフトから作り直しません（シフト画面から戻せます）。' : '';
-    if (!window.confirm(`${transaction.memo || kindMeta(transaction.kind).label}を削除しますか？${transaction.status === 'settled' ? '\n確定済みのため、残高も元に戻します。' : ''}${salaryNote}`)) return;
+    if (hasLinkedRefund(transaction) || hasRefundDestination(id)) { showToast('返金と紐付いた取引は直接削除できません'); return; }
+    const salaryNote = transaction.salaryPaymentMonth ? '\n削除すると、この月の給与見込みは自動では作り直されません。' : '';
+    const details = state.transactions.filter(item => item.status === 'absorbed' && item.absorbedBy === id && item.refundEvidence?.destinationStatementId !== id).length;
+    const detailNote = details ? `\nこの請求を削除すると内訳${details}件が未確定に戻ります。` : '';
+    if (!window.confirm(`${transaction.memo || kindMeta(transaction.kind).label}を削除しますか？${transaction.status === 'settled' ? '\n確定済みのため、残高も元に戻します。' : ''}${salaryNote}${detailNote}`)) return;
     if (transaction.status === 'settled') revertEffect(transaction);
     // 消した給与の月は覚えておく。覚えないと、シフトから同じ見込みがすぐ作り直される
     if (transaction.salaryPaymentMonth) {
@@ -2910,12 +3664,14 @@
   }
 
   function openAccountModal(id = '') {
+    rememberModalEdit('account-modal', () => id ? account(id) || null : null);
     const current = id ? account(id) : null;
     $('#account-modal-title').textContent = current ? '口座を編集' : '口座を追加';
     $('#account-id').value = current?.id || '';
     $('#account-name').value = current?.name || '';
     $('#account-role').value = current?.role || 'spending';
     $('#account-balance').value = current?.currentBalance ?? 0;
+    $('#account-balance-verified').checked = false;
     $('#account-spendable').checked = current ? current.includeInSpendable : true;
     $('#account-modal').hidden = false;
     $('#account-name').focus();
@@ -2923,11 +3679,17 @@
 
   function saveAccount(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('account-modal')) return;
     const id = $('#account-id').value;
     const role = $('#account-role').value;
     const current = id ? account(id) : null;
     const next = { id: id || uid('account'), name: $('#account-name').value.trim(), role, currentBalance: Number($('#account-balance').value || 0), includeInSpendable: $('#account-spendable').checked && !['savings', 'investment'].includes(role), reserveAmount: current?.reserveAmount || 0, isPrimary: role === 'primary' };
-    if (!next.name) { showToast('口座名を入力してください'); return; }
+    if (!next.name || !Number.isSafeInteger(next.currentBalance)) { showToast('口座名と残高を確認してください'); return; }
+    if ($('#account-balance-verified').checked) {
+      next.balanceEvidence = { source: 'bank-manual', amount: next.currentBalance, date: today() };
+    } else if (current?.balanceEvidence && current.currentBalance === next.currentBalance) {
+      next.balanceEvidence = current.balanceEvidence;
+    }
     if (next.isPrimary) state.accounts.forEach(item => { item.isPrimary = false; });
     if (current) state.accounts = state.accounts.map(item => item.id === id ? next : item);
     else state.accounts.push(next);
@@ -2945,6 +3707,7 @@
   }
 
   function openCardModal(id = '') {
+    rememberModalEdit('card-modal', () => ({ card: id ? creditCard(id) || null : null, accountIds: state.accounts.map(item => item.id) }));
     const current = id ? creditCard(id) : null;
     $('#card-modal-title').textContent = current ? 'カードを編集' : 'カードを追加';
     $('#card-id').value = current?.id || '';
@@ -2960,6 +3723,7 @@
 
   function saveCard(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('card-modal')) return;
     if (!state.accounts.length) { closeModal('card-modal'); showToast('先に引落口座を追加してください'); return; }
     const id = $('#card-id').value;
     const current = id ? creditCard(id) : null;
@@ -2990,6 +3754,7 @@
   }
 
   function openWorkModal(id = '') {
+    rememberModalEdit('work-modal', () => id ? state.workEntries.find(item => item.id === id) || null : null);
     const current = id ? state.workEntries.find(item => item.id === id) : null;
     $('#work-modal-title').textContent = current ? '勤務を編集' : '勤務を記録';
     $('#work-id').value = current?.id || '';
@@ -3004,6 +3769,7 @@
 
   function saveWork(event) {
     event.preventDefault();
+    if (!canSaveModalEdit('work-modal')) return;
     const id = $('#work-id').value;
     const current = id ? state.workEntries.find(item => item.id === id) : null;
     const next = {
@@ -3056,6 +3822,72 @@
     const payload = { ...state, exportedAt: nowIso() };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `yoryoku-backup-${today()}.json`; link.click(); URL.revokeObjectURL(link.href); showToast('バックアップを書き出しました');
+  }
+
+  function downloadJson(payload, filename) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportRecoveryData() {
+    try {
+      const recovery = cloud.readUnsavedRecovery();
+      if (!recovery.snapshots.length) {
+        showToast('この端末に退避した未保存データはありません');
+        return;
+      }
+      downloadJson(recovery, 'yoryoku-unsaved-recovery-' + today() + '.json');
+      showToast('未保存データを書き出しました');
+    } catch (_) {
+      showToast('未保存データを書き出せませんでした');
+    }
+  }
+
+  async function exportCloudData(button) {
+    button.disabled = true;
+    try {
+      const snapshot = await cloud.readCloudBackup();
+      downloadJson(snapshot, 'yoryoku-cloud-snapshot-' + today() + '.json');
+      showToast('クラウドの原本を書き出しました');
+    } catch (error) {
+      showToast('原本を書き出せませんでした: ' + error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function restoreCloudFile(file) {
+    if (!file) return;
+    try {
+      const snapshot = JSON.parse(await file.text());
+      const uid = cloud.getSession().user?.uid;
+      const plan = window.RedesignRestorePlan.planRestore({ snapshot, targetId: 'restore-preview', uid });
+      const counts = Object.entries(snapshot.collections).map(([name, group]) => {
+        const labels = { importCandidates: 'メール候補', receipts: 'レシート', receiptItems: 'レシート明細', itemAliases: '品名の対応' };
+        return (labels[name] || name) + ' ' + group.documents.length + '件';
+      }).join('、');
+      if (!plan.rootWrites.length || !window.confirm('家計と ' + counts + ' を、新しい共有スペースへ復元しますか？')) return;
+      await runCloudRestore(snapshot);
+    } catch (error) { showToast('復元できませんでした: ' + error.message); }
+    finally { $('#restore-cloud-file').value = ''; }
+  }
+
+  async function runCloudRestore(snapshot, resume = false) {
+    const buttons = $$('[data-action="restore-cloud"], [data-action="resume-cloud-restore"]');
+    buttons.forEach(button => { button.disabled = true; });
+    try {
+      const result = await cloud.restoreCloudBackup(snapshot, resume);
+      if (result.status === 'verified') {
+        renderPage();
+        showToast('復元と内容の照合が完了しました。共有スペースの一覧から開けます。');
+      } else showToast('復元先 ' + result.targetId + ' は確認が必要です。明細の保存中に止まった場合は「復元を確認・再開」を押してください。');
+    } catch (error) { showToast('復元を確認してください: ' + error.message); }
+    finally { buttons.forEach(button => { button.disabled = false; }); }
   }
 
   function importData(file) {
@@ -3132,16 +3964,61 @@
 
   function handleClick(event) {
     const pageButton = event.target.closest('[data-page]');
-    if (pageButton) { currentPage = pageButton.dataset.page; $('#sidebar').classList.remove('open'); renderPage(); return; }
-    const planButton = event.target.closest('[data-plan-filter]');
-    if (planButton) { planFilter = planButton.dataset.planFilter; renderPage(); return; }
+    if (pageButton) {
+      currentPage = pageButton.dataset.page;
+      if (currentPage === 'checks') dailyCheckScope = pageButton.dataset.check || 'all';
+      if (currentPage === 'plans') planFilter = pageButton.dataset.planSection || 'all';
+      if (currentPage === 'records') recordTab = pageButton.dataset.recordSection || 'transactions';
+      if (currentPage === 'imports') mailSection = 'pending';
+      if ($('#sidebar').open) $('#sidebar').close();
+      if ($('#money-flow-dialog').open) $('#money-flow-dialog').close();
+      renderPage();
+      const section = document.getElementById(pageButton.dataset.sectionTarget || '');
+      if (section) section.scrollIntoView();
+      else window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      return;
+    }
+    const mailButton = event.target.closest('[data-mail-section]');
+    if (mailButton) {
+      mailSection = mailButton.dataset.mailSection;
+      renderPage();
+      $(`[data-mail-section="${mailSection}"]`)?.focus();
+      return;
+    }
+    const planDay = event.target.closest('[data-plan-day]');
+    if (planDay) {
+      planDate = planDate === planDay.dataset.planDay ? '' : planDay.dataset.planDay;
+      renderPage();
+      $(`[data-plan-day="${planDay.dataset.planDay}"]`)?.focus();
+      return;
+    }
+    const planStep = event.target.closest('[data-plan-month-step]');
+    if (planStep) {
+      planMonth = finance.shiftMonthKey(planMonth || today().slice(0, 7), Number(planStep.dataset.planMonthStep));
+      planDate = '';
+      renderPage();
+      $(`[data-plan-month-step="${planStep.dataset.planMonthStep}"]`)?.focus();
+      return;
+    }
     const planCardButton = event.target.closest('[data-plan-detail-card]');
-    if (planCardButton) { planDetailCardFilter = planCardButton.dataset.planDetailCard; renderPage(); return; }
+    if (planCardButton) { planDetailCardFilter = planCardButton.dataset.planDetailCard; detailPeriod = ''; renderPage(); return; }
     const recordButton = event.target.closest('[data-record-filter]');
     if (recordButton) { recordFilter = recordButton.dataset.recordFilter; renderPage(); return; }
     const action = event.target.closest('[data-action]');
     if (!action) return;
     const name = action.dataset.action;
+    if (name === 'prototype-account' || name === 'prototype-bills') {
+      const view = dailyOverview();
+      const isAccount = name === 'prototype-account';
+      const detail = $('#money-flow-dialog');
+      $('#money-flow-title').textContent = isAccount ? '口座残高' : '請求額';
+      $('#money-flow-detail').innerHTML = isAccount
+        ? `<p class="amount">${formatDisplayedAmount(view.primary.currentBalance)}</p>${accountBalanceNote(view.primary)}<button type="button" class="button button-quiet" data-page="accounts">口座・カード</button>${view.unverifiedAccounts ? '<button type="button" class="button button-quiet" data-page="checks" data-check="accounts">未確認の口座</button>' : ''}`
+        : `<dl class="ledger">${view.unconfirmedEvents.map(item => `<div><dt>${formatDate(item.date)} · 見込み</dt><dd>${formatDisplayedAmount(item.amount + (item.additionalPossible || 0))}</dd></div>`).join('') || '<div><dt>未確認</dt><dd>0件</dd></div>'}</dl><button type="button" class="button button-quiet" data-page="checks" data-check="bills">請求額を確認</button>`;
+      detail.showModal();
+      return;
+    }
+    if (name === 'daily-add-statement') { openDailyStatement(action.dataset.card, action.dataset.date); return; }
     if (name === 'record-tab') { recordTab = action.dataset.tab === 'receipts' ? 'receipts' : 'transactions'; renderPage(); return; }
     if (name === 'range-mode') { setRecordRangeMode(action.dataset.mode); return; }
     if (name === 'range-month') { stepRecordMonth(Number(action.dataset.step || 0)); return; }
@@ -3155,8 +4032,12 @@
     if (name === 'close-add-menu') closeAddMenu();
     if (name === 'add-event') { closeAddMenu(); openEventModal('', action.dataset.kind || 'payment'); }
     if (name === 'toggle-details') { toggleStatementDetails(action.dataset.id); return; }
+    if (name === 'correct-detail-card') { openCardCorrection(action.dataset.id); return; }
+    if (name === 'correct-detail-time') { openDetailTime(action.dataset.id); return; }
+    if (name === 'card-cancellation') { openCardCancellation(action.dataset.id); return; }
     if (name === 'edit-event') openEventModal(action.dataset.id);
     if (name === 'delete-event') deleteEvent(action.dataset.id);
+    if (name === 'confirm-statement') void confirmStatement(action.dataset.id);
     if (name === 'settle-event') settleEvent(action.dataset.id);
     if (name === 'restore-salary') restoreSalaryRecord(action.dataset.month);
     if (name === 'add-account') { closeAddMenu(); openAccountModal(); }
@@ -3184,27 +4065,100 @@
     if (name === 'review-answer') { answerReview(action.dataset.answer); return; }
     if (name === 'review-reason') { answerReviewReason(action.dataset.reason); return; }
     if (name === 'review-cancel-reason') { reviewReasonFor = ''; renderReviewCard(); return; }
-    if (name === 'accept-candidate') { acceptCandidate(action.dataset.id); return; }
+    if (name === 'accept-candidate') {
+      const row = action.closest('.candidate-row');
+      const bankAccountId = row?.querySelector('[data-refund-bank-account]')?.value || '';
+      const bankDate = row?.querySelector('[data-refund-bank-date]')?.value || '';
+      const bankReflected = row?.querySelector('[data-refund-bank-reflected]')?.value || '';
+      acceptCandidate(action.dataset.id, row?.querySelector('[data-candidate-card]')?.value || '', {
+        amount: row?.querySelector('[data-candidate-field="amount"]')?.value || '',
+        date: row?.querySelector('[data-candidate-field="date"]')?.value || '',
+        merchant: row?.querySelector('[data-candidate-field="merchant"]')?.value || '',
+        entryType: row?.querySelector('[data-candidate-field="entryType"]')?.value || '',
+        refundTarget: row?.querySelector('[data-refund-target]')?.value || '',
+        destinationStatementId: row?.querySelector('[data-refund-statement]')?.value || '',
+        creditDate: row?.querySelector('[data-refund-credit-date]')?.value || '',
+        bankCredit: bankAccountId || bankDate || bankReflected ? {
+          accountId: bankAccountId, date: bankDate, balanceAlreadyIncludesCredit: bankReflected ? bankReflected === 'yes' : null
+        } : undefined
+      });
+      return;
+    }
+    if (name === 'correct-candidate-type') { openCandidateTypeCorrection(action.dataset.id); return; }
+    if (name === 'remember-candidate-card') { const row = action.closest('.candidate-row'); rememberCandidateCard(action.dataset.id, row?.querySelector('[data-candidate-card]')?.value || ''); return; }
+    if (name === 'forget-candidate-card') { forgetCandidateCard(Number(action.dataset.index)); return; }
     if (name === 'ignore-candidate') { ignoreCandidate(action.dataset.id); return; }
     if (name === 'delete-candidate') { deleteCandidate(action.dataset.id); return; }
     if (name === 'add-work') { closeAddMenu(); openWorkModal(); }
     if (name === 'edit-work') openWorkModal(action.dataset.id);
     if (name === 'delete-work') deleteWork(action.dataset.id);
     if (name === 'reset-what-if') updateWhatIf(0);
+    if (name === 'edit-recurring' || name === 'cancel-recurring-edit') { recurringEditId = name === 'edit-recurring' ? action.dataset.id : ''; renderPage(); }
     if (name === 'export') exportData();
+    if (name === 'export-recovery') exportRecoveryData();
+    if (name === 'export-cloud') void exportCloudData(action);
+    if (name === 'restore-cloud') $('#restore-cloud-file').click();
+    if (name === 'resume-cloud-restore') void runCloudRestore(null, true);
     if (name === 'import') $('#import-file').click();
     if (name === 'reset') resetData();
   }
 
   function bindEvents() {
+    // 更新直後に古いHTMLが残っていても日時訂正欄を用意する。
+    if (!$('#event-usage-time')) {
+      const label = document.createElement('label');
+      label.id = 'event-usage-time-wrap';
+      label.hidden = true;
+      label.innerHTML = '<span>利用時刻（日本時間・任意）</span><input id="event-usage-time" type="time" step="60"><small class="field-hint">時刻が不明なら空欄にしてください。メールの受信時刻からは補いません。</small>';
+      $('#event-usage-date-wrap').after(label);
+    }
     document.addEventListener('click', event => {
+      if (event.target.closest('[data-flow-close]')) $('#money-flow-dialog').close();
       const close = event.target.closest('[data-close-modal]'); if (close) closeModal(close.dataset.closeModal);
       if (event.target.classList.contains('modal-backdrop')) event.target.hidden = true;
       if (event.target.classList.contains('add-menu-backdrop')) closeAddMenu();
       handleClick(event);
     });
-    $('#menu-button').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+    const menu = $('#sidebar');
+    const content = $('#page-container');
+    content.addEventListener('change', event => {
+      if (event.target.id !== 'detail-period') return;
+      detailPeriod = event.target.value;
+      renderPage();
+      $('#detail-period')?.focus();
+    });
+    let touchStart;
+    content.addEventListener('touchstart', event => {
+      touchStart = event.touches.length === 1 && !event.target.closest('input, select, textarea, button') ? event.touches[0] : null;
+    }, { passive: true });
+    content.addEventListener('touchcancel', () => { touchStart = null; });
+    content.addEventListener('touchend', event => {
+      const start = touchStart;
+      touchStart = null;
+      const end = event.changedTouches[0];
+      if (!start || !end) return;
+      const dx = end.clientX - start.clientX;
+      if (Math.abs(dx) < 55 || Math.abs(dx) <= 1.5 * Math.abs(end.clientY - start.clientY)) return;
+      const buttons = currentPage === 'imports' ? $$('[data-mail-section]')
+        : currentPage === 'plans' && planFilter === 'details' ? $$('[data-plan-detail-card]') : [];
+      const index = buttons.findIndex(button => button.getAttribute('aria-pressed') === 'true');
+      if (index >= 0) buttons[index + (dx < 0 ? 1 : -1)]?.click();
+    }, { passive: true });
+    const menuButton = $('#menu-button');
+    menuButton.addEventListener('click', () => {
+      menu.showModal();
+      menuButton.setAttribute('aria-expanded', 'true');
+    });
+    $('#menu-close').addEventListener('click', () => menu.close());
+    menu.addEventListener('click', event => {
+      if (event.target === menu && event.clientX > menu.getBoundingClientRect().right) menu.close();
+    });
+    menu.addEventListener('close', () => {
+      menuButton.setAttribute('aria-expanded', 'false');
+      if (!$('#app-shell').hidden) menuButton.focus({ preventScroll: true });
+    });
     $('#event-kind').addEventListener('change', updateEventKindUi);
+    $('#event-status').addEventListener('change', updateEventKindUi);
     $('#event-transfer-type').addEventListener('change', updateEventKindUi);
     $('#event-card').addEventListener('change', () => { updateCardDateUi(); syncCardSourceAccount(true); });
     $('#event-usage-date').addEventListener('change', () => syncCardSourceAccount(true));
@@ -3215,15 +4169,47 @@
     $('#card-form').addEventListener('submit', saveCard);
     $('#work-form').addEventListener('submit', saveWork);
     document.addEventListener('submit', event => {
+      if (event.target.id === 'debit-form') { void saveDebit(event); return; }
+      if (event.target.id === 'recurring-plan-form') { void saveRecurringPlan(event); return; }
+      if (event.target.id === 'card-correction-form') { void saveCardCorrection(event); return; }
+      if (event.target.id === 'detail-time-form') { void saveDetailTime(event); return; }
+      if (event.target.id === 'card-cancel-form') { void saveCardCancellation(event); return; }
+      if (event.target.id === 'candidate-type-form') { void saveCandidateTypeCorrection(event); return; }
       if (event.target.id === 'receipt-form') { saveReceiptForm(event); return; }
       if (event.target.id === 'share-member-form') { addCloudMember(event); return; }
       if (event.target.id === 'workspace-name-form') { renameCloudWorkspace(event); return; }
       if (event.target.id === 'wage-settings-form') { saveWageSettings(event); return; }
       if (event.target.id !== 'settings-form') return;
-      event.preventDefault(); state.settings.defenseLine = Number($('#settings-defense').value || 0); state.settings.deadlineMode = $('#settings-deadline').value; state.settings.cashflowHorizonDays = Number($('#settings-horizon').value || 90); state.settings.reviewDayOfWeek = Math.min(Math.max(Number($('#settings-review-day').value || 0), 0), 6); persist(); renderPage(); showToast('設定を保存しました');
+      event.preventDefault();
+      const deadlineMode = $('#settings-deadline').value;
+      const deadlineCardIds = new FormData(event.target).getAll('deadline-card');
+      if (deadlineMode === 'card-closing' && !deadlineCardIds.length) {
+        showToast('期限の基準にするカードを選んでください');
+        return;
+      }
+      state.settings.deadlineCardIds = deadlineCardIds;
+      state.settings.defenseLine = Number($('#settings-defense').value || 0); state.settings.deadlineMode = $('#settings-deadline').value; state.settings.cashflowHorizonDays = Number($('#settings-horizon').value || 90); state.settings.reviewDayOfWeek = Math.min(Math.max(Number($('#settings-review-day').value || 0), 0), 6); persist(); renderPage(); showToast('設定を保存しました');
     });
     $('#import-file').addEventListener('change', event => importData(event.target.files[0]));
+    let restoreInput = $('#restore-cloud-file');
+    if (!restoreInput) {
+      restoreInput = document.createElement('input');
+      restoreInput.id = 'restore-cloud-file';
+      restoreInput.type = 'file';
+      restoreInput.accept = 'application/json';
+      restoreInput.hidden = true;
+      document.body.appendChild(restoreInput);
+    }
+    restoreInput.addEventListener('change', event => void restoreCloudFile(event.target.files[0]));
     document.addEventListener('change', event => {
+      const candidateCard = event.target.closest?.('[data-candidate-card]');
+      if (candidateCard) { candidateCardSelections.set(candidateCard.dataset.candidateCard, candidateCard.value); return; }
+      const candidateField = event.target.closest?.('[data-candidate-field]');
+      if (candidateField) {
+        const id = candidateField.dataset.candidateId;
+        candidateEdits.set(id, { ...candidateEdits.get(id), [candidateField.dataset.candidateField]: candidateField.value });
+        return;
+      }
       const outcomeSelect = event.target.closest?.('[data-line-outcome]');
       if (outcomeSelect) { setReceiptOutcome(outcomeSelect.dataset.id, outcomeSelect.value); return; }
       const lineField = event.target.closest?.('[data-line-field]');
@@ -3236,6 +4222,12 @@
       if (['future-start', 'future-end'].includes(event.target.id)) renderFutureResult();
     });
     document.addEventListener('input', event => {
+      const candidateField = event.target.closest?.('[data-candidate-field]');
+      if (candidateField) {
+        const id = candidateField.dataset.candidateId;
+        candidateEdits.set(id, { ...candidateEdits.get(id), [candidateField.dataset.candidateField]: candidateField.value });
+        return;
+      }
       const lineInput = event.target.closest?.('[data-line-field]');
       if (lineInput) { onReceiptLineInput(lineInput); return; }
       if (event.target.id === 'receipt-total') { updateReceiptLineSum(); return; }

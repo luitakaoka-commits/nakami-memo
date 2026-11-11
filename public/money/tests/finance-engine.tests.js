@@ -42,6 +42,26 @@
 
     /* ---------- 祝日・営業日エンジン ---------- */
 
+    test('銀行の年末年始休業日は営業日としない', () => {
+      equal(engine.isJapaneseBusinessDay('2026-12-31'), false, '12月31日は銀行休業日');
+      equal(engine.isJapaneseBusinessDay('2026-01-02'), false, '1月2日は銀行休業日');
+      equal(engine.japaneseHolidayName('2026-12-31'), '', '国民の祝日と銀行休業日は区別');
+    });
+    test('年末年始の引落予定日は次の銀行営業日へ', () => {
+      equal(engine.calculateCardPaymentDate('2026-11-30', 0, 31, 1), '2027-01-04', '12月31日から年始休業を越える');
+      equal(engine.calculateCardPaymentDate('2027-12-30', 31, 2, 1), '2028-01-04', '1月2日から1月3日を越える');
+    });
+    test('年始の休業日から前営業日へ戻すと年末休業日を越える', () => {
+      equal(engine.previousBusinessDay('2026-01-02'), '2025-12-30', '年末年始の前営業日');
+    });
+    test('休業日が長く続き営業日を特定できない場合は推測しない', () => {
+      const overrides = {};
+      for (let day = 1; day <= 31; day++) overrides[`2026-07-${String(day).padStart(2, '0')}`] = '臨時休業';
+      let failed = false;
+      try { engine.nextBusinessDay('2026-07-01', { overrides }); } catch { failed = true; }
+      assert(failed, '営業日ではない日を計算結果として返した');
+    });
+
     test('祝日エンジン: 2026年の主要な祝日を正しく判定する', () => {
       equal(engine.japaneseHolidayName('2026-01-01'), '元日', '元日');
       equal(engine.japaneseHolidayName('2026-01-12'), '成人の日', '成人の日は1月第2月曜');
@@ -472,6 +492,37 @@
       equal(heavy.cashflow.afterVerdict, 'belowDefense', '判定が最低残高割れへ変わる');
     });
 
+    test('カード定期払いは引落日へ送り、請求総額と二重に控除しない', () => {
+      const input = {
+        today: '2026-09-01', deadline: '2026-09-14', endDate: '2026-10-13',
+        accounts: [account('a1', '生活費口座', 'primary', 50000)],
+        cards: [{ id: 'c1', name: 'カード', accountId: 'a1', closingDay: 15, paymentDay: 10 }],
+        recurringPlans: [{ id: 'electricity', kind: 'payment', amount: 5000, dayOfMonth: 5, cardId: 'c1' }]
+      };
+      for (const amount of [0, 20000]) {
+        const transactions = amount ? [tx({ amount, cardId: 'c1', sourceAccountId: 'a1', entryType: 'statement', dueDate: '2026-10-13' })] : [];
+        const due = amount || 5000;
+        const cashflow = engine.calculateCashflowCheck({ ...input, transactions });
+        equal(cashflow.timeline.find(day => day.date === '2026-09-05').primaryBalance, 50000);
+        equal(cashflow.timeline.find(day => day.date === '2026-10-13').primaryBalance, 50000 - due);
+        const budget = engine.calculateSpendableAmount({ ...input, transactions });
+        equal(budget.cashOutflow, 0);
+        equal(budget.unpaidCardTotal, amount);
+        equal(budget.plannedCardTotal, amount ? 0 : 5000);
+        equal(budget.total, 50000 - due);
+      }
+    });
+    test('月をまたいで移動した定期予定を元の月に再生成しない', () => {
+      const plans = [{ id: 'p1', dayOfMonth: 27, amount: 60000 }];
+      for (const moved of [
+        { id: 'recurring:p1:2026-09-27' },
+        { id: 'saved', scheduledDate: '2026-09-27' }
+      ]) {
+        const rows = engine.expandScheduledTransactions(plans, '2026-09-01', '2026-10-31',
+          [{ ...moved, recurringPlanId: 'p1', dueDate: '2026-10-01' }]);
+        if (rows.length !== 1 || rows[0].dueDate !== '2026-10-27') throw new Error('元の月が再生成されたか翌月分が消えました');
+      }
+    });
     test('定期予定を期間内へ展開し、実取引と二重にしない', () => {
       const plans = [{ id: 'p1', kind: 'payment', name: '家賃', amount: 60000, dayOfMonth: 27, sourceAccountId: 'a1', isActive: true }];
       const expanded = engine.expandScheduledTransactions(plans, '2026-08-25', '2026-10-31', []);

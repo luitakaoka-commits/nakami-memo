@@ -1,0 +1,17 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { reconcile } = require('./private-mail-check.js');
+const fact = { messageId: 'mail', usedDate: '2026-10-24', usedTime: '15:11', timeZone: 'Asia/Tokyo', amount: 100, merchant: '店舗', cardText: 'テストカード' };
+const tx = { id: 'tx', cardId: 'card', amount: 100, transactionDate: fact.usedDate, transactionAt: '2026-10-24T06:11:00.000Z', memo: '店舗' };
+const run = (transactions = [tx], facts = [fact]) => reconcile({ cards: [{ id: 'card', name: 'カード' }], transactions }, facts, 'カード', 'テストカード');
+assert.equal(run().status, 'pass');
+assert.equal(run([{ ...tx, cardId: 'other' }]).counts.unmatched, 1);
+assert.equal(run([{ ...tx, transactionAt: '2026-10-24T06:12:00.000Z' }]).counts.timeMismatch, 1);
+assert.equal(run([tx], [{ ...fact, timeZone: '' }]).status, 'review');
+assert.equal(run([tx, { ...tx, id: 'other' }]).counts.ambiguous, 1);
+assert.equal(run([tx], [fact, { ...fact, messageId: 'other' }]).counts.reusedTransactions, 1);
+assert.equal(run([tx], [fact, fact]).counts.repeatedMessageIds, 1);
+assert.equal(run([tx], [{ ...fact, currency: 'USD', amount: null }]).counts.foreign, 1);
+assert.equal(run([{ ...tx, memo: '別の店舗' }], [{ ...fact, merchant: '異なる店' }]).counts.merchantMismatch, 1);
+assert.throws(() => run([tx], []));
+console.log(JSON.stringify({ suite: 'private-mail-check-contract', total: 10, passed: 10, failed: 0 }));

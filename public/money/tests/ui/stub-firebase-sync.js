@@ -1,19 +1,37 @@
 // テスト用のFirebaseスタブ。ネットワークへ接続せずにアプリを起動する。
+import './redesign-sync-coordinator.js?v=57';
+import './redesign-migration-check.js';
+import './redesign-restore-plan.js';
 export const firebaseSync = {
+  restoreCloudBackup: async (snapshot, resume) => {
+    (window.__TEST_CALLS__ ||= []).push({ fn: 'restoreCloudBackup', snapshot, resume });
+    return { status: 'verified', targetId: 'restore-test' };
+  },
+  readUnsavedRecovery: () => globalThis.RedesignSyncCoordinator.readRecovery(localStorage, 'test-user', 'test-workspace'),
   waitForAuth: async () => ({ uid: 'test-user', email: 'test@example.com' }),
   signIn: async () => ({ user: { uid: 'test-user' } }),
   signOut: async () => {},
   connect: async (initialState, onRemote, onStatus, onCandidates) => {
+    window.__TEST_STATE_SINK__ = onRemote;
     if (onStatus) onStatus('saved');
     if (onCandidates) { window.__TEST_CANDIDATE_SINK__ = onCandidates; onCandidates([]); }
   },
+  readCloudBackup: async () => {
+    if (window.__TEST_BACKUP_FAIL__) throw new Error('権限エラー');
+    return { workspaceId: 'test-workspace', collections: { importCandidates: { complete: true, documents: [] } } };
+  },
   selectWorkspace: async () => {},
   refreshWorkspaces: async () => [],
-  queueSave: () => {},
+  queueSave: (_state, acceptance) => { if (acceptance) (window.__TEST_CALLS__ ||= []).push({ fn: 'updateImportCandidate', ...acceptance }); },
   addMember: async () => {},
   removeMember: async () => {},
   renameWorkspace: async () => {},
-  updateImportCandidate: async () => {},
+  updateImportCandidate: async (id, patch) => { (window.__TEST_CALLS__ ||= []).push({ fn: 'updateImportCandidate', id, patch }); },
+  correctImportCandidateType: async (id, expected, confirmed) => {
+    const patch = globalThis.RedesignSyncCoordinator.purchaseCandidateCorrection(expected, expected, confirmed);
+    (window.__TEST_CALLS__ ||= []).push({ fn: 'correctImportCandidateType', id, expected, confirmed, patch });
+    return patch;
+  },
   deleteImportCandidate: async () => {},
   // レシートの保存は Firestore に行かず、呼ばれた中身を window.__TEST_CALLS__ に残す（テストが中身を見る）
   saveReceipt: async (receipt, items) => { (window.__TEST_CALLS__ ||= []).push({ fn: 'saveReceipt', receipt, items }); return receipt.id || 'r-new'; },

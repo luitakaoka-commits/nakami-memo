@@ -1,0 +1,174 @@
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const crypto = require('crypto');
+const dir = path.join(__dirname, '..', 'integrations', 'gas-card-mail-import');
+const failures = [];
+let total = 0;
+const test = (name, fn) => { total++; try { fn(); } catch (error) { failures.push({ name, message: error.message }); } };
+const assert = (value, message) => { if (!value) throw new Error(message); };
+
+function fixture({ ids = ['a', 'b'], failModify = false, failSave = false, legacyStatus = 404, sender = 'notice@jcb.co.jp', subject = 'ご利用のお知らせ', body = 'ご利用日時：2026/08/23 15:03\nご利用金額：1,000円', encodedBody = '', charset = 'UTF-8' } = {}) {
+  const saved = new Map();
+  const labeled = [];
+  const queries = [];
+  let released = false;
+  const response = (status, data = {}) => ({ getResponseCode: () => status, getContentText: () => JSON.stringify(data) });
+  const box = {
+    Logger: { log() {} },
+    Utilities: { DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' }, computeDigest: (_a, text) => [...crypto.createHash('sha256').update(text).digest()].map(x => x > 127 ? x - 256 : x), base64Decode: text => Buffer.from(text, 'base64'), base64DecodeWebSafe: text => Buffer.from(text, 'base64url'), newBlob: bytes => ({ getDataAsString: encoding => new TextDecoder(encoding || 'utf-8').decode(Buffer.from(bytes)) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => '' }) },
+    LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => { released = true; } }) },
+    UrlFetchApp: { fetch: (url, opts = {}) => {
+      if (url.includes('/gmail/v1/users/me/messages?')) { queries.push(decodeURIComponent((url.split('&q=')[1] || ''))); return response(200, { messages: ids.map(id => ({ id })) }); }
+      if (url.endsWith('/gmail/v1/users/me/labels')) return response(200, { labels: [{ id: 'processed-label', name: 'CashManege/取込済み' }, { id: 'ignored-label', name: 'CashManege/対象外' }] });
+      if (url.includes('/gmail/v1/users/me/messages/') && url.endsWith('?format=full')) return response(200, {
+        internalDate: String(Date.parse('2026-08-23T06:03:00.000Z')),
+        payload: { mimeType: 'multipart/alternative', headers: [{ name: 'From', value: sender }, { name: 'Subject', value: subject }], parts: [{ mimeType: 'text/plain', headers: [{ name: 'Content-Type', value: `text/plain; charset="${charset}"` }], body: { data: encodedBody || Buffer.from(body).toString('base64url') } }] }
+      });
+      if (url.includes('/gmail/v1/users/me/messages/') && url.endsWith('/modify')) {
+        const id = url.split('/').slice(-2)[0];
+        if (failModify) return response(503);
+        labeled.push({ id, label: JSON.parse(opts.payload).addLabelIds[0] });
+        return response(200);
+      }
+      if (url.includes('/importCandidates/') && (!opts.method || opts.method === 'get')) return response(legacyStatus);
+      if (url.includes('/importCandidates?documentId=')) {
+        if (failSave) return response(403);
+        const id = decodeURIComponent(url.split('documentId=')[1]);
+        if (saved.has(id)) return response(409);
+        saved.set(id, JSON.parse(opts.payload).fields);
+        return response(200);
+      }
+      throw new Error('unexpected request');
+    } }
+  };
+  vm.createContext(box);
+  for (const file of ['Parsers.gs', 'Code.gs']) vm.runInContext(fs.readFileSync(path.join(dir, file), 'utf8'), box);
+  box.readConfig = () => ({ projectId: 'test', workspaceId: 'ws', gmailQuery: '' });
+  box.fetchAccessToken = () => 'test-token';
+  return { box, saved, labeled, queries, released: () => released };
+}
+
+test('別のメールは同額同日でも別候補とし、処理済みは各メールに付ける', () => {
+  const f = fixture();
+  const summary = f.box.importCardMails();
+  assert(summary.created === 2 && f.saved.size === 2, '別々の通知を1件にまとめている');
+  assert(f.labeled.length === 2 && f.labeled.every(x => x.label === 'processed-label'), '各メールへのラベルが不足');
+  assert(f.released(), 'ロックを解放していない');
+});
+
+test('同じメールの再処理は新しい候補を作らない', () => {
+  const f = fixture({ ids: ['a'] });
+  f.box.importCardMails();
+  const result = f.box.importCardMails();
+  assert(f.saved.size === 1 && result.duplicated === 1, '同一メールが重複登録された');
+});
+
+test('ラベル付け失敗後は保存済み候補を重複させず再試行できる', () => {
+  const f = fixture({ ids: ['a'], failModify: true });
+  const result = f.box.importCardMails();
+  assert(result.failed === 1 && f.saved.size === 1 && f.labeled.length === 0, '失敗したメールの扱いが不正');
+  assert(f.released(), '失敗時もロックを解放する');
+});
+
+test('保存に失敗したメールには処理済みラベルを付けない', () => {
+  const f = fixture({ ids: ['a'], failSave: true });
+  const result = f.box.importCardMails();
+  assert(result.failed === 1 && f.saved.size === 0 && f.labeled.length === 0, '保存失敗を処理済みにしている');
+  assert(f.released(), '保存失敗時もロックを解放する');
+});
+test('カード利用の候補でないメールには取込済みではなく対象外ラベルを付ける', () => {
+  const f = fixture({ ids: ['a'], sender: 'notice@example.com', subject: 'サービスのお知らせ', body: 'サービスの料金改定についてお知らせします。' });
+  const result = f.box.importCardMails();
+  assert(result.created === 0 && f.saved.size === 0, '対象外のメールから候補を作成した');
+  assert(f.labeled.length === 1 && f.labeled[0].label === 'ignored-label', '対象外のメールに取込済みラベルを付けた');
+  assert(f.queries[0].includes('-label:"CashManege/対象外"'), '対象外メールを次回も検索してしまう');
+});
+
+test('利用日が不明な場合、受信日を利用日と誤って保存しない', () => {
+  const f = fixture({ ids: ['a'], body: 'ご利用金額：1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.usedDate.stringValue === '' && fields.status.stringValue === 'needs_review', '受信日を利用日と誤認している');
+});
+test('本文の利用時刻と時間帯の根拠を候補へ保存する', () => {
+  const f = fixture({ ids: ['a'], body: '【ご利用日時(日本時間)】 2026/08/23 15:03\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.usedTime.stringValue === '15:03' && fields.usedTimeZone.stringValue === 'Asia/Tokyo' && fields.usedTimeSource.stringValue === 'mail-body', '本文の時刻または根拠が欠けている');
+});
+test('本文に時間帯がない場合は日本時間を推測しない', () => {
+  const f = fixture({ ids: ['a'], body: 'ご利用日時：2026/08/23 15:03\nご利用金額：1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.usedTime.stringValue === '15:03' && fields.usedTimeZone.stringValue === '', '時間帯を推測している');
+});
+test('利用日があっても本文に利用時刻がない通知は要確認', () => {
+  const f = fixture({ ids: ['a'], subject: 'JCBカード／ショッピングご利用のお知らせ', body: 'カード名称：ＪＣＢカードＷ\n【ご利用日時(日本時間)】 2026/08/23\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.status.stringValue === 'needs_review' && fields.usedTime.stringValue === '', '利用時刻不明を見逃した');
+  assert(fields.note.stringValue.includes('時刻'), '要確認の理由がない');
+});
+test('カード種類が不明な通知は要確認', () => {
+  const f = fixture({ ids: ['a'], subject: 'JCBカード／ショッピングご利用のお知らせ', body: '【ご利用日時(日本時間)】 2026/08/23 15:03\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.status.stringValue === 'needs_review', 'カード種類不明を見逃した');
+  assert(fields.note.stringValue.includes('カード'), '要確認の理由がない');
+});
+test('カード名・金額・利用日時の根拠があるJCB通知は確認待ち候補になる', () => {
+  const f = fixture({ ids: ['a'], subject: 'JCBカード／ショッピングご利用のお知らせ', body: 'カード名称：ＪＣＢカードＷ\n【ご利用日時(日本時間)】 2026/08/23 15:03\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.status.stringValue === 'pending', '根拠のある通知が通常の候補にならない');
+});
+test('通知の受信日と本文の利用日が異なっても本文の利用日時を保存', () => {
+  const f = fixture({ ids: ['a'], subject: 'JCBカード／ショッピングご利用のお知らせ', body: 'カード名称：ＪＣＢカードＷ\n【ご利用日時(日本時間)】 2026/08/22 23:59\n【ご利用金額】1,000円' });
+  f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(fields.usedDate.stringValue === '2026-08-22' && fields.usedTime.stringValue === '23:59', '受信日時を利用日時に取り違えた');
+});
+
+test('符号化された日本語件名を元の文字に戻す', () => {
+  const f = fixture();
+  const word = Buffer.from('ご請求額確定').toString('base64');
+  assert(f.box.decodeMimeHeader(`=?UTF-8?B?${word}?=`) === 'ご請求額確定', '日本語の件名を復元できない');
+  assert(f.box.decodeMimeHeader('=?UTF-8?Q?Card_Notice?=') === 'Card Notice', 'Q形式の件名を復元できない');
+});
+test('ISO-2022-JPの本文を文字化けさせず利用日時を読む', () => {
+  const f = fixture({ ids: ['a'], charset: 'iso-2022-jp', encodedBody: 'GyRCJDRNeE1RRnw7fiEnGyhCMjAyNi8wOC8yMyAxNTowMw==' });
+  const message = f.box.readGmailMessage('a', 'test-token');
+  assert(message.getPlainBody() === 'ご利用日時：2026/08/23 15:03', '文字コードを正しく復元できない');
+  const parsed = f.box.parseCardMail({ sender: message.getFrom(), subject: message.getSubject(), body: message.getPlainBody(), receivedAt: message.getDate() });
+  assert(parsed.usedDate === '2026-08-23' && parsed.usedTime === '15:03', '復元後の利用日時が不正');
+});
+
+test('旧候補と同じ指紋でも別の利用を捨てず、重複を要確認にする', () => {
+  const f = fixture({ ids: ['a'], legacyStatus: 200 });
+  const result = f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(result.created === 1 && fields.status.stringValue === 'needs_review', '旧候補との衝突を確認に回していない');
+  assert(fields.note.stringValue.includes('以前の取込候補'), '確認する理由を表示していない');
+});
+
+test('旧候補を確認できない場合は保存せずラベルも付けない', () => {
+  const f = fixture({ ids: ['a'], legacyStatus: 503 });
+  const result = f.box.importCardMails();
+  assert(result.failed === 1 && f.saved.size === 0 && f.labeled.length === 0, '確認失敗時に処理を進めた');
+});
+
+test('Googleの一時確認候補は金額とカードを保持して要確認で保存する', () => {
+  const f = fixture({ ids: ['a'], sender: 'notice@vpass.ne.jp', subject: 'ご利用のお知らせ【三井住友カード】',
+    body: '三井住友カードＶＩＳＡ（ＮＬ）についてカードの利用内容をお知らせします。\nご利用日時：2026/09/05 23:07\nGOOGLE*WALLET TEMP（買物） 200円' });
+  const result = f.box.importCardMails();
+  const fields = [...f.saved.values()][0];
+  assert(result.created === 1 && fields.status.stringValue === 'needs_review', '要確認で保存されない');
+  assert(fields.type.stringValue === 'unknown' && fields.amount.doubleValue === 200, '通知の種別や額が不正');
+  assert(fields.cardHint.stringValue.includes('三井住友') && fields.usedDate.stringValue === '2026-09-05' && fields.usedTime.stringValue === '23:07', 'カードや利用日時を失った');
+  assert(fields.note.stringValue.includes('一時的'), '理由を保存していない');
+});
+
+console.log(JSON.stringify({ suite: 'gas-card-import', total, passed: total - failures.length, failed: failures.length, ...(failures.length ? { failures } : {}) }));
+process.exit(failures.length ? 1 : 0);

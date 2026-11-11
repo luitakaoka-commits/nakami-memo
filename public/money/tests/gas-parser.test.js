@@ -93,6 +93,31 @@ test('エポスカード: 01epos.jp を差出人として認識する', () => {
 
 /* ---------- 金額の特定 ---------- */
 
+test('JCB本文の明示された利用時刻を日本時間として分離する', () => {
+  const result = parse('notice@jcb.co.jp', 'JCBカード／ショッピングご利用のお知らせ', '【ご利用日時(日本時間)】 2026/08/24 23:09\n【ご利用金額】279円');
+  equal(result.usedTime, '23:09', '利用時刻');
+  equal(result.usedTimeZone, 'Asia/Tokyo', '明示された日本時間');
+});
+test('三井住友の本文時刻は保持するがタイムゾーンは推測しない', () => {
+  const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】', 'ご利用日時：2026/08/23 15:03\n店（買物）\n145円');
+  equal(result.usedTime, '15:03', '利用時刻');
+  equal(result.usedTimeZone, '', '明示されていないタイムゾーン');
+});
+test('日付のみ・受信時刻のみ・不正な時刻は利用時刻にしない', () => {
+  for (const body of ['ご利用日時：2026/08/23\nご利用金額：1,000円', 'ご利用日時：2026/08/23 25:10\nご利用金額：1,000円', 'ご利用日：2026/08/23\nお知らせ送信時刻 15:03\nご利用金額：1,000円']) {
+    const result = parse('notice@jcb.co.jp', 'ご利用のお知らせ', body);
+    equal(result.usedTime, '', '不明な時刻');
+  }
+});
+test('利用日時が複数あれば時刻をひとつに決めない', () => {
+  const result = parse('notice@jcb.co.jp', 'ご利用のお知らせ', 'ご利用日時：2026/08/23 15:03\nご利用日時：2026/08/23 17:30\nご利用金額：1,000円');
+  equal(result.usedTime, '', '曖昧な時刻');
+});
+test('日本時間と矛盾するタイムゾーン表記は確定しない', () => {
+  const result = parse('notice@jcb.co.jp', 'ご利用のお知らせ', '【ご利用日時(日本時間)】2026/08/24 23:09 UTC+0000\n【ご利用金額】279円');
+  equal(result.usedTimeZone, '', '矛盾する時間帯');
+});
+
 test('ラベル付きの金額は、他に数字があっても確定する', () => {
   const result = parse(
     '三井住友カード <statement@vpass.ne.jp>',
@@ -140,6 +165,12 @@ test('返金・取消は自動確定しない', () => {
   equal(parse('info@01epos.jp', 'ご返金のお知らせ', 'ご返金日 2026/08/21\nご返金額 2,000円').type, 'refund', '返金');
   equal(parse('info@01epos.jp', 'お取消のお知らせ', '取消日 2026/08/21\n取消金額 2,000円').type, 'cancel', '取消');
   equal(parse('info@01epos.jp', 'ご返金のお知らせ', 'ご返金日 2026/08/21\nご返金額 2,000円').confident, false, '要確認になる');
+  equal(parse('info@01epos.jp', 'カードご利用のお知らせ', 'ご利用日時：2026年08月21日12:00\nご利用金額：2,000円\nご利用場所：テスト店\nキャンセルに関するご案内はこちら').type, 'purchase', '注意書きを取消にしない');
+});
+test('ポイント利用後の支払額を注文額から区別する', () => {
+  const result = parse('notice@skylark-app.net', 'テーブル決済完了のお知らせ', 'ご利用日時：2026年08月21日12時00分\nご注文金額：1,195円(税込)\nご利用ポイント：すかいらーくポイント(-87P)\nお支払い金額：1108円(税込)');
+  equal(result.amount, 1108, '支払額');
+  equal(result.confident, false, '未対応の差出人は要確認');
 });
 
 test('未対応の差出人は要確認にする', () => {
@@ -150,6 +181,19 @@ test('未対応の差出人は要確認にする', () => {
 
 test('カード利用と関係のないメールは候補にしない', () => {
   equal(parse('news@example.com', 'キャンペーンのご案内', '今月のおすすめ商品はこちら'), null, '候補を作らない');
+});
+
+test('利用額のないカード会社の振替案内や、他社の金額入り広告を候補にしない', () => {
+  equal(parse('info@jcb.co.jp', 'カードのお振替内容確定のご案内', 'いつもカードをご利用いただきありがとうございます。内容は会員サイトでご確認ください。'), null, '振替案内は取引として扱わない');
+  equal(parse('news@example.com', 'キャンペーンのお知らせ', 'いつもご利用ありがとうございます。今なら3,000円お得です。'), null, '広告の金額を取引として扱わない');
+});
+
+test('請求総額の通知を1件のカード利用と決めつけない', () => {
+  const result = parse('info@jcb.co.jp', 'ご請求額確定のお知らせ', 'いつもご利用ありがとうございます。\nご請求額：12,345円');
+  equal(result.amount, 12345, '請求額');
+  equal(result.type, 'unknown', '利用明細と決めつけない');
+  equal(result.confident, false, '要確認');
+  assert(result.note.includes('請求'), '請求総額の可能性を案内する');
 });
 
 test('年をまたぐ短い日付表記を補正する', () => {
@@ -165,6 +209,146 @@ test('カード番号らしき数字をカード名として保存しない', ()
   );
   equal(result.cardHint, 'ＪＣＢカードＷ', 'カード名のみ');
   assert(!/[0-9]{4}/.test(result.cardHint), 'カード名に4桁以上の数字を含めない');
+  const numbered = parse('info@jcb.co.jp', 'ご利用のお知らせ', 'カード名称：JCBカード 1234\nご利用日 2026/08/24\nご利用金額 500円');
+  assert(!numbered.cardHint.includes('1234'), 'カード名に印字された番号を保存しない');
+});
+
+test('利用日時の後では表記に関係なく最初の金額と店舗を読む', () => {
+  const result = parse('statement@vpass.ne.jp', 'ご利用のお知らせ',
+    'ご利用日時：2026/08/23 15:03\nセブン－イレブン（買物）\n1,234円\n後日ご案内 ¥5,000');
+  equal(result.amount, 1234, '先に現れた利用額');
+  equal(result.merchant, 'セブン－イレブン（買物）', '利用額の直前の利用先');
+});
+
+test('差出人の表示名や別ドメインに含まれる文字列でカード会社と判断しない', () => {
+  const spoofed = parse('JCB jcb.co.jp <alerts@notjcb.co.jp>', 'ご利用のお知らせ',
+    'ご利用日 2026/08/23\nご利用金額 1,000円');
+  equal(spoofed.issuerLabel, '', '差出人は未対応');
+  equal(spoofed.confident, false, '要確認');
+  const subdomain = parse('お知らせ <notice@qa.jcb.co.jp>', 'ご利用のお知らせ',
+    'ご利用日 2026/08/23\nご利用金額 1,000円');
+  equal(subdomain.issuerLabel, 'JCB', '正規のサブドメインは認識');
+});
+
+test('存在しない利用日を別の日付に読み替えず要確認にする', () => {
+  const result = parse('info@jcb.co.jp', 'ご利用のお知らせ', 'ご利用日 2026/02/30\nご利用金額 800円');
+  equal(result.usedDate, '', '不正な日付を保存しない');
+  equal(result.confident, false, '日付が不明なら要確認');
+  assert(result.note.includes('利用日'), '日付の確認を案内する');
+});
+
+test('確認したJCBと三井住友の形式だけ金額と利用日の根拠を認める', () => {
+  const check = (sender, subject, body) => {
+    const mail = { sender, subject, body, receivedAt: new Date(2026, 7, 25, 12) };
+    return sandbox.assessNoticeEvidence(mail, sandbox.parseCardMail(mail));
+  };
+  assert(check('info@jcb.co.jp', 'JCBカード／ショッピングご利用のお知らせ',
+    '【ご利用日時(日本時間)】 2026/08/24 10:00\n【ご利用金額】 500円').safe, 'JCBの利用金額を識別できない');
+  assert(check('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+    'ご利用日時：2026/08/23 15:03\nテスト店舗（買物）\n1,234円\n参考 ¥5,000').safe, '三井住友の明細を識別できない');
+  assert(!check('info@01epos.jp', 'エポスカードより「カードご利用のお知らせ」',
+    'ご利用日時：2026/08/23 15:03\nご利用金額：1,234円').safe, 'カードの種類が不明な通知を自動処理した');
+});
+
+test('金額の重複ラベルや利用日不明は自動処理しない', () => {
+  const check = body => {
+    const mail = { sender: 'info@jcb.co.jp', subject: 'JCBカード／ショッピングご利用のお知らせ', body, receivedAt: new Date(2026, 7, 25, 12) };
+    return sandbox.assessNoticeEvidence(mail, sandbox.parseCardMail(mail));
+  };
+  assert(!check('【ご利用日時】2026/08/24\n【ご利用金額】500円\n【ご利用金額】600円').safe, '複数金額を自動処理した');
+  assert(!check('案内日 2026/08/24\n【ご利用金額】500円').safe, '利用日でない日付を使った');
+  assert(!check('【ご利用日時】2026/02/30\n【ご利用金額】500円').safe, '存在しない利用日を使った');
+});
+
+test('本文の利用日と解析結果が異なる場合や日付に余分な数字がある場合は根拠としない', () => {
+  const mail = { sender: 'notice@jcb.co.jp', subject: 'JCBカード／ショッピングご利用のお知らせ', body: '【ご利用日時(日本時間)】 2026/08/24 10:00\n【ご利用金額】 500円', receivedAt: new Date(2026, 7, 25) };
+  const parsed = sandbox.parseCardMail(mail);
+  assert(!sandbox.assessNoticeEvidence(mail, { ...parsed, usedDate: '2026-08-23' }).safe, '本文と異なる利用日を根拠として認めた');
+  const malformed = { ...mail, body: mail.body.replace('2026/08/24', '2026/08/240') };
+  assert(!sandbox.assessNoticeEvidence(malformed, sandbox.parseCardMail(malformed)).safe, '数字が続く不正な日付を根拠として認めた');
+});
+
+test('外貨の利用金額を円の金額として返さない', () => {
+  for (const currency of ['USD', 'EUR', 'GBP']) {
+    const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】', [
+      'ご利用カード：三井住友カードＶＩＳＡ（ＮＬ）',
+      '◇利用日：2026/10/13 09:31',
+      `◇利用金額：1.00${currency}`,
+      '◇利用先：海外店舗'
+    ].join('\n'));
+    equal(result.amount, null, '外貨を円として返した');
+    equal(result.confident, false, '外貨を確定扱いにした');
+  }
+});
+
+test('JPYの利用通知と本文中の外貨の説明を混同しない', () => {
+  const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】', [
+    '◇利用日：2026/10/13 09:31', '◇利用金額：120JPY',
+    '海外利用はUSDで表示される場合があります。'
+  ].join('\n'));
+  equal(result.amount, 120, 'JPYの金額を失った');
+});
+
+test('利用日ラベルの同じ行に記載された時刻も保持する', () => {
+  const result = parse('statement@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+    '◇利用日：2026/10/17 15:08\n◇利用金額：5080円\n◇利用先：テスト店舗');
+  equal(result.usedTime, '15:08', '本文にある利用時刻を失った');
+  equal(result.usedTimeZone, '', '時間帯を推測した');
+});
+
+test('キャッシュバック広告を返金の候補にしない', () => {
+  equal(parse('mail@contact.vpass.ne.jp',
+    '本ご案内が届いた方限定！もれなく最大1,000円キャッシュバック！',
+    'キャンペーン期間中にカードをご利用するだけで、最大1,000円キャッシュバック。'), null, '広告を返金にした');
+});
+
+test('利用情報のある抽選チケット案内を再度の購入候補にしない', () => {
+  equal(parse('suguchan@vpass.ne.jp', '【抽選チケット進呈】すぐチャン！Vポイントがその場で当たる！',
+    '利用カード：三井住友カードVISA（NL）\n利用日：2026/10/17 15:08\n利用金額：5080円\n利用先：テスト店舗'), null, '抽選案内を別取引にした');
+});
+
+test('キャンペーンの実際の返金完了通知は広告として捨てない', () => {
+  const result = parse('notice@vpass.ne.jp', 'キャンペーンの返金完了のお知らせ',
+    'ご返金日：2026/10/17\nご返金金額：1000円');
+  equal(result.type, 'refund', '返金完了を失った');
+  equal(result.confident, false, '返金を未照合のまま確定した');
+});
+
+test('Googleの一時確認と思われる通知は金額を保持して要確認にする', () => {
+  for (const merchant of ['GOOGLE*WALLET TEMP', 'GOOGLE *WALLET TEMP', 'ＧＯＯＧＬＥ＊ＷＡＬＬＥＴ ＴＥＭＰ', 'GOOGLE *TEMPORARY HOLD']) {
+    const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+      `ご利用日時：2026/09/05 23:07\n${merchant}（買物） 200円`);
+    equal(result.amount, 200, '通知額を消した');
+    equal(result.usedDate, '2026-09-05', '利用日を失った');
+    equal(result.usedTime, '23:07', '時刻を失った');
+    equal(result.type, 'unknown', '購入と断定した');
+    equal(result.confident, false, '確定扱いにした');
+    assert(/一時的|確認/.test(result.note), '確認理由がない');
+  }
+});
+
+test('通常のGoogle購入や本文の一時確認の説明は保留通知と混同しない', () => {
+  for (const merchant of ['GOOGLE*YouTube', 'GOOGLE*WALLET TEMP STORE']) {
+    const result = parse('notice@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+      `ご利用日時：2026/09/05 23:07\n${merchant}（買物） 200円\nGOOGLE *TEMPORARY HOLDは確認用の場合があります。`);
+    equal(result.type, 'purchase', '別の購入を保留扱いにした');
+    equal(result.amount, 200, '金額を変えた');
+  }
+});
+
+test('カード会社が送る公演案内の開催日と料金を利用明細にしない', () => {
+  equal(parse('info@cr.mufg.jp', '＜限定50名＞11/4(水)受付開始！新春公演の講座付きチケット',
+    'いつもご利用いただきありがとうございます。\n開催日 2027年1月10日\n料金 1名様10,000円\nお早めにお申込みください。'), null, '案内の価格を支出にした');
+});
+
+test('利用取引ラベルの取消を注意書きではなく取引の種類として読む', () => {
+  for (const [operation, expected] of [['取消', 'cancel'], ['返金', 'refund'], ['買物', 'purchase']]) {
+    const result = parse('statement@vpass.ne.jp', 'ご利用のお知らせ【三井住友カード】',
+      `◇利用日：2026/10/13 09:31\n◇利用先：テスト店舗\n◇利用金額：1.00USD\n◇利用取引：${operation}\nキャンセルに関する説明です。`);
+    equal(result.type, expected, '取引区分を誤認した');
+    equal(result.amount, null, '外貨を円にした');
+    equal(result.confident, false, '外貨を確定扱いにした');
+  }
 });
 
 if (failures.length === 0) {
