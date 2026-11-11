@@ -5,7 +5,7 @@
   const yen = amount => `${amount < 0 ? '−' : ''}¥${Math.abs(amount).toLocaleString('ja-JP')}`;
   const groups = {
     'メイン': ['資金繰り・試算', '支払いの見通し', '予定', '記録', 'メール確認', '口座・カード', 'シフト・給与', 'レシート'],
-    'サブ': ['ふりかえり・ムダ支出', '定期支払い', '設定', '家計・共有', 'バックアップ・復元']
+    'サブ': ['ふりかえり・ムダ支出', '定期支払い', '設定']
   };
   let state = 'normal';
   let route = '資金繰り・試算';
@@ -33,8 +33,13 @@
   function fixture() {
     let balance = state === 'shortfall' ? 60000 : window.moneyOverview.primaryBalance();
     const opening = balance;
-    const rows = events.map(event => ({ ...event, balance: balance += event.amount }));
-    return { opening, rows, available: opening - 100000 - 20000 - 10000 };
+    const end = Date.UTC(2026, 10, 9 + window.moneyExtras.horizon() - 1);
+    const rows = events.filter(event => {
+      const [month, day] = event.date.split('/').map(Number);
+      return Date.UTC(2026, month - 1, day) <= end;
+    }).map(event => ({ ...event, balance: balance += event.amount }));
+    const reserve = window.moneyExtras.reserve();
+    return { opening, rows, reserve, available: opening - 100000 - 20000 - reserve };
   }
   function menu() {
     const count = window.moneyMail.pendingCount();
@@ -53,13 +58,14 @@
   }
   function render() {
     const data = fixture();
+    const [lastMonth, lastDay] = data.rows.at(-1).date.split('/');
     const blank = blankState();
     $('#balance-content').innerHTML = blank || `${banner()}
       <section class="sheet amount-sheet"><p class="date-label">11月15日（日）まで</p><p class="amount ${data.available < 0 ? 'negative' : ''}">${yen(data.available)}</p>${data.available < 0 ? '<p class="notice">不足</p>' : ''}</section>
-      <section class="sheet" data-calculation><h2 class="section-heading">金額の計算</h2><dl class="ledger"><div><dt>口座残高</dt><dd>${yen(data.opening)}</dd></div><div><dt>カード引落 · 11/10</dt><dd>−¥100,000</dd></div><div><dt>生活費 · 11/15まで</dt><dd>−¥20,000</dd></div><div><dt>予備額</dt><dd>−¥10,000</dd></div><div class="ledger-total"><dt>計</dt><dd>${yen(data.available)}</dd></div></dl></section>
+      <section class="sheet" data-calculation><h2 class="section-heading">金額の計算</h2><dl class="ledger"><div><dt>口座残高</dt><dd>${yen(data.opening)}</dd></div><div><dt>カード引落 · 11/10</dt><dd>−¥100,000</dd></div><div><dt>生活費 · 11/15まで</dt><dd>−¥20,000</dd></div><div><dt>予備額</dt><dd>${yen(-data.reserve)}</dd></div><div class="ledger-total"><dt>計</dt><dd>${yen(data.available)}</dd></div></dl></section>
       <section class="sheet"><h2 class="section-heading">確認事項</h2><button class="check-row" data-detail="account"><span>口座残高<small>確認日 11/8</small></span><span class="check-count">1口座 ›</span></button><button class="check-row" data-detail="bill"><span>請求額<small>12月分 · 見込み</small></span><span class="check-count">1件 ›</span></button><button class="check-row" data-route="メール確認"><span>メール</span><span class="check-count" data-mail-count>${window.moneyMail.pendingCount()}件 ›</span></button></section>`;
     $('#forecast-content').innerHTML = blank || `${banner()}
-      <section class="sheet"><p class="date-label">11月9日〜12月10日</p><div class="forecast-head"><p id="forecast-event" class="support">11/9 · 現在の口座残高</p><strong id="forecast-amount">${yen(data.opening)}</strong></div>${chart(data.rows)}${state === 'shortfall' ? '<span class="status danger">不足</span>' : ''}</section>
+      <section class="sheet"><p class="date-label">11月9日〜${lastMonth}月${lastDay}日</p><div class="forecast-head"><p id="forecast-event" class="support">11/9 · 現在の口座残高</p><strong id="forecast-amount">${yen(data.opening)}</strong></div>${chart(data.rows)}${state === 'shortfall' ? '<span class="status danger">不足</span>' : ''}</section>
       <section class="sheet"><h2 class="section-heading">入出金と残高</h2><div class="table-wrap"><table><thead><tr><th scope="col">日付 / 内容</th><th scope="col">入出金</th><th scope="col">残高</th></tr></thead><tbody>${data.rows.map(row => `<tr><td>${row.date}<br>${row.name}<small>${row.type}</small></td><td class="${row.amount > 0 ? 'income' : ''}">${row.amount ? (row.amount > 0 ? '+' : '') + yen(row.amount) : '—'}</td><td class="${row.balance < 0 ? 'negative' : ''}">${yen(row.balance)}</td></tr>`).join('')}</tbody></table></div></section>`;
     $('#announcement').textContent = $('#preview-state').selectedOptions[0].textContent;
     menu();
@@ -83,7 +89,7 @@
     });
     return `<svg class="forecast-chart" viewBox="0 0 340 240" role="img" aria-label="口座残高の棒グラフ">${ticks.join('')}${bars.join('')}</svg>`;
   }
-  const routeKeys = { '資金繰り・試算': 'cashflow', '支払いの見通し': 'forecast', 'メール確認': 'mail', '予定': 'plans', '記録': 'records', '口座・カード': 'accounts', 'シフト・給与': 'shift' };
+  const routeKeys = { '資金繰り・試算': 'cashflow', '支払いの見通し': 'forecast', 'メール確認': 'mail', '予定': 'plans', '記録': 'records', '口座・カード': 'accounts', 'シフト・給与': 'shift', 'レシート': 'receipts', 'ふりかえり・ムダ支出': 'review', '定期支払い': 'recurring', '設定': 'settings' };
   function closeSidebar() { $('#sidebar').close(); }
   function applyRoute() {
     $('#toast').classList.remove('visible');
@@ -92,10 +98,10 @@
     $('#screen-name').textContent = route;
     $('#page-title').textContent = route;
     for (const name of Object.values(routeKeys)) $('#' + name + '-screen').hidden = routeKeys[route] !== name;
-    $('#pending-screen').hidden = Boolean(routeKeys[route]);
     if (routeKeys[route] === 'mail') window.moneyMail.open();
     if (routeKeys[route] === 'plans') window.moneyPlans.open();
     window.moneyOverview[routeKeys[route]]?.();
+    window.moneyExtras[routeKeys[route]]?.();
     closeSidebar(); menu();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
@@ -142,5 +148,6 @@
     toastTimer = setTimeout(() => toast.classList.remove('visible'), 3200);
   });
   document.addEventListener('preview-accounts-change', render);
+  document.addEventListener('preview-settings-change', render);
   render(); applyRoute();
 })();

@@ -146,3 +146,12 @@ body.modal-open { overflow: hidden; }
 .mail-fields .asset-check { display: flex; align-items: center; gap: 8px; }
 .mail-fields .asset-check input { width: 20px; min-height: 20px; flex: none; }
 .account-card { overflow-wrap: anywhere; }
+.extra-toolbar { margin-bottom: 12px; }
+.extra-toolbar select, #review-screen select { max-width: 100%; border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 4px 8px; }
+.extra-actions { flex-wrap: wrap; gap: 4px 14px; }
+.extra-lines { margin-top: 10px; }
+.receipt-fields { min-width: 0; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.extra-members { list-style: none; padding: 0; margin: 0; overflow-wrap: anywhere; }
+#settings-screen details > summary { cursor: pointer; padding-block: 4px; }
+#settings-screen details[open] > summary { margin-bottom: 12px; }
+#settings-import { font-size: 13px; }

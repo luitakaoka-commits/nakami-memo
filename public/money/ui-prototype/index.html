@@ -9,11 +9,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="styles.css?v=edit-parity">
+  <link rel="stylesheet" href="styles.css?v=remaining-screens">
   <script src="mail.js?v=plans" defer></script>
   <script src="plans.js?v=edit-parity" defer></script>
   <script src="overview.js?v=edit-parity" defer></script>
-  <script src="app.js?v=edit-parity" defer></script>
+  <script src="extras.js?v=remaining-screens" defer></script>
+  <script src="app.js?v=remaining-screens" defer></script>
 </head>
 <body>
   <div class="prototype-notice">UI試作</div>
@@ -31,7 +32,10 @@
     <section id="records-screen" aria-label="記録" hidden></section>
     <section id="accounts-screen" aria-label="口座・カード" hidden></section>
     <section id="shift-screen" aria-label="シフト・給与" hidden></section>
-    <section id="pending-screen" hidden><p>未作成</p></section>
+    <section id="receipts-screen" aria-label="レシート" hidden></section>
+    <section id="review-screen" aria-label="ふりかえり・ムダ支出" hidden></section>
+    <section id="recurring-screen" aria-label="定期支払い" hidden></section>
+    <section id="settings-screen" aria-label="設定" hidden></section>
   </main>
   <details class="preview-tools"><summary>表示状態</summary><div class="tool-content"><label for="preview-state">状態</label><select id="preview-state"><option value="normal">通常</option><option value="shortfall">不足</option><option value="empty">データなし</option><option value="loading">読込中</option><option value="offline">オフライン</option><option value="error">エラー</option><option value="success">保存完了</option></select></div></details>
   <dialog id="sidebar" class="sidebar" aria-labelledby="sidebar-title">
@@ -69,6 +73,10 @@
   </dialog>
   <dialog id="asset-editor" class="detail-dialog" aria-labelledby="asset-editor-title">
     <div class="dialog-heading"><h2 id="asset-editor-title"></h2><button type="button" class="icon-button" data-asset-close aria-label="閉じる">×</button></div>
+    <form class="mail-fields"></form>
+  </dialog>
+  <dialog id="extra-editor" class="detail-dialog" aria-labelledby="extra-editor-title">
+    <div class="dialog-heading"><h2 id="extra-editor-title"></h2><button type="button" class="icon-button" data-extra-close aria-label="閉じる">×</button></div>
     <form class="mail-fields"></form>
   </dialog>
   <div id="toast" class="toast" role="status"></div>

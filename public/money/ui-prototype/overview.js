@@ -154,7 +154,7 @@
     const entries = work.filter(item => item.date.startsWith(shiftMonth)).sort((a,b) => a.date.localeCompare(b.date));
     const total = entries.reduce((sum, item) => sum + item.hours, 0);
     const planned = entries.reduce((sum, item) => sum + (item.status === 'planned' ? item.hours : 0), 0);
-    const estimated = entries.reduce((sum, item) => sum + Math.round(item.hours * (item.rate || 1250)), 0);
+    const estimated = entries.reduce((sum, item) => sum + Math.round(item.hours * (item.rate || window.moneyExtras.hourlyRate())), 0);
     shifts.innerHTML = `<section class="sheet plan-calendar" aria-label="シフトカレンダー">${pager(shiftMonth)}
       <div class="plan-grid">${[...'日月火水木金土'].map(label => `<span>${label}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(offset)}
       ${Array.from({ length: last }, (_, i) => {
@@ -164,7 +164,7 @@
       }).join('')}</div></section>
       <div class="shift-totals"><section class="sheet"><h2>給与見込み額</h2><strong>${yen(estimated)}</strong></section><section class="sheet"><h2>予定勤務時間</h2><strong>${planned}時間</strong><p class="support">勤務済み ${total - planned}時間</p></section></div>
       <section class="sheet"><div class="plan-toolbar"><h2>シフト一覧</h2><button type="button" class="text-button" data-shift-add>シフトを追加</button></div>${entries.map(item =>
-        `<article class="plan-row"><div class="plan-toolbar"><strong>${item.date.replaceAll('-', '/')}</strong><strong>${item.hours}時間</strong></div><p class="support">${item.status === 'worked' ? '勤務済み' : '勤務予定'} · ${yen(item.rate || 1250)}／時${item.memo ? ' · ' + escape(item.memo) : ''}</p>${actions('work', work.indexOf(item))}</article>`).join('') || '<p class="support">シフトなし</p>'}</section>`;
+        `<article class="plan-row"><div class="plan-toolbar"><strong>${item.date.replaceAll('-', '/')}</strong><strong>${item.hours}時間</strong></div><p class="support">${item.status === 'worked' ? '勤務済み' : '勤務予定'} · ${yen(item.rate || window.moneyExtras.hourlyRate())}／時${item.memo ? ' · ' + escape(item.memo) : ''}</p>${actions('work', work.indexOf(item))}</article>`).join('') || '<p class="support">シフトなし</p>'}</section>`;
   }
 
   records.addEventListener('click', event => {
