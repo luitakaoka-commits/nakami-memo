@@ -1407,3 +1407,56 @@ h1, h2, .nav-link, .topbar-title, .page-heading h1, .card h2, .settings-card h2,
 body:has(.card-detail-nav) .floating-add { bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
 body:has(.card-detail-nav) .main { padding-bottom: calc(8.5rem + env(safe-area-inset-bottom)); }
 #review, #recurring { scroll-margin-top: 8rem; }
+
+/* Shared visual structure with the approved money prototype. */
+.prototype-flow, .money-flow-dialog { --paper: #fffdf8; --soft: #f4efe6; --brand: #713745; --danger: #a3373b; --space-md: 20px; --space-lg: 28px; --radius: 20px; --weight-label: 500; }
+.prototype-flow { max-width: 560px; margin-inline: auto; }
+.prototype-flow .page-heading h1 { margin: 0; font-size: clamp(23px, 6vw, 30px); line-height: 1.5; }
+.prototype-flow .daily-hero { background: var(--surface); color: var(--ink); }
+.prototype-flow .sheet h2 { font-size: 18px; margin-top: 0; }
+.prototype-flow .sheet .amount { margin: 14px 0 10px; }
+.prototype-flow .sheet .check-row { min-height: 44px; }
+.prototype-flow .sheet .check-row span { overflow-wrap: anywhere; }
+.money-flow-dialog { width: min(90vw, 480px); max-height: 85dvh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; background: var(--paper); color: var(--ink); }
+.money-flow-dialog::backdrop { background: #241b25a3; }
+.money-flow-dialog .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.money-flow-dialog .amount { font-size: clamp(36px, 11.8vw, 56px); margin: 18px 0 4px; }
+.money-flow-dialog [data-flow-close].button { margin-top: 20px; }
+.money-flow-dialog .ledger > div { display: flex; justify-content: space-between; gap: 12px; padding-block: 8px; }
+.money-flow-dialog .ledger dd { margin: 0; }
+@media (max-width: 350px) { .prototype-flow .sheet { padding: 16px; } }
+.prototype-flow .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-md); margin-bottom: var(--space-md); }
+.prototype-flow .amount-sheet { padding-block: var(--space-lg); border-color: var(--brand); }
+.prototype-flow .date-label { display: inline-block; color: var(--brand); font-size: 14px; font-weight: var(--weight-label); }
+.prototype-flow .amount { font-size: clamp(36px, 11.8vw, 56px); line-height: 1.4; letter-spacing: -.035em; margin: 14px 0 10px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.prototype-flow .negative { color: var(--danger); }
+.prototype-flow .section-heading { margin-bottom: 12px; }
+.prototype-flow .ledger { margin: 0; }
+.prototype-flow .ledger > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-block: 8px; font-size: 13px; }
+.prototype-flow .ledger dt { min-width: 0; }
+.prototype-flow .ledger dd { margin: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.prototype-flow .ledger .ledger-total { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 12px; font-weight: var(--weight-label); }
+.prototype-flow .check-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 12px 0; border: 0; border-top: 1px solid var(--line); text-align: left; background: transparent; }
+.prototype-flow .check-row:first-of-type { border-top: 0; }
+.prototype-flow .check-row small { display: block; color: var(--muted); font-size: 12px; font-weight: var(--weight-body); }
+.prototype-flow .check-count { flex-shrink: 0; color: var(--brand); font-size: 13px; white-space: nowrap; }
+.prototype-flow .check-row:hover { color: var(--brand); }
+
+.money-sidebar { width: min(86vw, 340px); padding: 24px 20px; }
+.money-sidebar .sidebar-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 4px; }
+.money-sidebar .sidebar-heading h2 { margin: 0; }
+.money-sidebar .menu-group-title { font-size: 11px; color: var(--muted); margin: 18px 12px 6px; }
+.money-sidebar .menu-link { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; min-height: 48px; border: 0; background: transparent; text-align: left; font-size: 14px; white-space: nowrap; border-radius: 10px; }
+.money-sidebar .menu-link svg { width: 24px; height: 24px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.money-sidebar .menu-link .menu-icon-blue { fill: #2873bf; stroke: none; }
+.money-sidebar .menu-link .menu-icon-red { fill: #c53c45; stroke: none; }
+.money-sidebar .menu-badge { margin-left: auto; font-size: 11px; color: var(--ledger-brand); }
+.plan-view-toolbar, .forecast-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.forecast-head strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+
+.prototype-flow .mail-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 12px; }
+.prototype-flow .mail-tabs button { min-height: 44px; padding: 4px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 13px; }
+.prototype-flow .mail-tabs button[aria-pressed="true"] { border-bottom: 2px solid var(--brand); color: var(--brand); }
+.prototype-flow .candidate-row { display: grid; margin-bottom: 14px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.prototype-flow .candidate-edit-fields { grid-template-columns: minmax(0, 1fr); }
+.prototype-flow .candidate-edit-fields input, .prototype-flow .candidate-edit-fields select { min-height: 44px; font-size: 16px; }

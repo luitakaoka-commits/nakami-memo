@@ -14,7 +14,7 @@ const APP_PATH = process.env.APP_PATH || '/money/index.html';
 // 実行日のままにすると、日付が進むたびに黙って落ちる。
 const TODAY = '2026-09-02T09:00:00+09:00';
 const STUB = fs.readFileSync(process.env.STUB_PATH || path.join(__dirname, 'stub-firebase-sync.js'), 'utf8');
-const PORT = 8791;
+const PORT = Number(process.env.MONEY_UI_PORT || 8791);
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
@@ -105,9 +105,32 @@ const closeModals = page => page.evaluate(() => {
   await page.goto(`http://localhost:${PORT}${APP_PATH}`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => Boolean(window.__YORYOKU__), null, { timeout: 10000 }).catch(() => {});
 
+  await record('approved_cashflow_layout', async () => {
+    const sections = page.locator('[data-daily-home] > .sheet');
+    assert(await sections.count() === 3, '資金繰りの3つの枠が揃っていない');
+    assert((await sections.nth(0).innerText()).includes('9月15日'), '締め日が金額の上にない');
+    assert((await sections.nth(1).locator('h2').innerText()) === '金額の計算', '計算内訳が独立した枠にない');
+    assert((await sections.nth(2).locator('h2').innerText()) === '確認事項', '確認事項の枠がない');
+    const toAmount = text => Number(text.replace(/−/g, '-').replace(/[^\d-]/g, ''));
+    const shown = toAmount(await sections.nth(0).locator('.amount').innerText());
+    const values = await sections.nth(1).locator('dd').allTextContents();
+    assert(shown === -10000 && toAmount(values.at(-1)) === shown && values.slice(0, -1).map(toAmount).reduce((a, b) => a + b, 0) === shown, '内訳が試算額と一致しない');
+    await sections.nth(2).locator('[data-action="prototype-account"]').click();
+    const detail = page.locator('#money-flow-dialog');
+    assert(await detail.isVisible(), '口座残高の詳細が開かない');
+    await detail.locator('.note-mark').click();
+    assert((await detail.locator('.note-glass').innerText()).includes('銀行の残高は未確認'), '残高の説明が開かない');
+    await detail.locator('[data-flow-close]').last().click();
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-page="cashflow"]').click();
+    assert(await page.locator('.forecast-bars .forecast-zero').count() === 1, '見通しの棒グラフが表示されない');
+    assert(await page.getByRole('heading', { name: '入出金と残高' }).isVisible(), '見通しの表が表示されない');
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+  });
+
   await record('initial_render', async () => {
     assert(await page.isVisible('#app-shell'), 'app-shell が表示されていない');
-    assert((await page.textContent('#page-title')).trim() === 'ホーム', 'ホームが表示されていない');
+    assert((await page.textContent('#page-title')).trim() === '資金繰り・試算', '資金繰り・試算が表示されていない');
     const migrated = await page.evaluate(() => {
       const state = window.__YORYOKU__.getState();
       const oldCard = state.transactions.find(item => item.id === 't1');
@@ -122,13 +145,11 @@ const closeModals = page => page.evaluate(() => {
   });
 
   await record('home_cashflow_status', async () => {
-    const card = page.locator('.cashflow-status-card');
-    assert(await card.count() === 1, 'ホームに将来の見通しがない');
-    assert(await card.evaluate(el => ['good', 'warn', 'bad'].some(name => el.classList.contains(name))), '状態に応じた色がない');
-    assert(!/¥|円/.test(await card.innerText()), 'ホームの将来の見通しに金額が表示されている');
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'スマホ画面が横にはみ出している');
-    await card.click();
-    assert((await page.textContent('#page-title')).trim() === '支払い能力チェック', '詳細画面を開けない');
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-page="cashflow"]').click();
+    assert((await page.textContent('#page-title')).trim() === '支払いの見通し', '詳細画面を開けない');
+    await page.getByText('引落の内訳', { exact: true }).click();
     assert(await page.locator('.check-hero .stat-card').count() > 0, '詳細画面に金額の内訳がない');
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
   });
@@ -147,10 +168,7 @@ const closeModals = page => page.evaluate(() => {
     // 基準口座30万円−家賃8万円−カード8万円−予備15万円。別口座や予定給与は足さない。
     const dailyShown = (await page.locator('.daily-amount').innerText()).replace(/−/g, '-').replace(/[^0-9-]/g, '');
     assert(dailyShown === '-10000', `余力が基準口座と保守的な計算に一致しない: ${dailyShown}`);
-    await page.locator('[data-page="daily"]').click();
-    assert((await page.locator('.daily-formula').first().innerText()).includes('締め日後'), '後日の引落を確保する理由がない');
-    assert((await page.locator('#page-title').innerText()) === '余力の内訳', '余力の内訳を開けない');
-    const guidance = page.locator('.operation-note');
+    const guidance = page.locator('[data-calculation] .operation-note');
     const note = guidance.locator('.note-glass');
     assert(!(await note.isVisible()), '使える額の説明が初期状態で開いている');
     await guidance.locator('.note-mark').click();
@@ -159,7 +177,7 @@ const closeModals = page => page.evaluate(() => {
     assert(!(await note.isVisible()), 'キーボードで説明を閉じられない');
     try {
       await page.evaluate(() => window.__YORYOKU__.setImportCandidates([{ id: 'daily-live', status: 'pending', type: 'purchase', amount: 1000, usedDate: '2026-09-02' }]));
-      assert((await page.locator('.daily-checks').innerText()).includes('メールの未確認候補 1件'), '内訳画面でメール候補の更新が即時反映されない');
+      assert((await page.locator('.daily-checks').innerText()).includes('1件 ›'), '内訳画面でメール候補の更新が即時反映されない');
     } finally {
       await page.evaluate(() => window.__YORYOKU__.setImportCandidates([]));
     }
@@ -190,15 +208,18 @@ const closeModals = page => page.evaluate(() => {
       await page.evaluate(() => window.__YORYOKU__.setPage('home'));
       assert(await page.locator('.daily-checks [data-check="imports"]').count() === 0, '未確認0件を確認待ちとして表示している');
       assert(await page.locator('.daily-checks [data-page="settings"]').count() === 0, '未検出の支払いを確認待ちとして表示している');
-      assert((await page.locator('.daily-periods').innerText()).includes('確保する支払い'), '使う期限と支払いを確保する期限が分離されていない');
-      await page.locator('[data-check="accounts"]').click();
+      await page.locator('[data-calculation] .note-mark').click();
+      assert((await page.locator('[data-calculation] .note-glass').innerText()).includes('までの支払い額'), '使う期限と支払いを確保する期限が分離されていない');
+      await page.locator('[data-action="prototype-account"]').click();
+      await page.locator('#money-flow-dialog [data-check="accounts"]').click();
       assert(await page.evaluate(() => window.scrollY) === 0, '移動先が元のスクロール位置のままで見出しが隠れる');
       assert(await page.locator('[data-check-item="account"]').count() === 3, '未確認の口座だけを表示できない');
       await page.locator('[data-check-item="account"] [data-action="edit-account"]').first().click();
       assert(await page.locator('#account-name').inputValue() === '生活費口座', '対象口座の編集へ直接つながらない');
       await closeModals(page);
       await page.evaluate(() => window.__YORYOKU__.setPage('home'));
-      await page.locator('[data-check="bills"]').click();
+      await page.locator('[data-action="prototype-bills"]').click();
+      await page.locator('#money-flow-dialog [data-check="bills"]').click();
       assert(await page.locator('[data-check-item="bill"]').count() === 2, '未確認の請求だけを表示できない');
       assert((await page.locator('[data-check-item="bill"]').first().innerText()).includes('引落'), '請求の対象日が分からない');
       const selectedId = await page.locator('[data-check-item="bill"] [data-action="edit-event"]').first().getAttribute('data-id');
@@ -236,7 +257,7 @@ const closeModals = page => page.evaluate(() => {
         window.__YORYOKU__.setPage('home');
       });
       assert(await page.locator('.daily-checks .daily-check').count() === 0, '確認待ちがないのにリンクを作っている');
-      assert((await page.locator('.daily-checks').innerText()).includes('確認待ちの項目はありません'), '確認完了後の説明がない');
+      assert((await page.locator('.daily-checks').innerText()).includes('0件 ›'), '確認待ちがないときの件数が正しくない');
     } finally {
       await closeModals(page);
       await page.evaluate(s => { Object.assign(window.__YORYOKU__.getState(), s); window.__YORYOKU__.setPage('home'); }, snapshot);
@@ -251,22 +272,25 @@ const closeModals = page => page.evaluate(() => {
       await page.locator('#settings-horizon').selectOption('30');
       await page.locator('#settings-form [type="submit"]').click();
       await page.evaluate(() => window.__YORYOKU__.setPage('home'));
-      assert((await page.locator('.cashflow-status-card').innerText()).includes('30日の支払い'), 'ホームに30日の設定が反映されない');
       // 30日では10/13のカード5万円を期間外とし、基準口座30万−家賃8万−9月カード3万−予備15万。
       const shown = (await page.locator('.daily-amount').innerText()).replace(/−/g, '-').replace(/[^0-9-]/g, '');
       assert(shown === '40000', `期間外の支払いが余力に残っている: ${shown}`);
-      await page.locator('.cashflow-status-card').click();
+      await page.locator('#menu-button').click();
+      await page.locator('#sidebar [data-page="cashflow"]').click();
+      await page.getByText('引落の内訳', { exact: true }).click();
       assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('9/2〜10/1・30日間'), '予測終了日と日数が設定に一致しない');
-      assert(!(await page.locator('.timeline-table tbody').innerText()).includes('10/13'), '期間外の引落が残高表に残っている');
+      assert(!(await page.locator('[data-debit-assessment] .timeline-table tbody').innerText()).includes('10/13'), '期間外の引落が残高表に残っている');
       await page.reload({ waitUntil: 'networkidle' });
       await page.waitForFunction(() => Boolean(window.__YORYOKU__));
       assert(await page.evaluate(() => window.__YORYOKU__.getState().settings.cashflowHorizonDays) === 30, '再読込で期間設定が失われる');
       await page.evaluate(() => window.__YORYOKU__.setPage('cashflow'));
+      await page.getByText('引落の内訳', { exact: true }).click();
       assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('30日間'), '再読込後の画面が90日へ戻る');
       await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
       await page.locator('#settings-horizon').selectOption('90');
       await page.locator('#settings-form [type="submit"]').click();
       await page.evaluate(() => window.__YORYOKU__.setPage('cashflow'));
+      await page.getByText('引落の内訳', { exact: true }).click();
       assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('9/2〜11/30・90日間'), '90日に戻しても反映されない');
     } finally {
       await page.evaluate(s => {
@@ -287,7 +311,7 @@ const closeModals = page => page.evaluate(() => {
     assert(result.total === expected, `今使える金額が式と一致しない: ${result.total} != ${expected}`);
     assert(result.unpaidCardTotal === 80000, `未払いカードが想定と違う: ${result.unpaidCardTotal}`);
     assert(result.cashAvailable === 340000, '貯金口座が現金に含まれている');
-    const shown = await page.textContent('.hero-card h1');
+    const shown = await page.textContent('.daily-amount');
     assert(shown.replace(/[^0-9-]/g, '').length > 0, 'ホームに金額が表示されていない');
   });
 
@@ -310,7 +334,7 @@ const closeModals = page => page.evaluate(() => {
     await page.waitForSelector('.timeline-table tbody tr');
     const rows = await page.$$eval('.timeline-table tbody tr', nodes => nodes.length);
     assert(rows > 0, '残高推移が表示されていない');
-    assert((await page.textContent('#page-title')).trim() === '支払い能力チェック', 'ページタイトルが違う');
+    assert((await page.textContent('#page-title')).trim() === '支払いの見通し', 'ページタイトルが違う');
   });
 
   await record('salary_payment_date', async () => {
@@ -365,8 +389,8 @@ const closeModals = page => page.evaluate(() => {
 
   await record('candidate_not_counted_before_approval', async () => {
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
-    await page.getByRole('button', { name: 'メール取込を確認', exact: true }).click();
-    assert(await page.getByRole('heading', { name: '通知・メールからの取込候補' }).isVisible(), '未確認0件のホームから取込候補を確認できない');
+    await page.locator('.daily-checks [data-page="imports"]').click();
+    assert(await page.getByRole('heading', { name: 'メール確認' }).isVisible(), '未確認0件のホームから取込候補を確認できない');
     assert(await page.locator('[data-mail-section="pending"]').getAttribute('aria-pressed') === 'true', '最初に未取り込みが表示されない');
     await page.locator('.candidate-list').evaluate(node => {
       const swipe = (type, field, clientX) => {
@@ -391,8 +415,8 @@ const closeModals = page => page.evaluate(() => {
     assert(before.spendable === after.spendable, '承認前の候補が今使える金額に反映されている');
     assert(before.min === after.min, '承認前の候補が支払い能力チェックに反映されている');
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
-    assert((await page.locator('.home-mail-import').innerText()).includes('未確認の取込候補が3件'), 'ホームの未確認件数が更新されていない');
-    await page.getByRole('button', { name: 'メール取込を確認', exact: true }).click();
+    assert((await page.locator('.daily-checks [data-page="imports"]').innerText()).includes('3件 ›'), 'ホームの未確認件数が更新されていない');
+    await page.locator('.daily-checks [data-page="imports"]').click();
     await page.waitForSelector('.candidate-row');
     const rows = await page.$$eval('.candidate-row', nodes => nodes.length);
     assert(rows === 3, `候補の表示件数が違う: ${rows}`);
@@ -679,8 +703,7 @@ const closeModals = page => page.evaluate(() => {
     assert(await day.getAttribute('aria-pressed') === 'true', 'カレンダーの日付を選べない');
     assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '日付を選んだ予定に明細が混ざっている');
     await day.click();
-    await page.locator('#menu-button').click();
-    await page.locator('#sidebar [data-plan-section="details"]').click();
+    await page.locator('.plan-view-toolbar [data-plan-section="details"]').click();
     assert(await page.locator('.card-detail-nav').isVisible(), '明細のカード切替が表示されない');
     assert(await page.locator('#detail-period').isVisible(), '利用期間を選べない');
     assert(await page.locator('[data-plan-detail-card="c1"]').count() === 1, '1枚目のカードが選べない');
@@ -1382,6 +1405,7 @@ const closeModals = page => page.evaluate(() => {
       const other = page.locator('.candidate-row').filter({ has: page.locator(`[data-id="${id}"]`) });
       assert(await other.locator('[data-candidate-card]').inputValue() === '', '異なる差出人または種類不明に対応を使った');
     }
+    await page.getByText('メールとカードの対応', { exact: true }).click();
     await page.locator('[data-action="forget-candidate-card"]').click();
     assert(await row.locator('[data-candidate-card]').inputValue() === '', '解除した対応が残っている');
   });
@@ -1648,6 +1672,7 @@ const closeModals = page => page.evaluate(() => {
       api.setPage('cashflow');
     });
     try {
+      await page.getByText('引落の内訳', { exact: true }).click();
       const result = await page.locator('[data-debit-assessment]').innerText();
       assert(result.includes('不足の見込み') && result.includes('引落口座A') && result.includes('55,000'), '同日同口座を合算して不足判定できていない');
       assert(result.includes('引落口座B') && result.includes('10,000'), '別口座の請求を分離していない');

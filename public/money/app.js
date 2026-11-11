@@ -676,7 +676,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=92" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=93" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -717,8 +717,11 @@
 
   function renderPage() {
     detailCache = new Map();
-    const titles = { home: 'ホーム', daily: '余力の内訳', checks: '確認すること', plans: '予定', records: '記録', accounts: '口座', shift: 'シフト', settings: '設定', spendable: '今使える金額', cashflow: '支払い能力チェック', imports: '取込候補' };
+    const titles = { home: '資金繰り・試算', daily: '余力の内訳', checks: '確認すること', plans: '予定', records: recordTab === 'receipts' ? 'レシート' : '記録', accounts: '口座・カード', shift: 'シフト・給与', settings: '設定', spendable: '今使える金額', cashflow: '支払いの見通し', imports: 'メール確認' };
     $('#page-title').textContent = titles[currentPage] || titles.home;
+    const pending = pendingCandidates().length;
+    $('#money-mail-count').hidden = pending === 0;
+    $('#money-mail-count').textContent = `${pending}件`;
     $$('.nav-link[data-page]').forEach(button => {
       const active = button.dataset.page === currentPage && !button.dataset.sectionTarget
         && (currentPage !== 'plans' || (button.dataset.planSection || 'all') === planFilter)
@@ -730,7 +733,6 @@
     const renderers = { home: renderHome, daily: renderDailyDetails, checks: renderDailyCheckDetails, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
     const warning = ['home', 'daily', 'checks', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
     $('#page-container').innerHTML = warning + renderers[currentPage]();
-    if (currentPage === 'home') requestAnimationFrame(animateHeroAmount);
     if (currentPage === 'spendable') requestAnimationFrame(() => {
       animateHeroAmount();
       updateWhatIf(whatIfAmount);
@@ -997,29 +999,22 @@
   function renderHome() {
     let view;
     try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
-    const { allowance: amount, assessment, period, primary } = view;
-    const status = DAILY_STATUS[assessment.futureStatus];
-    const next = DAILY_STATUS[assessment.nextStatus];
-    if (typeof window.__appStatus === 'function') window.__appStatus(`資金繰り：${status.label}`);
-    return `<div class="daily-home" data-daily-home>
-      <div class="daily-heading"><span class="eyebrow">${formatDate(today(), true)}</span><h1>資金繰り・試算</h1></div>
-      <section class="card hero-card daily-hero">
-        <h2>使える額</h2><h1 class="daily-amount ${amount.amount < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(amount.amount)}</h1>
-        <dl class="daily-periods"><div><dt>使う期間</dt><dd>今日〜${formatDate(period.deadline, true)}の締め日</dd></div><div><dt>確保する支払い</dt><dd>今日〜${formatDate(amount.endDate, true)}</dd></div></dl>
-        ${amount.endDate !== view.endDate ? '<p class="form-note">設定した予測期間より締め日が後のため、余力は締め日までの支払いを確保しています。</p>' : ''}
-        ${amount.amount < 0 ? `<p class="daily-caution">支払い額と予備額を確保すると、${formatAbsoluteYen(amount.amount)}不足する見込みです。</p>` : ''}
-        <button class="button button-primary" data-page="daily">金額の理由を見る <span aria-hidden="true">↗</span></button>
-        <small>残高の確認日：${view.scenario.accounts.find(a => a.id === primary.id)?.balanceVerified ? formatDate(primary.balanceEvidence.date, true) : '未確認'}<br>基準カード：${view.selectedCards.map(c => esc(c.name)).join('・')}</small>
-      </section>
-      <button type="button" class="card cashflow-status-card daily-outlook ${status.tone}" data-page="cashflow">
-        <span class="cashflow-status-top"><span class="eyebrow">これから${view.horizonDays}日の支払い</span><span class="cashflow-status-action">詳しく見る ›</span></span>
-        <span class="cashflow-status-title"><span class="status-dot" aria-hidden="true"></span>${status.label}</span>
-        <span class="cashflow-status-detail">${assessment.futureStatus === 'shortfall' ? '登録済みの支払いと追加の可能額を見込むと、足りなくなる日があります。' : '予定入金への依存や、未確認の記録を含めて確認します。'} ${formatDate(view.endDate)}まで</span>
-      </button>
-      <section class="card daily-next"><div><span class="eyebrow">次のカード引落</span><h2>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '引落予定を確認'}</h2></div><span class="status-pill ${next.tone}">${next.label}</span><p>同じ日の請求は口座ごとにまとめて判定します。予定入金が間に合うかも確認してください。</p><button class="button button-quiet" data-page="cashflow">引落の内訳</button></section>
-      ${renderDailyChecks(view)}
-      <div class="daily-quick"><button class="button button-primary" data-action="add-event" data-kind="payment">支出を記録</button><button class="button button-quiet" data-page="accounts">残高を確認</button></div>
-      ${renderMailImportPrompt()}${renderReviewPrompt()}
+    const { allowance, primary, period } = view;
+    if (typeof window.__appStatus === 'function') window.__appStatus(`資金繰り：${DAILY_STATUS[view.assessment.futureStatus].label}`);
+    const shortage = allowance.amount < 0;
+    const paymentRows = allowance.paymentEvents.slice().sort((a, b) => a.date.localeCompare(b.date)).map(event => {
+      const original = state.transactions.find(item => item.id === event.id.replace(/^legacy:/, ''));
+      const label = original?.memo || (event.cardPayment ? 'カード引落' : event.kind === 'transfer' ? '振替' : '支払い');
+      return `<div><dt>${esc(label)} · ${formatDate(event.date)}</dt><dd>${formatDisplayedAmount(-event.amount - (event.additionalPossible || 0))}</dd></div>`;
+    }).join('');
+    const note = `${formatDate(period.deadline)}までに使える額の目安です。${formatDate(allowance.endDate)}までの支払い額と予備額は差し引いてあります。入金予定額は含みません。`;
+    const verified = view.scenario.accounts.find(account => account.id === primary.id)?.balanceVerified;
+    const accountDetail = verified ? `確認日 ${formatDate(primary.balanceEvidence.date)}` : '銀行残高は未確認';
+    return `<div class="prototype-flow daily-home" data-daily-home>
+      <div class="page-heading"><div><p class="eyebrow">${formatDate(today(), true)}</p><h1>資金繰り・試算</h1></div></div>
+      <section class="sheet amount-sheet daily-hero"><p class="date-label">${formatDate(period.deadline, true)}まで</p><p class="amount daily-amount${shortage ? ' negative' : ''}">${formatDisplayedAmount(allowance.amount)}</p>${shortage ? renderGuidance('説明', `支払い額と予備額を確保すると、${formatAbsoluteYen(allowance.amount)}不足する見込みです。`) : ''}</section>
+      <section class="sheet" data-calculation><h2 class="section-heading">金額の計算</h2>${renderGuidance('説明', note)}<dl class="ledger"><div><dt>口座残高</dt><dd>${formatDisplayedAmount(allowance.openingBalance)}</dd></div>${paymentRows}<div><dt>予備額</dt><dd>${formatDisplayedAmount(-allowance.reserve)}</dd></div><div class="ledger-total"><dt>計</dt><dd>${formatDisplayedAmount(allowance.amount)}</dd></div></dl></section>
+      <section class="sheet daily-checks"><h2 class="section-heading">確認事項</h2><button class="check-row" data-action="prototype-account"><span>口座残高<small>${esc(accountDetail)}</small></span><span class="check-count">${state.accounts.length}口座 ›</span></button><button class="check-row" data-action="prototype-bills"><span>請求額</span><span class="check-count">${view.unconfirmedBills}件 ›</span></button><button class="check-row" data-page="imports"><span>メール</span><span class="check-count">${view.pending}件 ›</span></button></section>
     </div>`;
   }
 
@@ -1337,16 +1332,13 @@
       }).join('');
 
     return `
-      <div class="page-heading"><div><span class="eyebrow">取込候補</span><h1>通知・メールからの取込候補</h1></div><button class="button button-quiet button-small" data-page="settings">設定へ戻る</button></div>
-      <section class="card info-card">
-        <div class="filters" role="group" aria-label="メールの状態">${MAIL_SECTIONS.map(([value, label]) => `<button type="button" class="filter-button ${value === mailSection ? 'active' : ''}" data-mail-section="${value}" aria-pressed="${value === mailSection}">${label}</button>`).join('')}</div>
-        ${mailSection === 'pending' ? renderGuidance('取り込みについて', 'まだ取り込んでいない候補は試算に含まれていません。カード、金額、日付と内容を確認してください。') : ''}
-      </section>
-      <section class="card info-card"><h2>メールとカードの対応</h2><p class="check-detail">候補でカードを選び「このカードの対応を覚える」を押すと、同じ差出人とカード名の候補に選択を表示します。種類が特定できない通知は覚えられません。</p>${(Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : []).map((item, i) => `<div>${esc(item.hint)} → ${esc(state.cards.find(card => card.id === item.cardId)?.name || '削除されたカード')} <button class="mini-button" data-action="forget-candidate-card" data-index="${i}">対応を解除</button></div>`).join('')}</section>
-      <section class="card list-card">
-        <div class="list-card-header"><div><span class="eyebrow">${pendingCandidates().length}件が未確認</span><h2>候補一覧</h2></div></div>
-        <div class="candidate-list">${rows || emptyBlock('取込候補はありません', 'カード利用のお知らせメールが取り込まれると、ここに表示されます。')}</div>
-      </section>`;
+      <div class="prototype-flow">
+        <div class="page-heading"><div><p class="eyebrow">${formatDate(today(), true)}</p><h1>メール確認</h1></div></div>
+        <div class="mail-tabs" role="group" aria-label="メールの状態">${MAIL_SECTIONS.map(([value, label]) => `<button type="button" data-mail-section="${value}" aria-pressed="${value === mailSection}">${label}</button>`).join('')}</div>
+        ${mailSection === 'pending' && rows ? renderGuidance('説明', 'まだ取り込んでいない候補は試算に含まれていません。カード、金額、日付と内容を確認してください。') : ''}
+        <div class="candidate-list">${rows || '<p class="sheet">0件</p>'}</div>
+        ${state.settings.mailCardMappings?.length ? `<details class="sheet"><summary>メールとカードの対応</summary>${state.settings.mailCardMappings.map((item, i) => `<div>${esc(item.hint)} → ${esc(state.cards.find(card => card.id === item.cardId)?.name || '削除されたカード')} <button class="mini-button" data-action="forget-candidate-card" data-index="${i}">対応を解除</button></div>`).join('')}</details>` : ''}
+      </div>`;
   }
 
   /** 候補を正式なカード取引へ変換する。承認するまで計算には含めない。 */
@@ -2427,7 +2419,7 @@
       const x = 56 + index * (width - 56) / points.length;
       return `<rect x="${x}" y="${y(Math.max(0, point.value))}" width="24" height="${Math.abs(y(0) - y(point.value))}" class="${point.value < 0 ? 'forecast-negative' : 'forecast-positive'}"><title>${formatDate(point.date)} ${formatDisplayedAmount(point.value)}</title></rect><text x="${x + 12}" y="190" text-anchor="middle">${formatDate(point.date)}</text>`;
     });
-    return `<section class="card daily-details"><h2>予測残高</h2><p>${esc(view.primary.name)}</p><div class="table-scroll"><svg class="forecast-bars" role="img" aria-label="${esc(view.primary.name)}の予測残高。${esc(points.map(point => `${formatDate(point.date)} ${formatDisplayedAmount(point.value)}`).join('、'))}" width="${width}" height="200" viewBox="0 0 ${width} 200">${ticks.join('')}${bars.join('')}</svg></div></section>`;
+    return `<div class="table-scroll"><svg class="forecast-bars" role="img" aria-label="${esc(view.primary.name)}の予測残高。${esc(points.map(point => `${formatDate(point.date)} ${formatDisplayedAmount(point.value)}`).join('、'))}" width="${width}" height="200" viewBox="0 0 ${width} 200">${ticks.join('')}${bars.join('')}</svg></div>`;
   }
 
   function renderCashflow() {
@@ -2447,14 +2439,25 @@
     const timeline = assessment.timeline.map(row => `<tr><td>${formatDate(row.date)}</td><td>${esc(accountName(row.accountId))}</td><td class="num">${formatAbsoluteYen(row.cardAmount + row.cardAdditionalPossible)}</td><td class="num">${formatDisplayedAmount(row.projectedBalance)}</td><td>${DAILY_STATUS[row.status].label}</td></tr>`).join('');
     const reasonsShown = [...new Set(assessment.issues.map(issue => reasons[issue.type]).filter(Boolean))];
     const shortfall = assessment.issues.find(issue => issue.type === 'projected_shortfall');
-    return `<div class="daily-home"><div class="page-heading"><h1>支払いの見通し</h1><button class="button button-quiet" data-page="home">ホームへ</button></div>
+    const first = assessment.balancesByDate[0];
+    const forecastRows = assessment.balancesByDate.map((point, index) => {
+      const value = point.balances[view.primary.id];
+      const previous = assessment.balancesByDate[index - 1]?.balances[view.primary.id];
+      return `<tr><td>${formatDate(point.date)}${index === 0 ? '<br>現在の口座残高' : ''}</td><td>${index ? formatSigned(value - previous) : '—'}</td><td class="${value < 0 ? 'negative' : ''}">${formatDisplayedAmount(value)}</td></tr>`;
+    }).join('');
+    return `<div class="prototype-flow daily-home"><div class="page-heading"><div><p class="eyebrow">${formatDate(today(), true)}</p><h1>支払いの見通し</h1></div></div>
+      <section class="sheet"><p class="date-label">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}</p><div class="forecast-head"><p>${formatDate(first.date)} · 現在の口座残高</p><strong>${formatDisplayedAmount(first.balances[view.primary.id])}</strong></div>${renderForecastBars(view)}
+      ${renderGuidance('予測残高について', '登録した入出金がすべて予定どおりに行われた場合の残高です。')}
+      ${assessment.issues.some(issue => issue.type === 'same_day_income_unconfirmed') ? renderGuidance('同日の入金と引落', '引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。') : ''}
+      ${shortfall ? renderGuidance('残高不足について', `${formatDate(shortfall.date)}の時点で、残高が${formatAbsoluteYen(shortfall.amount)}不足する見込みです。`) : ''}</section>
+      <section class="sheet"><h2 class="section-heading">入出金と残高</h2><div class="table-scroll"><table class="timeline-table"><thead><tr><th scope="col">日付 / 内容</th><th scope="col">入出金</th><th scope="col">残高</th></tr></thead><tbody>${forecastRows}</tbody></table></div></section>
+      <details class="sheet"><summary>引落の内訳</summary>
       <section class="card check-hero daily-details ${status.tone}" data-daily-outlook><span class="eyebrow">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}・${view.horizonDays}日間</span><h2>${status.label}</h2>
       <div class="summary-strip"><div class="stat-card"><span>最初の不足見込み</span><strong>${shortfall ? formatDate(shortfall.date, true) : '未確認条件を確認'}</strong></div><div class="stat-card"><span>次のカード引落</span><strong>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '未登録'}</strong></div></div>
       <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></section>
-      ${renderForecastBars(view)}
       <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2>${renderGuidance('予測残高について', '登録した入出金がすべて予定どおりに行われた場合の残高です。')}${assessment.issues.some(issue => issue.type === 'same_day_income_unconfirmed') ? renderGuidance('同日の入金と引落', '引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。') : ''}<div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
       <section class="card daily-details"><h2>登録済みの入出金予定</h2><div class="daily-events">${events.map(e => `<div><span><strong>${formatDate(e.date, true)}</strong><small>${esc(accountName(e.accountId))}・${e.cardPayment ? 'カード請求' : e.kind === 'income' ? '予定入金' : e.kind === 'transfer' ? '予定振替' : '支払い'}</small></span><strong class="${e.kind === 'income' ? 'value-positive' : 'value-negative'}">${e.kind === 'income' ? '+' : '−'}${formatAbsoluteYen(e.amount + (e.additionalPossible || 0))}</strong></div>`).join('') || '<p>期間内の予定はありません。</p>'}</div><button class="button button-quiet" data-page="plans">予定を確認・修正</button></section>
-      ${renderDailyChecks(view)}</div>`;
+      ${renderDailyChecks(view)}</details></div>`;
   }
 
   function renderLegacyCashflow() {
@@ -2596,6 +2599,7 @@
       .reduce((amount, delta) => amount + delta.delta, 0), 0);
     return `
       <div class="page-heading"><h1>${planFilter === 'details' ? '明細' : '予定'}</h1></div>
+      <div class="plan-view-toolbar">${planFilter === 'details' ? '<button type="button" class="button button-quiet" data-page="plans">予定</button>' : '<button type="button" class="button button-quiet" data-page="plans" data-plan-section="details">明細</button><button type="button" class="button button-primary" data-action="add-event">予定を追加</button>'}</div>
       ${planFilter === 'details' ? renderPlanDetails(details) : `
         ${renderPlanCalendar(mainPlans)}
         <div class="summary-strip"><div class="stat-card"><span>${formatDate(deadline)}までの計算対象</span><strong>${within.length}件</strong></div><div class="stat-card"><span>期限内の収支見込み</span><strong class="${withinAmount >= 0 ? 'value-positive' : 'value-negative'}">${formatSigned(withinAmount)}</strong></div><div class="stat-card"><span>登録済みの予定</span><strong>${mainPlans.length}件</strong></div></div>
@@ -3967,6 +3971,7 @@
       if (currentPage === 'records') recordTab = pageButton.dataset.recordSection || 'transactions';
       if (currentPage === 'imports') mailSection = 'pending';
       if ($('#sidebar').open) $('#sidebar').close();
+      if ($('#money-flow-dialog').open) $('#money-flow-dialog').close();
       renderPage();
       const section = document.getElementById(pageButton.dataset.sectionTarget || '');
       if (section) section.scrollIntoView();
@@ -4002,6 +4007,17 @@
     const action = event.target.closest('[data-action]');
     if (!action) return;
     const name = action.dataset.action;
+    if (name === 'prototype-account' || name === 'prototype-bills') {
+      const view = dailyOverview();
+      const isAccount = name === 'prototype-account';
+      const detail = $('#money-flow-dialog');
+      $('#money-flow-title').textContent = isAccount ? '口座残高' : '請求額';
+      $('#money-flow-detail').innerHTML = isAccount
+        ? `<p class="amount">${formatDisplayedAmount(view.primary.currentBalance)}</p>${accountBalanceNote(view.primary)}<button type="button" class="button button-quiet" data-page="accounts">口座・カード</button>${view.unverifiedAccounts ? '<button type="button" class="button button-quiet" data-page="checks" data-check="accounts">未確認の口座</button>' : ''}`
+        : `<dl class="ledger">${view.unconfirmedEvents.map(item => `<div><dt>${formatDate(item.date)} · 見込み</dt><dd>${formatDisplayedAmount(item.amount + (item.additionalPossible || 0))}</dd></div>`).join('') || '<div><dt>未確認</dt><dd>0件</dd></div>'}</dl><button type="button" class="button button-quiet" data-page="checks" data-check="bills">請求額を確認</button>`;
+      detail.showModal();
+      return;
+    }
     if (name === 'daily-add-statement') { openDailyStatement(action.dataset.card, action.dataset.date); return; }
     if (name === 'record-tab') { recordTab = action.dataset.tab === 'receipts' ? 'receipts' : 'transactions'; renderPage(); return; }
     if (name === 'range-mode') { setRecordRangeMode(action.dataset.mode); return; }
@@ -4097,6 +4113,7 @@
       $('#event-usage-date-wrap').after(label);
     }
     document.addEventListener('click', event => {
+      if (event.target.closest('[data-flow-close]')) $('#money-flow-dialog').close();
       const close = event.target.closest('[data-close-modal]'); if (close) closeModal(close.dataset.closeModal);
       if (event.target.classList.contains('modal-backdrop')) event.target.hidden = true;
       if (event.target.classList.contains('add-menu-backdrop')) closeAddMenu();

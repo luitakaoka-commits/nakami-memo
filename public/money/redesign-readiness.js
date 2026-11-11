@@ -134,15 +134,17 @@
     const account = input.accounts.find(item => item.id === accountId);
     if (!account) throw new Error('支出に使う口座を確認してください');
     let throughDeadline = 0, afterDeadline = 0;
+    const paymentEvents = [];
     for (const event of input.events) {
       if (event.accountId !== accountId || event.status !== 'planned' || event.kind === 'income' || event.date < input.today || event.date > input.endDate) continue;
       const cost = add(event.amount, event.additionalPossible || 0);
+      paymentEvents.push(event);
       if (event.date <= deadline) throughDeadline = add(throughDeadline, cost);
       else afterDeadline = add(afterDeadline, cost);
     }
     const amount = add(add(add(account.balance, -throughDeadline), -afterDeadline), -reserve);
     const status = amount < 0 || assessment.futureStatus === 'shortfall' ? 'shortfall' : assessment.futureStatus;
-    return { amount, status, referenceOnly: status !== 'safe', openingBalance: account.balance, throughDeadline, afterDeadline, reserve, deadline, endDate: input.endDate };
+    return { amount, status, referenceOnly: status !== 'safe', openingBalance: account.balance, throughDeadline, afterDeadline, reserve, deadline, endDate: input.endDate, paymentEvents };
   }
   const api = { calculateReadiness, spendingAllowance };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
