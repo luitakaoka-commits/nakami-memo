@@ -3,7 +3,6 @@
   'use strict';
   const $ = selector => document.querySelector(selector);
   const yen = amount => `${amount < 0 ? '−' : ''}¥${Math.abs(amount).toLocaleString('ja-JP')}`;
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const groups = {
     'メイン': ['資金繰り・試算', '支払いの見通し', '予定', '記録', 'メール確認', '口座・カード', 'シフト・給与', 'レシート'],
     'サブ': ['ふりかえり・ムダ支出', '定期支払い', '設定', '家計・共有', 'バックアップ・復元']
@@ -23,8 +22,6 @@
     '定期支払い': '<rect x="2" y="5" width="17" height="14" rx="2"/><path d="M2 10h17M6 3v4m8-4v4"/><circle cx="18" cy="16" r="4"/><path d="M18 14v2l2 1"/>',
     '設定': '<path d="m10 2 4 0 1 3 3-1 3 3-1 3 2 1v3l-3 1 1 3-3 3-3-1-1 2h-4l-1-3-3 1-3-3 1-3-2-1v-3l3-1-1-3 3-3 3 1z"/><circle cx="12" cy="12" r="3"/>'
   };
-  let timer = null;
-  let animationIndex = 0;
   const events = [
     { date: '11/9', name: '現在の口座残高', amount: 0, type: '現在' },
     { date: '11/10', name: 'カード引落', amount: -100000, type: '確認済み' },
@@ -43,12 +40,6 @@
     const count = window.moneyMail.pendingCount();
     $('#menu-items').innerHTML = Object.entries(groups).map(([title, links]) => `<p class="menu-group-title">${title}</p>${links.map(label => `<button class="menu-link" data-route="${label}" ${route === label ? 'aria-current="page"' : ''}>${menuIcons[label] ? '<svg aria-hidden="true" viewBox="0 0 24 24">' + menuIcons[label] + '</svg>' : ''}<span class="menu-label">${label}</span>${label === 'メール確認' && count ? `<span class="menu-badge">${count}件</span>` : ''}</button>`).join('')}`).join('');
   }
-  function stopAnimation() {
-    clearInterval(timer);
-    timer = null;
-    const play = $('#play-forecast');
-    if (play) { play.textContent = '再生'; play.setAttribute('aria-pressed', 'false'); }
-  }
   function banner() {
     if (state === 'offline') return '<p class="notice" role="status">オフライン · 保存待ち</p>';
     if (state === 'success') return '<p class="notice success" role="status">保存完了</p>';
@@ -61,7 +52,6 @@
     return '';
   }
   function render() {
-    stopAnimation();
     const data = fixture();
     const blank = blankState();
     $('#balance-content').innerHTML = blank || `${banner()}
@@ -69,9 +59,8 @@
       <section class="sheet" data-calculation><h2 class="section-heading">金額の計算</h2><dl class="ledger"><div><dt>口座残高</dt><dd>${yen(data.opening)}</dd></div><div><dt>カード引落 · 11/10</dt><dd>−¥100,000</dd></div><div><dt>生活費 · 11/15まで</dt><dd>−¥20,000</dd></div><div><dt>予備額</dt><dd>−¥10,000</dd></div><div class="ledger-total"><dt>計</dt><dd>${yen(data.available)}</dd></div></dl></section>
       <section class="sheet"><h2 class="section-heading">確認事項</h2><button class="check-row" data-detail="account"><span>口座残高<small>確認日 11/8</small></span><span class="check-count">1口座 ›</span></button><button class="check-row" data-detail="bill"><span>請求額<small>12月分 · 見込み</small></span><span class="check-count">1件 ›</span></button><button class="check-row" data-route="メール確認"><span>メール</span><span class="check-count" data-mail-count>${window.moneyMail.pendingCount()}件 ›</span></button></section>`;
     $('#forecast-content').innerHTML = blank || `${banner()}
-      <section class="sheet"><p class="date-label">11月9日〜12月10日</p><div class="forecast-head"><p id="forecast-event" class="support">11/9 · 現在の口座残高</p><strong id="forecast-amount">${yen(data.opening)}</strong></div>${chart(data.rows)}<div class="play-row">${state === 'shortfall' ? '<span class="status danger">不足</span>' : ''}<button id="play-forecast" class="primary-button small-button" aria-pressed="false">再生</button></div></section>
-      <section class="sheet"><h2 class="section-heading">入出金と残高</h2><div class="table-wrap"><table><thead><tr><th scope="col">日付 / 内容</th><th scope="col">入出金</th><th scope="col">残高</th></tr></thead><tbody>${data.rows.map((row, index) => `<tr data-event-row="${index}" ${index === 0 ? 'class="highlight"' : ''}><td>${row.date}<br>${row.name}<small>${row.type}</small></td><td class="${row.amount > 0 ? 'income' : ''}">${row.amount ? (row.amount > 0 ? '+' : '') + yen(row.amount) : '—'}</td><td class="${row.balance < 0 ? 'negative' : ''}">${yen(row.balance)}</td></tr>`).join('')}</tbody></table></div></section>`;
-    if ($('#play-forecast')) $('#play-forecast').addEventListener('click', playAnimation);
+      <section class="sheet"><p class="date-label">11月9日〜12月10日</p><div class="forecast-head"><p id="forecast-event" class="support">11/9 · 現在の口座残高</p><strong id="forecast-amount">${yen(data.opening)}</strong></div>${chart(data.rows)}${state === 'shortfall' ? '<span class="status danger">不足</span>' : ''}</section>
+      <section class="sheet"><h2 class="section-heading">入出金と残高</h2><div class="table-wrap"><table><thead><tr><th scope="col">日付 / 内容</th><th scope="col">入出金</th><th scope="col">残高</th></tr></thead><tbody>${data.rows.map(row => `<tr><td>${row.date}<br>${row.name}<small>${row.type}</small></td><td class="${row.amount > 0 ? 'income' : ''}">${row.amount ? (row.amount > 0 ? '+' : '') + yen(row.amount) : '—'}</td><td class="${row.balance < 0 ? 'negative' : ''}">${yen(row.balance)}</td></tr>`).join('')}</tbody></table></div></section>`;
     $('#announcement').textContent = $('#preview-state').selectedOptions[0].textContent;
     menu();
   }
@@ -90,38 +79,21 @@
     }
     const bars = rows.map((row, i) => {
       const x = 52 + (i + .5) * 282 / rows.length;
-      return `<rect class="chart-bar ${row.balance < 0 ? 'negative' : 'positive'}${i === 0 ? ' selected' : ''}" data-bar="${i}" x="${x - 11}" y="${Math.min(zero, y(row.balance))}" width="22" height="${Math.abs(y(row.balance) - zero)}" aria-label="${row.date} ${yen(row.balance)}"/><text class="chart-label" x="${x}" y="225" text-anchor="middle">${row.date}</text>`;
+      return `<rect class="chart-bar ${row.balance < 0 ? 'negative' : 'positive'}" data-bar="${i}" x="${x - 11}" y="${Math.min(zero, y(row.balance))}" width="22" height="${Math.abs(y(row.balance) - zero)}" aria-label="${row.date} ${yen(row.balance)}"/><text class="chart-label" x="${x}" y="225" text-anchor="middle">${row.date}</text>`;
     });
     return `<svg class="forecast-chart" viewBox="0 0 340 240" role="img" aria-label="口座残高の棒グラフ">${ticks.join('')}${bars.join('')}</svg>`;
   }
-  function showAnimationStep(index) {
-    const rows = fixture().rows;
-    $('#forecast-event').textContent = `${rows[index].date} · ${rows[index].name}`;
-    $('#forecast-amount').textContent = yen(rows[index].balance);
-    $('#forecast-amount').classList.toggle('negative', rows[index].balance < 0);
-    document.querySelectorAll('[data-bar]').forEach((bar, i) => bar.classList.toggle('selected', i === index));
-    document.querySelectorAll('[data-event-row]').forEach((row, i) => row.classList.toggle('highlight', i === index));
-  }
-  function playAnimation() {
-    if (timer) { stopAnimation(); return; }
-    animationIndex = 0;
-    showAnimationStep(0);
-    if (reducedMotion.matches) { showAnimationStep(events.length - 1); $('#announcement').textContent = '動きを減らす設定のため、最後の予測残高を表示しました。'; return; }
-    $('#play-forecast').textContent = '停止';
-    $('#play-forecast').setAttribute('aria-pressed', 'true');
-    timer = setInterval(() => { animationIndex++; showAnimationStep(animationIndex); if (animationIndex === events.length - 1) { stopAnimation(); $('#announcement').textContent = '残高推移の再生が完了しました。'; } }, 1000);
-  }
-  const routeKeys = { '資金繰り・試算': 'cashflow', '支払いの見通し': 'forecast', 'メール確認': 'mail' };
+  const routeKeys = { '資金繰り・試算': 'cashflow', '支払いの見通し': 'forecast', 'メール確認': 'mail', '予定': 'plans' };
   function closeSidebar() { $('#sidebar').close(); }
   function applyRoute() {
-    stopAnimation();
     const key = decodeURIComponent(location.hash.slice(1)) || 'cashflow';
     route = Object.keys(routeKeys).find(label => routeKeys[label] === key) || Object.values(groups).flat().find(label => label === key) || '資金繰り・試算';
     $('#screen-name').textContent = route;
     $('#page-title').textContent = route;
-    for (const name of ['cashflow', 'forecast', 'mail']) $('#' + name + '-screen').hidden = routeKeys[route] !== name;
+    for (const name of ['cashflow', 'forecast', 'mail', 'plans']) $('#' + name + '-screen').hidden = routeKeys[route] !== name;
     $('#pending-screen').hidden = Boolean(routeKeys[route]);
     if (routeKeys[route] === 'mail') window.moneyMail.open();
+    if (routeKeys[route] === 'plans') window.moneyPlans.open();
     closeSidebar(); menu();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
@@ -140,7 +112,7 @@
     $('#detail-dialog').showModal();
     document.body.classList.add('modal-open');
   }
-  $('#menu-open').addEventListener('click', () => { stopAnimation(); $('#sidebar').showModal(); $('#menu-open').setAttribute('aria-expanded', 'true'); document.body.classList.add('modal-open'); });
+  $('#menu-open').addEventListener('click', () => { $('#sidebar').showModal(); $('#menu-open').setAttribute('aria-expanded', 'true'); document.body.classList.add('modal-open'); });
   $('#menu-close').addEventListener('click', closeSidebar);
   $('#sidebar').addEventListener('close', () => { $('#menu-open').setAttribute('aria-expanded', 'false'); document.body.classList.remove('modal-open'); });
   $('#detail-dialog').addEventListener('close', () => document.body.classList.remove('modal-open'));
@@ -153,12 +125,18 @@
   });
   $('#preview-state').addEventListener('change', event => { state = event.target.value; render(); });
   window.addEventListener('hashchange', applyRoute);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) stopAnimation(); });
-  reducedMotion.addEventListener('change', () => stopAnimation());
   document.addEventListener('mail-change', () => {
     menu();
     const badge = $('[data-mail-count]');
     if (badge) badge.textContent = window.moneyMail.pendingCount() + '件 ›';
+  });
+  let toastTimer;
+  document.addEventListener('money-toast', event => {
+    const toast = $('#toast');
+    clearTimeout(toastTimer);
+    toast.textContent = event.detail;
+    toast.classList.add('visible');
+    toastTimer = setTimeout(() => toast.classList.remove('visible'), 3200);
   });
   render(); applyRoute();
 })();

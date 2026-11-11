@@ -9,9 +9,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="styles.css">
-  <script src="mail.js?v=entry-type" defer></script>
-  <script src="app.js?v=entry-type" defer></script>
+  <link rel="stylesheet" href="styles.css?v=plans">
+  <script src="mail.js?v=plans" defer></script>
+  <script src="plans.js?v=plans" defer></script>
+  <script src="app.js?v=plans" defer></script>
 </head>
 <body>
   <div class="prototype-notice">UI試作</div>
@@ -25,6 +26,7 @@
     <section id="cashflow-screen" aria-label="資金繰り・試算"><div id="balance-content"></div></section>
     <section id="forecast-screen" aria-label="支払いの見通し" hidden><div id="forecast-content"></div></section>
     <section id="mail-screen" aria-label="メール確認" hidden></section>
+    <section id="plans-screen" aria-label="予定" hidden></section>
     <section id="pending-screen" hidden><p>未作成</p></section>
   </main>
   <details class="preview-tools"><summary>表示状態</summary><div class="tool-content"><label for="preview-state">状態</label><select id="preview-state"><option value="normal">通常</option><option value="shortfall">不足</option><option value="empty">データなし</option><option value="loading">読込中</option><option value="offline">オフライン</option><option value="error">エラー</option><option value="success">保存完了</option></select></div></details>
@@ -33,6 +35,18 @@
     <nav id="menu-items" aria-label="メインとサブのメニュー"></nav>
   </dialog>
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title"><div class="dialog-heading"><h2 id="detail-title"></h2><button class="icon-button" data-close-detail aria-label="詳細を閉じる">×</button></div><div id="detail-body"></div><button class="primary-button" data-close-detail>閉じる</button></dialog>
+  <dialog id="plan-editor" class="detail-dialog" aria-labelledby="plan-editor-title">
+    <div class="dialog-heading"><h2 id="plan-editor-title">予定を追加</h2><button type="button" class="icon-button" data-plan-close aria-label="閉じる">×</button></div>
+    <form class="mail-fields">
+      <input type="hidden" name="id">
+      <label>日付<input type="date" name="date" required></label>
+      <label>内容<input name="name" maxlength="40" required></label>
+      <label>種類<select name="kind"><option value="payment">支払い</option><option value="income">収入</option><option value="saving">貯金</option><option value="nisa">NISA</option><option value="transfer">振込</option></select></label>
+      <label>金額<input name="amount" type="number" min="1" step="1" inputmode="numeric" required></label>
+      <button class="primary-button" type="submit">保存</button>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status"></div>
   <div id="announcement" class="sr-only" aria-live="polite"></div>
 </body>
 </html>

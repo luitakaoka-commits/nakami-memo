@@ -50,7 +50,16 @@ const server = http.createServer((req, res) => {
     await test('backdrop_closes_menu', () => page.locator('#sidebar').evaluate(el => !el.open));
     await page.getByRole('button', { name: 'メニューを開く' }).click();
     await page.getByRole('button', { name: '予定', exact: true }).click();
-    await test('unbuilt_route_honest', () => page.locator('#pending-screen').isVisible());
+    await test('plans_open_calendar', async () => await page.locator('.plan-calendar').isVisible() && (await page.locator('.plan-grid button').count()) === 30);
+    await page.screenshot({ path: path.join(output, '予定_スマホ.png'), fullPage: true });
+    await page.getByRole('button', { name: '翌月' }).click();
+    await page.getByRole('button', { name: '12月5日、1件' }).click();
+    await test('calendar_selects_month_and_day', () => page.locator('#plans-screen .plan-row').innerText().then(t => t.includes('仕送り')));
+    await page.getByRole('button', { name: '予定を追加', exact: true }).click();
+    await page.locator('#plan-editor input[name="name"]').fill('検査用予定');
+    await page.locator('#plan-editor input[name="amount"]').fill('1200');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    await test('plan_save_updates_day_and_toast', async () => await page.getByText('検査用予定', { exact: true }).isVisible() && await page.locator('#toast.visible').textContent() === '保存しました');
     const openRoute = async label => { await page.getByRole('button', { name: 'メニューを開く' }).click(); await page.locator('.menu-link').filter({ hasText: label }).click(); };
     await openRoute('資金繰り・試算');
     await page.getByRole('button', { name: '口座残高 確認日 11/8 1口座 ›' }).click();
@@ -67,11 +76,7 @@ const server = http.createServer((req, res) => {
     await test('bar_chart_six_balances', () => page.locator('.chart-bar').count().then(n => n === 6));
     await test('zero_baseline_and_man_ticks', () => page.evaluate(() => document.querySelector('.chart-zero') && [...document.querySelectorAll('.chart-tick')].map(el => el.textContent).join(',') === '0円,5万円,10万円,15万円,20万円'));
     await test('positive_bars_blue', () => page.locator('.chart-bar.positive').evaluateAll(bars => bars.length === 6 && bars.every(bar => getComputedStyle(bar).fill === 'rgb(40, 115, 191)')));
-    await page.getByRole('button', { name: '再生', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('#forecast-event').textContent.includes('カード引落') && document.querySelector('#forecast-amount').textContent === '¥80,000');
-    await test('animation_updates_card_balance', () => page.locator('#forecast-amount').innerText().then(t => t === '¥80,000'));
-    await page.getByRole('button', { name: '停止', exact: true }).click();
-    await test('animation_stops', () => page.locator('#play-forecast').getAttribute('aria-pressed').then(t => t === 'false'));
+    await test('forecast_no_playback', () => page.getByRole('button', { name: '再生', exact: true }).count().then(n => n === 0));
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: path.join(output, '残高予測_スマホ.png'), fullPage: true });
     await page.keyboard.press('ArrowLeft');
@@ -121,13 +126,12 @@ const server = http.createServer((req, res) => {
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.screenshot({ path: path.join(output, '資金繰り_PC.png'), fullPage: true });
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await openRoute('支払いの見通し');
-    await page.getByRole('button', { name: '再生', exact: true }).click();
-    await test('reduced_motion_shows_final_balance', () => page.locator('#forecast-amount').innerText().then(t => t === '¥73,000'));
     await page.setViewportSize({ width: 390, height: 844 });
     await openRoute('メール確認');
     const activeMail = () => page.locator('.mail-panel:not([inert])');
+    await page.evaluate(() => window.scrollTo(0, 400));
+    await test('menu_sticks_during_scroll', () => page.locator('.app-header').evaluate(el => scrollY > 100 && el.getBoundingClientRect().top === 0));
+    await page.evaluate(() => window.scrollTo(0, 0));
     await test('mail_opens_pending_only', async () => await activeMail().getAttribute('aria-label') === '未取り込み' && await activeMail().locator('form').count() === 2);
     await page.screenshot({ path: path.join(output, 'メール_スマホ.png'), fullPage: true });
     async function swipeMailTo(index) {
@@ -158,6 +162,7 @@ const server = http.createServer((req, res) => {
       await bill.isVisible() && await bill.locator('select[name="type"]').evaluate(select => select.validity.valueMissing));
     await activeMail().locator('[data-candidate="1"] input[name="amount"]').fill('2500');
     await activeMail().getByRole('button', { name: '取り込む', exact: true }).first().click();
+    await test('mail_import_toast', () => page.locator('#toast.visible').textContent().then(t => t === '取り込みました'));
     await activeMail().getByRole('button', { name: '無視', exact: true }).click();
     await test('mail_pending_empty_after_actions', () => activeMail().innerText().then(t => t.trim() === '0件'));
     await page.getByRole('button', { name: '取り込み済み', exact: true }).click();

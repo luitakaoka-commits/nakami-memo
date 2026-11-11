@@ -15,7 +15,7 @@ h2 { font-size: 18px; }
 svg { display: block; width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 [hidden] { display: none !important; }
 .prototype-notice { padding: 5px 12px; text-align: center; background: var(--soft); color: var(--muted); font-size: 11px; }
-.app-header { display: flex; align-items: center; gap: var(--space-sm); padding: 8px 16px; padding-top: max(8px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: var(--paper); }
+.app-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: var(--space-sm); padding: 8px 16px; padding-top: max(8px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: var(--paper); }
 .header-caption { margin-left: auto; font-size: 12px; color: var(--muted); }
 .icon-button { display: grid; place-items: center; width: 44px; min-width: 44px; padding: 0; border: 1px solid transparent; background: transparent; border-radius: var(--radius-control); font-size: 26px; }
 .icon-button:hover { background: var(--soft); }
@@ -47,22 +47,18 @@ main { max-width: 600px; margin: 0 auto; padding: var(--space-lg) 20px 0; }
 .chart-zero { stroke: var(--chart-zero); stroke-width: 1.5; }
 .chart-bar.positive { fill: var(--chart-positive); }
 .chart-bar.negative { fill: var(--chart-negative); }
-.chart-bar.selected { stroke: var(--ink); stroke-width: 2; }
 .chart-label { fill: var(--muted); font-size: 10px; font-family: var(--font); }
 .chart-legend { display: flex; gap: 18px; font-size: 11px; color: var(--muted); }
 .income { color: var(--income); }
-.play-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
 .status { font-size: 12px; color: var(--warning); background: var(--warning-soft); padding: 6px 10px; border-radius: var(--radius-control); }
 .status.danger { background: var(--danger-soft); color: var(--danger); }
 .primary-button { border: 0; padding: 10px 16px; background: var(--brand); color: var(--on-brand); border-radius: var(--radius-control); white-space: nowrap; }
-.small-button { font-size: 12px; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { text-align: left; padding: 10px 3px; vertical-align: top; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); white-space: nowrap; }
 td:last-child, th:last-child { text-align: right; white-space: nowrap; }
 td small { display: block; color: var(--muted); font-size: 10px; }
-tr.highlight { background: var(--soft); }
 .notice { padding: 10px 12px; border-left: 3px solid var(--warning); background: var(--warning-soft); margin-bottom: 16px; font-size: 12px; }
 .notice.success { border-color: var(--income); background: var(--income-soft); }
 .state-sheet { min-height: 200px; display: grid; align-content: center; gap: 12px; }
@@ -107,3 +103,17 @@ body.modal-open { overflow: hidden; }
 .mail-fields label { display: grid; gap: 4px; font-size: 12px; }
 .mail-fields input, .mail-fields select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 8px; color: inherit; font: inherit; font-size: 16px; }
 .mail-actions { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
+.toast { position: fixed; z-index: 5; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 10px 16px; background: var(--ink); color: var(--paper); border-radius: 10px; opacity: 0; pointer-events: none; }
+.toast.visible { opacity: 1; }
+.plan-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+#plans-screen > .plan-toolbar { margin-bottom: 12px; }
+.plan-toolbar select, .plan-card-filter select { border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 4px 8px; }
+.plan-card-filter { display: block; margin-bottom: 12px; }
+.plan-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; text-align: center; }
+.plan-grid > span { padding: 6px 0; font-size: 12px; }
+.plan-grid button { position: relative; padding: 0 0 4px; border: 1px solid transparent; background: transparent; border-radius: 8px; }
+.plan-grid button[aria-pressed="true"] { border-color: var(--brand); color: var(--brand); }
+.plan-dot { position: absolute; bottom: 5px; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: var(--brand); }
+.plan-row { padding: 12px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.plan-row:last-child { border-bottom: 0; }
+.plan-row .mail-actions { flex-wrap: wrap; }

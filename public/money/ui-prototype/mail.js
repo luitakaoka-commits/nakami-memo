@@ -46,7 +46,7 @@
       <div class="mail-track">${tabs.map(([status, label]) => {
         const rows = candidates.filter(item => status === 'pending' ? pending(item) : item.status === status);
         return `<section class="mail-panel" aria-label="${label}">${rows.map(candidateRow).join('') || '<p class="sheet">0件</p>'}</section>`;
-      }).join('')}</div>${cardMappings.size ? `<div class="sheet"><h2>メールとカードの対応</h2>${[...cardMappings].map(([id, card]) => `<div class="mail-actions"><span>${escape(card)}</span><button type="button" class="text-button" data-forget-card="${id}">対応を解除</button></div>`).join('')}</div>` : ''}<p class="sr-only" role="status" id="mail-feedback"></p>`;
+      }).join('')}</div>${cardMappings.size ? `<div class="sheet"><h2>メールとカードの対応</h2>${[...cardMappings].map(([id, card]) => `<div class="mail-actions"><span>${escape(card)}</span><button type="button" class="text-button" data-forget-card="${id}">対応を解除</button></div>`).join('')}</div>` : ''}`;
     const track = screen.querySelector('.mail-track');
     track.scrollLeft = index * track.clientWidth;
     updateTabs(index);
@@ -62,7 +62,8 @@
     if (event.target.name === 'amount') item.amount = Number(event.target.value);
     else if (['date', 'merchant', 'card', 'type'].includes(event.target.name)) item[event.target.name] = event.target.value;
   });
-  function changed() {
+  function changed(message) {
+    document.dispatchEvent(new CustomEvent('money-toast', { detail: message }));
     render(selected);
     document.dispatchEvent(new Event('mail-change'));
   }
@@ -71,7 +72,7 @@
     if (!form) return;
     event.preventDefault();
     candidates.find(item => item.id === Number(form.dataset.candidate)).status = 'accepted';
-    changed();
+    changed('取り込みました');
   });
   screen.addEventListener('click', event => {
     const tab = event.target.closest('[data-mail-tab]');
@@ -84,7 +85,7 @@
     const forget = event.target.closest('[data-forget-card]');
     if (forget) {
       cardMappings.delete(Number(forget.dataset.forgetCard));
-      changed();
+      changed('カードの対応を解除しました');
       return;
     }
     const button = event.target.closest('[data-mail-action]');
@@ -95,14 +96,13 @@
     if (button.dataset.mailAction === 'remember') {
       if (!form.elements.card.reportValidity()) return;
       cardMappings.set(item.id, item.card);
-      changed();
-      screen.querySelector('#mail-feedback').textContent = 'カードの対応を記録しました';
+      changed('カードの対応を保存しました');
     } else if (button.dataset.mailAction === 'ignore') {
       item.status = 'ignored';
-      changed();
+      changed('無視しました');
     } else if (window.confirm('削除しますか？')) {
       candidates.splice(index, 1);
-      changed();
+      changed('削除しました');
     }
   });
   window.moneyMail = { open: () => render(), pendingCount: () => candidates.filter(pending).length };
