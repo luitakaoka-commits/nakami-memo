@@ -4,7 +4,7 @@
   const screen = document.querySelector('#plans-screen');
   const editor = document.querySelector('#plan-editor');
   const form = editor.querySelector('form');
-  const kinds = { payment: '支払い', income: '収入', saving: '貯金', nisa: 'NISA', transfer: '振込' };
+  const kinds = { payment: '支払い', income: '収入', saving: '貯金', nisa: 'NISA', reimbursement: '立替回収', transfer: '振込' };
   const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   const yen = amount => '¥' + amount.toLocaleString('ja-JP');
   const plans = [
@@ -31,6 +31,7 @@
   let showDetails = false;
   let cardIndex = 0;
   let periodIndex = 0;
+  let saveEdit;
   const toast = message => document.dispatchEvent(new CustomEvent('money-toast', { detail: message }));
 
   function selectCard(index) {
@@ -50,7 +51,7 @@
         const rows = details.filter(item => item.card === card && item.date >= period.start && item.date <= period.end)
           .sort((a, b) => b.date.localeCompare(a.date));
         return `<section class="detail-card-panel" aria-label="${card}"><div class="sheet"><h2>${card}</h2>${rows.map(item =>
-          `<article class="plan-row"><div class="plan-toolbar"><strong>${escape(item.name)}</strong><strong>${yen(item.amount)}</strong></div><p class="support">${item.date.replaceAll('-', '/')}${item.included ? ' · 請求総額の内訳' : ''}</p></article>`).join('') || '<p class="support">明細なし</p>'}</div></section>`;
+          `<article class="plan-row"><div class="plan-toolbar"><strong>${escape(item.name)}</strong><strong>${yen(item.amount)}</strong></div><p class="support">${item.date.replaceAll('-', '/')}${item.included ? ' · 請求総額の内訳' : ''}</p>${item.included ? '' : `<div class="mail-actions"><button class="text-button" type="button" data-edit-detail="${details.indexOf(item)}">編集</button><button class="text-button" type="button" data-delete-detail="${details.indexOf(item)}">削除</button></div>`}</article>`).join('') || '<p class="support">明細なし</p>'}</div></section>`;
       }).join('')}</div>
       <nav class="detail-card-nav" aria-label="明細のカード">${cards.map((card, i) => `<button type="button" data-detail-card="${i}">${card}</button>`).join('')}</nav>`;
     const track = screen.querySelector('.detail-track');
@@ -72,9 +73,9 @@
       const date = month + '-' + String(i + 1).padStart(2, '0');
       const daily = rows.filter(item => item.date === date);
       const groups = [
-        { name: '収入', sign: '+', style: 'in', count: daily.filter(item => item.kind === 'income').length },
+        { name: '収入', sign: '+', style: 'in', count: daily.filter(item => ['income', 'reimbursement'].includes(item.kind)).length },
         { name: '支出', sign: '−', style: 'out', count: daily.filter(item => item.kind === 'payment').length },
-        { name: '資金移動', sign: '↔', style: 'move', count: daily.filter(item => !['income', 'payment'].includes(item.kind)).length }
+        { name: '資金移動', sign: '↔', style: 'move', count: daily.filter(item => !['income', 'reimbursement', 'payment'].includes(item.kind)).length }
       ].filter(group => group.count);
       const label = [`${number}月${i + 1}日`, `${daily.length}件`, ...groups.map(group => group.name + group.count + '件')].join('、');
       return `<button type="button" data-plan-day="${date}" aria-label="${label}" aria-pressed="${date === day}"><span>${i + 1}</span><span class="plan-marks" aria-hidden="true">${groups.map(group => `<span class="plan-mark ${group.style}">${group.sign}</span>`).join('')}</span></button>`;
@@ -97,14 +98,25 @@
       </section>`;
   }
 
-  function openEditor(item) {
+  function openEditor(item, title, onSave) {
+    saveEdit = onSave;
     form.reset();
     form.elements.id.value = item?.id ?? '';
     form.elements.date.value = item?.date ?? day;
     form.elements.name.value = item?.name ?? '';
     form.elements.amount.value = item?.amount ?? '';
     form.elements.kind.value = item?.kind ?? 'payment';
-    editor.querySelector('h2').textContent = item ? '予定を編集' : '予定を追加';
+    const category = form.elements.category;
+    for (const option of category.querySelectorAll('[data-existing]')) option.remove();
+    if (item?.category && !Array.from(category.options).some(option => option.value === item.category)) {
+      const option = new Option(item.category, item.category);
+      option.dataset.existing = '';
+      category.add(option);
+    }
+    category.value = item?.category ?? '生活費';
+    form.elements.lending.value = item?.lending ?? '';
+    form.elements.exclude.checked = Boolean(item?.exclude);
+    editor.querySelector('h2').textContent = title ?? (item ? '予定を編集' : '予定を追加');
     editor.showModal();
   }
 
@@ -116,6 +128,22 @@
   screen.addEventListener('click', event => {
     const button = event.target.closest('button');
     if (!button) return;
+    if ('editDetail' in button.dataset || 'deleteDetail' in button.dataset) {
+      const index = Number(button.dataset.editDetail ?? button.dataset.deleteDetail);
+      const item = details[index];
+      if (!item || item.included) return;
+      if ('editDetail' in button.dataset) {
+        return openEditor({ ...item, kind: 'payment' }, '明細を編集', values => {
+          Object.assign(item, values);
+          render();
+        });
+      }
+      if (!window.confirm(item.name + 'を削除しますか？')) return;
+      details.splice(index, 1);
+      render();
+      toast('削除しました');
+      return;
+    }
     if ('planAdd' in button.dataset) return openEditor();
     if ('detailCard' in button.dataset) {
       const track = screen.querySelector('.detail-track');
@@ -157,7 +185,18 @@
     const name = String(data.get('name')).trim();
     if (!name) { form.elements.name.focus(); return; }
     const item = plans.find(plan => plan.id === Number(data.get('id')));
-    const values = { date: data.get('date'), name, amount: Number(data.get('amount')), kind: data.get('kind') };
+    const values = {
+      date: data.get('date'), name, amount: Number(data.get('amount')), kind: data.get('kind'),
+      category: data.get('category'), lending: Number(data.get('lending')), exclude: data.has('exclude')
+    };
+    if (saveEdit) {
+      const save = saveEdit;
+      saveEdit = undefined;
+      editor.close();
+      save(values);
+      toast('保存しました');
+      return;
+    }
     if (item) Object.assign(item, values);
     else plans.push({ id: nextId++, ...values });
     day = values.date;
@@ -166,6 +205,6 @@
     render();
     toast('保存しました');
   });
-  editor.querySelector('[data-plan-close]').addEventListener('click', () => editor.close());
-  window.moneyPlans = { open() { showDetails = false; render(); } };
+  editor.querySelectorAll('[data-plan-close]').forEach(button => button.addEventListener('click', () => editor.close()));
+  window.moneyPlans = { open() { showDetails = false; render(); }, editTransaction: openEditor };
 })();

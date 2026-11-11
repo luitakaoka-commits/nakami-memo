@@ -31,7 +31,7 @@
     { date: '12/10', name: 'カード引落', amount: -120000, type: '見込み' }
   ];
   function fixture() {
-    let balance = state === 'shortfall' ? 60000 : 180000;
+    let balance = state === 'shortfall' ? 60000 : window.moneyOverview.primaryBalance();
     const opening = balance;
     const rows = events.map(event => ({ ...event, balance: balance += event.amount }));
     return { opening, rows, available: opening - 100000 - 20000 - 10000 };
@@ -141,5 +141,6 @@
     toast.classList.add('visible');
     toastTimer = setTimeout(() => toast.classList.remove('visible'), 3200);
   });
+  document.addEventListener('preview-accounts-change', render);
   render(); applyRoute();
 })();

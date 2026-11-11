@@ -143,3 +143,6 @@ body.modal-open { overflow: hidden; }
 .shift-hours { display: block; font-size: 10px; line-height: 1.2; color: var(--chart-positive); }
 .shift-totals h2 { font-size: 13px; margin-bottom: 4px; }
 .shift-totals strong { font-size: clamp(16px, 4.5vw, 24px); }
+.mail-fields .asset-check { display: flex; align-items: center; gap: 8px; }
+.mail-fields .asset-check input { width: 20px; min-height: 20px; flex: none; }
+.account-card { overflow-wrap: anywhere; }

@@ -9,11 +9,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="styles.css?v=calendar-details">
+  <link rel="stylesheet" href="styles.css?v=edit-parity">
   <script src="mail.js?v=plans" defer></script>
-  <script src="plans.js?v=calendar-details" defer></script>
-  <script src="overview.js?v=calendar-details" defer></script>
-  <script src="app.js?v=calendar-details" defer></script>
+  <script src="plans.js?v=edit-parity" defer></script>
+  <script src="overview.js?v=edit-parity" defer></script>
+  <script src="app.js?v=edit-parity" defer></script>
 </head>
 <body>
   <div class="prototype-notice">UI試作</div>
@@ -44,20 +44,32 @@
     <form class="mail-fields">
       <input type="hidden" name="id">
       <label>日付<input type="date" name="date" required></label>
-      <label>内容<input name="name" maxlength="40" required></label>
-      <label>種類<select name="kind"><option value="payment">支払い</option><option value="income">収入</option><option value="saving">貯金</option><option value="nisa">NISA</option><option value="transfer">振込</option></select></label>
+      <label>メモ<input name="name" maxlength="80" required></label>
+      <label>種類<select name="kind"><option value="payment">支払い</option><option value="income">収入</option><option value="saving">貯金</option><option value="nisa">NISA</option><option value="reimbursement">立替回収</option><option value="transfer">振込</option></select></label>
       <label>金額<input name="amount" type="number" min="1" step="1" inputmode="numeric" required></label>
+      <label>カテゴリ<select name="category"><option>生活費</option><option>固定費</option><option>食費</option><option>交通</option><option>娯楽</option><option>医療</option><option>給与</option><option>収入</option><option>その他</option></select></label>
+      <label>うち立替（任意）<input name="lending" type="number" min="0" step="1" inputmode="numeric"></label>
+      <label class="asset-check"><input name="exclude" type="checkbox">使える額の計算から除外</label>
+      <button class="text-button" type="button" data-plan-close>キャンセル</button>
       <button class="primary-button" type="submit">保存</button>
     </form>
   </dialog>
   <dialog id="shift-editor" class="detail-dialog" aria-labelledby="shift-editor-title">
     <div class="dialog-heading"><h2 id="shift-editor-title">シフト</h2><button type="button" class="icon-button" data-shift-close aria-label="閉じる">×</button></div>
     <form class="mail-fields">
-      <input type="hidden" name="date">
-      <label>勤務時間<input type="number" name="hours" min="0.25" max="24" step="0.25" inputmode="decimal" required></label>
+      <label>勤務日<input type="date" name="date" required></label>
+      <label>状態<select name="status"><option value="worked">勤務済み</option><option value="planned">勤務予定</option></select></label>
+      <label>勤務時間<input type="number" name="hours" min="0.25" max="24" step="0.25" inputmode="decimal" placeholder="0" required><small>15分は0.25、30分は0.5で入力</small></label>
+      <label>この日だけ時給を変更（任意）<input type="number" name="rate" min="0" step="1" inputmode="numeric" placeholder="基本時給を使用"></label>
+      <label>メモ<input type="text" name="memo" maxlength="60" placeholder="例：夕方シフト"></label>
       <button class="primary-button" type="submit">保存</button>
+      <button class="text-button" type="button" data-shift-close>キャンセル</button>
       <button class="text-button" type="button" data-shift-delete>削除</button>
     </form>
+  </dialog>
+  <dialog id="asset-editor" class="detail-dialog" aria-labelledby="asset-editor-title">
+    <div class="dialog-heading"><h2 id="asset-editor-title"></h2><button type="button" class="icon-button" data-asset-close aria-label="閉じる">×</button></div>
+    <form class="mail-fields"></form>
   </dialog>
   <div id="toast" class="toast" role="status"></div>
   <div id="announcement" class="sr-only" aria-live="polite"></div>
