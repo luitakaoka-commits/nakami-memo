@@ -72,6 +72,10 @@
   let cloud = null;
   let syncStatus = 'saved';
   let currentPage = 'home';
+  let mailSection = 'pending';
+  let planMonth = '';
+  let planDate = '';
+  let detailPeriod = '';
   let dailyCheckScope = 'all';
   let planFilter = 'all';
   let planDetailCardFilter = '';
@@ -672,7 +676,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=91" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=92" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -715,7 +719,14 @@
     detailCache = new Map();
     const titles = { home: 'ホーム', daily: '余力の内訳', checks: '確認すること', plans: '予定', records: '記録', accounts: '口座', shift: 'シフト', settings: '設定', spendable: '今使える金額', cashflow: '支払い能力チェック', imports: '取込候補' };
     $('#page-title').textContent = titles[currentPage] || titles.home;
-    $$('.nav-link[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === currentPage));
+    $$('.nav-link[data-page]').forEach(button => {
+      const active = button.dataset.page === currentPage && !button.dataset.sectionTarget
+        && (currentPage !== 'plans' || (button.dataset.planSection || 'all') === planFilter)
+        && (currentPage !== 'records' || (button.dataset.recordSection || 'transactions') === recordTab);
+      button.classList.toggle('active', active);
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
     const renderers = { home: renderHome, daily: renderDailyDetails, checks: renderDailyCheckDetails, plans: renderPlans, records: renderRecords, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
     const warning = ['home', 'daily', 'checks', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
     $('#page-container').innerHTML = warning + renderers[currentPage]();
@@ -974,6 +985,15 @@
     </details>`;
   }
 
+  function accountBalanceNote(item) {
+    const evidence = item.balanceEvidence;
+    const verified = evidence?.source === 'bank-manual' && evidence.amount === item.currentBalance && evidence.date;
+    const amount = formatDisplayedAmount(item.currentBalance);
+    return renderGuidance('銀行残高の確認', verified
+      ? `銀行で確認した残高：${amount}（${formatDate(evidence.date)}確認）`
+      : `登録した残高：${amount}（銀行の残高は未確認です）`);
+  }
+
   function renderHome() {
     let view;
     try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
@@ -982,10 +1002,9 @@
     const next = DAILY_STATUS[assessment.nextStatus];
     if (typeof window.__appStatus === 'function') window.__appStatus(`資金繰り：${status.label}`);
     return `<div class="daily-home" data-daily-home>
-      <div class="daily-heading"><span class="eyebrow">日々のお金</span><h1>今日の資金繰り</h1><p>${formatDate(today(), true)}の登録内容から試算</p></div>
+      <div class="daily-heading"><span class="eyebrow">${formatDate(today(), true)}</span><h1>資金繰り・試算</h1></div>
       <section class="card hero-card daily-hero">
-        <span class="eyebrow">今日ある残高だけで試算</span>
-        <h2>先の支払いを確保した後の残り</h2><h1 class="daily-amount ${amount.amount < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(amount.amount)}</h1>
+        <h2>使える額</h2><h1 class="daily-amount ${amount.amount < 0 ? 'value-negative' : ''}">${formatDisplayedAmount(amount.amount)}</h1>
         <dl class="daily-periods"><div><dt>使う期間</dt><dd>今日〜${formatDate(period.deadline, true)}の締め日</dd></div><div><dt>確保する支払い</dt><dd>今日〜${formatDate(amount.endDate, true)}</dd></div></dl>
         ${amount.endDate !== view.endDate ? '<p class="form-note">設定した予測期間より締め日が後のため、余力は締め日までの支払いを確保しています。</p>' : ''}
         ${amount.amount < 0 ? `<p class="daily-caution">支払い額と予備額を確保すると、${formatAbsoluteYen(amount.amount)}不足する見込みです。</p>` : ''}
@@ -1283,9 +1302,11 @@
     persist(); renderPage(); showToast('カードの対応を解除しました');
   }
 
+  const MAIL_SECTIONS = [['pending', '未取り込み'], ['accepted', '取り込み済み'], ['ignored', '無視']];
+
   function renderImports() {
     const rows = importCandidates
-      .slice()
+      .filter(candidate => mailSection === 'pending' ? ['pending', 'needs_review'].includes(candidate.status) : candidate.status === mailSection)
       .sort((a, b) => String(b.detectedAt || '').localeCompare(String(a.detectedAt || '')))
       .map(candidate => {
         const status = CANDIDATE_STATUS[candidate.status] || CANDIDATE_STATUS.pending;
@@ -1318,7 +1339,8 @@
     return `
       <div class="page-heading"><div><span class="eyebrow">取込候補</span><h1>通知・メールからの取込候補</h1></div><button class="button button-quiet button-small" data-page="settings">設定へ戻る</button></div>
       <section class="card info-card">
-        <p class="check-detail">カード利用のお知らせメールから作られた候補です。<strong>取り込むまでは、今使える金額にも支払い能力チェックにも反映されません。</strong>内容を確認して取り込むと、正式なカード取引になります。</p>
+        <div class="filters" role="group" aria-label="メールの状態">${MAIL_SECTIONS.map(([value, label]) => `<button type="button" class="filter-button ${value === mailSection ? 'active' : ''}" data-mail-section="${value}" aria-pressed="${value === mailSection}">${label}</button>`).join('')}</div>
+        ${mailSection === 'pending' ? renderGuidance('取り込みについて', 'まだ取り込んでいない候補は試算に含まれていません。カード、金額、日付と内容を確認してください。') : ''}
       </section>
       <section class="card info-card"><h2>メールとカードの対応</h2><p class="check-detail">候補でカードを選び「このカードの対応を覚える」を押すと、同じ差出人とカード名の候補に選択を表示します。種類が特定できない通知は覚えられません。</p>${(Array.isArray(state.settings.mailCardMappings) ? state.settings.mailCardMappings : []).map((item, i) => `<div>${esc(item.hint)} → ${esc(state.cards.find(card => card.id === item.cardId)?.name || '削除されたカード')} <button class="mini-button" data-action="forget-candidate-card" data-index="${i}">対応を解除</button></div>`).join('')}</section>
       <section class="card list-card">
@@ -2259,7 +2281,7 @@
     const foodTotal = food ? food.amount : 0;
     const slices = waste.total ? chartSlices(waste) : [];
 
-    return `<section class="card chart-card waste-card">
+    return `<section class="card chart-card waste-card" id="review">
       <div class="list-card-header"><div><span class="eyebrow">ムダ支出</span><h2>${esc(rangeLabel(range))}に捨てたもの</h2></div><strong class="value-negative">${formatAbsoluteYen(waste.total)}</strong></div>
       <div class="summary-strip">
         <div class="stat-card"><span>廃棄額</span><strong class="value-negative">${formatAbsoluteYen(waste.total)}</strong></div>
@@ -2389,6 +2411,25 @@
     }
   }
 
+  function renderForecastBars(view) {
+    const points = view.assessment.balancesByDate.map(point => ({ date: point.date, value: point.balances[view.primary.id] }));
+    const magnitude = Math.max(10000, ...points.map(point => Math.abs(point.value)));
+    const unit = Math.ceil(magnitude / 30000) * 10000;
+    const top = Math.max(unit, Math.ceil(Math.max(...points.map(point => point.value)) / unit) * unit);
+    const bottom = Math.min(0, Math.floor(Math.min(...points.map(point => point.value)) / unit) * unit);
+    const y = value => (top - value) * 160 / (top - bottom) + 12;
+    const width = Math.max(290, points.length * 42 + 55);
+    const ticks = [];
+    for (let amount = top; amount >= bottom; amount -= unit) {
+      ticks.push(`<line x1="51" x2="${width}" y1="${y(amount)}" y2="${y(amount)}" class="${amount === 0 ? 'forecast-zero' : 'forecast-gridline'}"/><text x="46" y="${y(amount) + 4}" text-anchor="end">${amount ? amount / 10000 + '万' : '0円'}</text>`);
+    }
+    const bars = points.map((point, index) => {
+      const x = 56 + index * (width - 56) / points.length;
+      return `<rect x="${x}" y="${y(Math.max(0, point.value))}" width="24" height="${Math.abs(y(0) - y(point.value))}" class="${point.value < 0 ? 'forecast-negative' : 'forecast-positive'}"><title>${formatDate(point.date)} ${formatDisplayedAmount(point.value)}</title></rect><text x="${x + 12}" y="190" text-anchor="middle">${formatDate(point.date)}</text>`;
+    });
+    return `<section class="card daily-details"><h2>予測残高</h2><p>${esc(view.primary.name)}</p><div class="table-scroll"><svg class="forecast-bars" role="img" aria-label="${esc(view.primary.name)}の予測残高。${esc(points.map(point => `${formatDate(point.date)} ${formatDisplayedAmount(point.value)}`).join('、'))}" width="${width}" height="200" viewBox="0 0 ${width} 200">${ticks.join('')}${bars.join('')}</svg></div></section>`;
+  }
+
   function renderCashflow() {
     let view;
     try { view = dailyOverview(); } catch (error) { return renderDailyError(error); }
@@ -2410,6 +2451,7 @@
       <section class="card check-hero daily-details ${status.tone}" data-daily-outlook><span class="eyebrow">${formatDate(scenario.today)}〜${formatDate(scenario.endDate)}・${view.horizonDays}日間</span><h2>${status.label}</h2>
       <div class="summary-strip"><div class="stat-card"><span>最初の不足見込み</span><strong>${shortfall ? formatDate(shortfall.date, true) : '未確認条件を確認'}</strong></div><div class="stat-card"><span>次のカード引落</span><strong>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '未登録'}</strong></div></div>
       <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></section>
+      ${renderForecastBars(view)}
       <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2>${renderGuidance('予測残高について', '登録した入出金がすべて予定どおりに行われた場合の残高です。')}${assessment.issues.some(issue => issue.type === 'same_day_income_unconfirmed') ? renderGuidance('同日の入金と引落', '引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。') : ''}<div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
       <section class="card daily-details"><h2>登録済みの入出金予定</h2><div class="daily-events">${events.map(e => `<div><span><strong>${formatDate(e.date, true)}</strong><small>${esc(accountName(e.accountId))}・${e.cardPayment ? 'カード請求' : e.kind === 'income' ? '予定入金' : e.kind === 'transfer' ? '予定振替' : '支払い'}</small></span><strong class="${e.kind === 'income' ? 'value-positive' : 'value-negative'}">${e.kind === 'income' ? '+' : '−'}${formatAbsoluteYen(e.amount + (e.additionalPossible || 0))}</strong></div>`).join('') || '<p>期間内の予定はありません。</p>'}</div><button class="button button-quiet" data-page="plans">予定を確認・修正</button></section>
       ${renderDailyChecks(view)}</div>`;
@@ -2491,7 +2533,22 @@
     const cardIds = [...new Set(details.map(item => item.cardId))]
       .sort((a, b) => cardName(a).localeCompare(cardName(b), 'ja'));
     if (!cardIds.includes(planDetailCardFilter)) planDetailCardFilter = cardIds[0] || '';
-    const selected = finance.sortByUsageDesc(details.filter(item => item.cardId === planDetailCardFilter));
+    const card = state.cards.find(item => item.id === planDetailCardFilter);
+    const cycle = item => finance.cardBillingCycleOf(item, card);
+    const cardDetails = finance.sortByUsageDesc(details.filter(item => item.cardId === planDetailCardFilter));
+    const periods = [...new Set(cardDetails.map(cycle).filter(Boolean))].sort().reverse();
+    const endOfCycle = month => {
+      const { endDate } = finance.calendarMonthRange(month);
+      const day = Math.min(Number(card?.closingDay) || 31, Number(endDate.slice(-2)));
+      return `${month}-${String(day).padStart(2, '0')}`;
+    };
+    const usagePeriod = month => {
+      const previous = new Date(`${endOfCycle(finance.shiftMonthKey(month, -1))}T00:00:00Z`);
+      previous.setUTCDate(previous.getUTCDate() + 1);
+      return `${formatDate(previous.toISOString().slice(0, 10))}〜${formatDate(endOfCycle(month))}（${month.slice(0, 4)}年）`;
+    };
+    if (!periods.includes(detailPeriod)) detailPeriod = '';
+    const selected = detailPeriod ? cardDetails.filter(item => cycle(item) === detailPeriod) : cardDetails;
     const pending = selected.filter(item => item.status === 'planned');
     const included = selected.filter(item => item.status === 'absorbed');
     const cardButtons = cardIds.map(id => {
@@ -2500,9 +2557,28 @@
     }).join('');
     return `
       <section class="card info-card"><p class="check-detail">カード利用の明細を、カードごとに表示します。請求総額がある分はその内訳として扱い、金額には重ねて計上しません。確定済みの内訳もここで確認できます。</p></section>
-      ${cardButtons ? `<div class="filters" role="group" aria-label="カードを選ぶ">${cardButtons}</div>` : ''}
+      ${periods.length ? `<label class="detail-period">利用期間<select id="detail-period"><option value="">すべて</option>${periods.map(period => `<option value="${esc(period)}" ${period === detailPeriod ? 'selected' : ''}>${usagePeriod(period)}</option>`).join('')}</select></label>` : ''}
+      ${cardButtons ? `<div class="filters card-detail-nav" role="group" aria-label="カードを選ぶ">${cardButtons}</div>` : ''}
       <div class="summary-strip"><div class="stat-card"><span>表示中の明細</span><strong>${selected.length}件</strong></div><div class="stat-card"><span>未確定の明細</span><strong>${pending.length}件</strong></div><div class="stat-card"><span>請求総額の内訳</span><strong>${included.length}件</strong></div></div>
       <section class="card list-card plan-detail-list"><div class="list-card-header"><h2>${planDetailCardFilter ? `${esc(cardName(planDetailCardFilter))}の明細` : 'カードの明細'}</h2><small class="muted">利用日の新しい順</small></div><div class="list">${renderTransactionRows(selected, false, 'usage') || emptyBlock('明細はありません', 'カード利用の明細を登録すると、カード別に表示されます。')}</div></section>`;
+  }
+
+  function renderPlanCalendar(transactions) {
+    const month = planMonth || today().slice(0, 7);
+    const { startDate, endDate } = finance.calendarMonthRange(month);
+    const firstWeekday = new Date(`${startDate}T00:00:00Z`).getUTCDay();
+    const plansByDate = new Map();
+    for (const plan of transactions) {
+      if (!plansByDate.has(plan.dueDate)) plansByDate.set(plan.dueDate, new Set());
+      plansByDate.get(plan.dueDate).add(plan.kind);
+    }
+    const cells = Array.from({ length: Number(endDate.slice(-2)) }, (_, index) => {
+      const day = index + 1;
+      const date = `${month}-${String(day).padStart(2, '0')}`;
+      const kinds = [...(plansByDate.get(date) || [])];
+      return `<button type="button" data-plan-day="${date}" aria-pressed="${date === planDate}" aria-label="${formatDate(date, true)}${kinds.length ? '、' + kinds.map(kind => kindMeta(kind).label).join('、') : ''}">${day}<span class="plan-markers" aria-hidden="true">${kinds.map(kind => `<span class="plan-marker" data-kind="${esc(kind)}">${icon(kindMeta(kind).icon)}</span>`).join('')}</span></button>`;
+    });
+    return `<section class="card daily-details plan-calendar"><div class="list-card-header"><button type="button" class="mini-button" data-plan-month-step="-1" aria-label="前の月">‹</button><h2>${month.replace('-', '年')}月</h2><button type="button" class="mini-button" data-plan-month-step="1" aria-label="次の月">›</button></div><div class="plan-grid">${[...'日月火水木金土'].map(day => `<span aria-hidden="true">${day}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(firstWeekday)}${cells.join('')}</div></section>`;
   }
 
   function renderPlans() {
@@ -2510,8 +2586,7 @@
     const mainPlans = planned.filter(transaction => transaction.entryType !== 'itemized');
     const details = state.transactions.filter(transaction => transaction.kind === 'payment'
       && transaction.entryType === 'itemized' && ['planned', 'absorbed'].includes(transaction.status));
-    const filters = [['all', 'すべて'], ['details', `明細 ${details.length}件`], ['payment', '支払い'], ['income', '収入'], ['saving', '貯金'], ['nisa', 'NISA'], ['transfer', '振込']];
-    const filtered = mainPlans.filter(transaction => planFilter === 'all' || transaction.kind === planFilter);
+    const filtered = mainPlans.filter(transaction => !planDate || transaction.dueDate === planDate);
     const deadline = getNextDeadline();
     const within = effectivePlannedTransactions().filter(transaction => transaction.dueDate <= deadline && transaction.dueDate >= today());
     const spendableIds = new Set(state.accounts.filter(item => !['savings', 'investment'].includes(item.role)
@@ -2520,9 +2595,9 @@
       .filter(delta => spendableIds.has(delta.accountId))
       .reduce((amount, delta) => amount + delta.delta, 0), 0);
     return `
-      <div class="page-heading"><div><span class="eyebrow">予定</span><h1>予定</h1></div></div>
-      <div class="filters">${filters.map(([value, label]) => `<button class="filter-button ${planFilter === value ? 'active' : ''}" data-plan-filter="${value}">${label}</button>`).join('')}</div>
+      <div class="page-heading"><h1>${planFilter === 'details' ? '明細' : '予定'}</h1></div>
       ${planFilter === 'details' ? renderPlanDetails(details) : `
+        ${renderPlanCalendar(mainPlans)}
         <div class="summary-strip"><div class="stat-card"><span>${formatDate(deadline)}までの計算対象</span><strong>${within.length}件</strong></div><div class="stat-card"><span>期限内の収支見込み</span><strong class="${withinAmount >= 0 ? 'value-positive' : 'value-negative'}">${formatSigned(withinAmount)}</strong></div><div class="stat-card"><span>登録済みの予定</span><strong>${mainPlans.length}件</strong></div></div>
         <section class="card list-card"><div class="list-card-header"><h2>予定一覧</h2><small class="muted">確定すると残高に反映</small></div><div class="list">${renderTransactionRows(filtered, false) || emptyBlock('この種類の予定はありません', 'ホームの「予定を追加」から登録できます。')}</div></section>`}`;
   }
@@ -2681,7 +2756,7 @@
       <section class="accounts-grid">${accounts.map(item => {
         const protectedAccount = ['savings', 'investment'].includes(item.role);
         const pending = pendingExp(item.id);
-        return `<article class="account-card ${protectedAccount ? 'account-protected' : ''}"><div class="account-top"><div><div class="account-role">${roleLabel(item.role)}</div><div class="account-name">${esc(item.name)}${item.isPrimary ? ' <span class="badge badge-settled">基準</span>' : ''}</div></div><div class="list-actions"><button class="mini-button" data-action="edit-account" data-id="${item.id}" aria-label="${esc(item.name)}を編集">編集</button><button class="mini-button danger" data-action="delete-account" data-id="${item.id}" aria-label="${esc(item.name)}を削除">削除</button></div></div><div class="account-balance">${formatDisplayedAmount(item.currentBalance)}</div><div class="account-bottom"><span>${item.balanceEvidence?.source === 'bank-manual' && item.balanceEvidence.amount === item.currentBalance ? '銀行残高確認 ' + esc(item.balanceEvidence.date) : '銀行残高は要確認'}</span></div><div class="account-bottom"><span>${protectedAccount ? '計算に含めない' : item.includeInSpendable ? '計算に含める' : '計算から除外'}</span><span>${pending ? `予定 ${formatFlowAmount(pending, 'out')}` : '予定なし'}</span></div></article>`;
+        return `<article class="account-card ${protectedAccount ? 'account-protected' : ''}"><div class="account-top"><div><div class="account-role">${roleLabel(item.role)}</div><div class="account-name">${esc(item.name)}${item.isPrimary ? ' <span class="badge badge-settled">基準</span>' : ''}</div></div><div class="list-actions"><button class="mini-button" data-action="edit-account" data-id="${item.id}" aria-label="${esc(item.name)}を編集">編集</button><button class="mini-button danger" data-action="delete-account" data-id="${item.id}" aria-label="${esc(item.name)}を削除">削除</button></div></div><div class="account-balance">${formatDisplayedAmount(item.currentBalance)}</div>${accountBalanceNote(item)}<div class="account-bottom"><span>${protectedAccount ? '計算に含めない' : item.includeInSpendable ? '計算に含める' : '計算から除外'}</span><span>${pending ? `予定 ${formatFlowAmount(pending, 'out')}` : '予定なし'}</span></div></article>`;
       }).join('') || '<div class="card empty" style="grid-column:1/-1"><div><strong>口座を追加してください</strong>口座を登録すると計算できます。</div></div>'}</section>
       <section class="card cards-section"><div class="list-card-header"><div><span class="eyebrow">支払い方法</span><h2>クレジットカード</h2></div><button class="button button-quiet button-small" data-action="add-card">カードを追加</button></div><div class="credit-card-grid">${cards.map(item => `<article class="credit-card-item"><div class="credit-card-mark">${icon('card')}</div><div class="credit-card-main"><strong>${esc(item.name)}</strong><small>${esc(accountName(item.accountId))}から引落し</small><span>${item.closingDay ? `${item.closingDay}日締め` : '月末締め'} ・ ${item.paymentDay ? `${item.paymentDay}日払い` : '支払日未設定'}</span></div><div class="list-actions"><button class="mini-button" data-action="edit-card" data-id="${item.id}">編集</button><button class="mini-button danger" data-action="delete-card" data-id="${item.id}">削除</button></div></article>`).join('') || emptyBlock('カードは未登録です', '追加すると、支払いをカード別に記録できます。')}</div></section>`;
   }
@@ -2819,7 +2894,7 @@
     const rows = state.recurringPlans.filter(item => !item.kind || item.kind === 'payment').map(item =>
       `<div class="settings-inline"><span>${esc(item.name || '定期予定')}${item.isActive === false ? '（停止中）' : ''}</span><button class="button button-quiet button-small" data-action="edit-recurring" data-id="${esc(item.id)}">編集</button></div>`
     ).join('');
-    return `<section class="settings-card"><h2>定期支払い</h2>${rows}
+    return `<section class="settings-card" id="recurring"><h2>定期支払い</h2>${rows}
       <form id="recurring-plan-form" class="form-stack">
         <label><span>名前</span><input name="name" required maxlength="40" value="${esc(plan?.name || '')}"></label>
         <label><span>見込み金額（円）</span><input name="amount" type="number" min="1" step="1" required value="${esc(plan?.amount ?? '')}"></label>
@@ -3089,11 +3164,11 @@
     $('#event-recipient').required = isTransfer && !isInternalTransfer;
     $('#event-source-label').textContent = ['income', 'reimbursement'].includes(kind) ? '入金先口座' : '出金元口座';
     $('#event-destination-label').textContent = isInternalTransfer ? '移動先口座' : '移動先口座（任意）';
-    $('#event-form-note').textContent = kind === 'income'
-      ? '予定収入は、期限までの使える額に加算します。'
-      : isTransfer
-        ? (isInternalTransfer ? '自分の別口座へ移動します。使える金額は変わりません。' : '他人口座への振込です。期限までの使える金額から差し引きます。')
-        : ['saving', 'nisa'].includes(kind) ? '予定で保存します。確定すると残高に反映します。' : '予定で保存します。確定すると残高に反映します。';
+    const status = $('#event-status').value;
+    const editingSettled = state.transactions.some(item => item.id === $('#event-id').value && item.status === 'settled');
+    $('#event-form-note').textContent = status === 'settled'
+      ? (editingSettled ? '訂正すると口座残高も変わります。' : '入出金を確定すると登録した口座残高に反映されます。')
+      : '予定を保存すると見通しに反映されます。';
   }
 
   function openCardCancellation(id) {
@@ -3473,7 +3548,7 @@
       return;
     }
     const cycle = finance.cardBillingCycleOf(transaction, card, holidayOptions());
-    if (!window.confirm(card.name + 'の請求額 ' + formatAbsoluteYen(transaction.amount) + '（引落日 ' + formatDate(transaction.dueDate, true) + '）をカード会社の明細で確認しましたか？')) return;
+    if (!window.confirm(card.name + '・' + formatAbsoluteYen(transaction.amount) + '（引落日 ' + formatDate(transaction.dueDate, true) + '）\nカード会社で確認した請求額を保存します。')) return;
     transaction.statementEvidence = { source: 'issuer-manual', cardId: card.id, accountId: card.accountId,
       dueDate: transaction.dueDate, amount: transaction.amount, cycle, checkedAt: nowIso() };
     try {
@@ -3568,8 +3643,10 @@
     const transaction = state.transactions.find(item => item.id === id);
     if (!transaction) return;
     if (hasLinkedRefund(transaction) || hasRefundDestination(id)) { showToast('返金と紐付いた取引は直接削除できません'); return; }
-    const salaryNote = transaction.salaryPaymentMonth ? '\nこの月の給与は、シフトから作り直しません（シフト画面から戻せます）。' : '';
-    if (!window.confirm(`${transaction.memo || kindMeta(transaction.kind).label}を削除しますか？${transaction.status === 'settled' ? '\n確定済みのため、残高も元に戻します。' : ''}${salaryNote}`)) return;
+    const salaryNote = transaction.salaryPaymentMonth ? '\n削除すると、この月の給与見込みは自動では作り直されません。' : '';
+    const details = state.transactions.filter(item => item.status === 'absorbed' && item.absorbedBy === id && item.refundEvidence?.destinationStatementId !== id).length;
+    const detailNote = details ? `\nこの請求を削除すると内訳${details}件が未確定に戻ります。` : '';
+    if (!window.confirm(`${transaction.memo || kindMeta(transaction.kind).label}を削除しますか？${transaction.status === 'settled' ? '\n確定済みのため、残高も元に戻します。' : ''}${salaryNote}${detailNote}`)) return;
     if (transaction.status === 'settled') revertEffect(transaction);
     // 消した給与の月は覚えておく。覚えないと、シフトから同じ見込みがすぐ作り直される
     if (transaction.salaryPaymentMonth) {
@@ -3883,11 +3960,43 @@
 
   function handleClick(event) {
     const pageButton = event.target.closest('[data-page]');
-    if (pageButton) { currentPage = pageButton.dataset.page; if (currentPage === 'checks') dailyCheckScope = pageButton.dataset.check || 'all'; $('#sidebar').classList.remove('open'); renderPage(); window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); return; }
-    const planButton = event.target.closest('[data-plan-filter]');
-    if (planButton) { planFilter = planButton.dataset.planFilter; renderPage(); return; }
+    if (pageButton) {
+      currentPage = pageButton.dataset.page;
+      if (currentPage === 'checks') dailyCheckScope = pageButton.dataset.check || 'all';
+      if (currentPage === 'plans') planFilter = pageButton.dataset.planSection || 'all';
+      if (currentPage === 'records') recordTab = pageButton.dataset.recordSection || 'transactions';
+      if (currentPage === 'imports') mailSection = 'pending';
+      if ($('#sidebar').open) $('#sidebar').close();
+      renderPage();
+      const section = document.getElementById(pageButton.dataset.sectionTarget || '');
+      if (section) section.scrollIntoView();
+      else window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      return;
+    }
+    const mailButton = event.target.closest('[data-mail-section]');
+    if (mailButton) {
+      mailSection = mailButton.dataset.mailSection;
+      renderPage();
+      $(`[data-mail-section="${mailSection}"]`)?.focus();
+      return;
+    }
+    const planDay = event.target.closest('[data-plan-day]');
+    if (planDay) {
+      planDate = planDate === planDay.dataset.planDay ? '' : planDay.dataset.planDay;
+      renderPage();
+      $(`[data-plan-day="${planDay.dataset.planDay}"]`)?.focus();
+      return;
+    }
+    const planStep = event.target.closest('[data-plan-month-step]');
+    if (planStep) {
+      planMonth = finance.shiftMonthKey(planMonth || today().slice(0, 7), Number(planStep.dataset.planMonthStep));
+      planDate = '';
+      renderPage();
+      $(`[data-plan-month-step="${planStep.dataset.planMonthStep}"]`)?.focus();
+      return;
+    }
     const planCardButton = event.target.closest('[data-plan-detail-card]');
-    if (planCardButton) { planDetailCardFilter = planCardButton.dataset.planDetailCard; renderPage(); return; }
+    if (planCardButton) { planDetailCardFilter = planCardButton.dataset.planDetailCard; detailPeriod = ''; renderPage(); return; }
     const recordButton = event.target.closest('[data-record-filter]');
     if (recordButton) { recordFilter = recordButton.dataset.recordFilter; renderPage(); return; }
     const action = event.target.closest('[data-action]');
@@ -3993,8 +4102,46 @@
       if (event.target.classList.contains('add-menu-backdrop')) closeAddMenu();
       handleClick(event);
     });
-    $('#menu-button').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+    const menu = $('#sidebar');
+    const content = $('#page-container');
+    content.addEventListener('change', event => {
+      if (event.target.id !== 'detail-period') return;
+      detailPeriod = event.target.value;
+      renderPage();
+      $('#detail-period')?.focus();
+    });
+    let touchStart;
+    content.addEventListener('touchstart', event => {
+      touchStart = event.touches.length === 1 && !event.target.closest('input, select, textarea, button') ? event.touches[0] : null;
+    }, { passive: true });
+    content.addEventListener('touchcancel', () => { touchStart = null; });
+    content.addEventListener('touchend', event => {
+      const start = touchStart;
+      touchStart = null;
+      const end = event.changedTouches[0];
+      if (!start || !end) return;
+      const dx = end.clientX - start.clientX;
+      if (Math.abs(dx) < 55 || Math.abs(dx) <= 1.5 * Math.abs(end.clientY - start.clientY)) return;
+      const buttons = currentPage === 'imports' ? $$('[data-mail-section]')
+        : currentPage === 'plans' && planFilter === 'details' ? $$('[data-plan-detail-card]') : [];
+      const index = buttons.findIndex(button => button.getAttribute('aria-pressed') === 'true');
+      if (index >= 0) buttons[index + (dx < 0 ? 1 : -1)]?.click();
+    }, { passive: true });
+    const menuButton = $('#menu-button');
+    menuButton.addEventListener('click', () => {
+      menu.showModal();
+      menuButton.setAttribute('aria-expanded', 'true');
+    });
+    $('#menu-close').addEventListener('click', () => menu.close());
+    menu.addEventListener('click', event => {
+      if (event.target === menu && event.clientX > menu.getBoundingClientRect().right) menu.close();
+    });
+    menu.addEventListener('close', () => {
+      menuButton.setAttribute('aria-expanded', 'false');
+      if (!$('#app-shell').hidden) menuButton.focus({ preventScroll: true });
+    });
     $('#event-kind').addEventListener('change', updateEventKindUi);
+    $('#event-status').addEventListener('change', updateEventKindUi);
     $('#event-transfer-type').addEventListener('change', updateEventKindUi);
     $('#event-card').addEventListener('change', () => { updateCardDateUi(); syncCardSourceAccount(true); });
     $('#event-usage-date').addEventListener('change', () => syncCardSourceAccount(true));

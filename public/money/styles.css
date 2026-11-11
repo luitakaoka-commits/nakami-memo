@@ -1345,3 +1345,65 @@ input:not([type="checkbox"]):not([type="radio"]), select, textarea, .amount-inpu
 @keyframes money-note-reveal { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 @media (hover: hover) { .note-toggle:hover .note-mark { border-color: var(--ledger-brand); background: var(--ledger-soft); } }
 @media (prefers-reduced-motion: reduce) { .note-mark { transition: none; } .operation-note[open] > .note-glass { animation: none; } }
+
+/* Mobile navigation and transaction views */
+body {
+  --bg: #fffdf8;
+  --bg-raised: #fffdf8;
+  --surface: #fff;
+  --surface-soft: #f4efe6;
+  --surface-page: #fffdf8;
+  --ink: #352c2b;
+  --muted: #71645f;
+  --line: #dfd6c9;
+  --ledger-rule-dark: var(--line);
+  --ledger-on-dark: var(--ink);
+  --ledger-muted-dark: var(--muted);
+  --ledger-soft: #f4efe6;
+  --radius: 16px;
+  --shadow-card: none;
+  --font-ledger: "Kiwi Maru", system-ui, sans-serif;
+  --font-ledger-body: var(--font-ledger);
+  --font-ledger-number: var(--font-ledger);
+}
+button, input, select, textarea { font-family: var(--font-ledger); }
+h1, h2, .nav-link, .topbar-title, .page-heading h1, .card h2, .settings-card h2, .account-card h2, .modal h2 { font-weight: 500; }
+.app-shell { display: block; }
+.topbar .menu-button { display: grid; place-items: center; }
+.button-primary, .floating-add, .mini-button.primary { color: #fff; }
+.topbar .menu-button { width: 44px; height: 44px; }
+.topbar-brand { display: none; }
+.topbar-context { border: 0; padding-left: 0; }
+@media (max-width: 600px) { .daily-home { --daily-space: 18px; } }
+.money-sidebar { position: fixed; inset: 0 auto 0 0; margin: 0; width: min(20rem, 88vw); max-width: none; max-height: none; height: 100dvh; padding: 1.25rem; overflow: auto; border: 0; background: var(--bg-raised); color: var(--ledger-on-dark); }
+.money-sidebar:not([open]) { display: none; }
+.money-sidebar[open] { display: flex; flex-direction: column; gap: 1rem; animation: money-menu-enter 200ms ease-out both; }
+.money-sidebar::backdrop { background: rgb(25 16 18 / 52%); }
+.money-sidebar .nav-link, .money-sidebar #menu-close { color: inherit; min-height: 44px; }
+.money-sidebar #menu-close { align-self: flex-end; }
+.money-sidebar .nav-link.active, .money-sidebar .nav-link:hover { background: var(--ledger-soft); color: var(--ledger-brand); }
+.money-sidebar .primary-nav { display: grid; gap: .2rem; }
+@keyframes money-menu-enter { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .money-sidebar[open] { animation: none; } }
+.main { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+.floating-add { bottom: calc(1rem + env(safe-area-inset-bottom)); }
+.plan-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; text-align: center; }
+.plan-grid > button { display: grid; justify-items: center; align-content: center; min-height: 44px; padding: 2px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); }
+.plan-grid > button[aria-pressed="true"] { border-color: var(--ledger-brand); background: var(--ledger-soft); }
+.plan-markers { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; min-height: 8px; }
+.plan-marker { display: inline-flex; color: #ad3449; }
+.plan-marker .ui-icon { width: 12px; height: 12px; }
+.plan-marker[data-kind="income"], .plan-marker[data-kind="reimbursement"] { color: #226abb; }
+.plan-marker[data-kind="transfer"] { color: #77529a; }
+.plan-marker[data-kind="saving"], .plan-marker[data-kind="nisa"] { color: #397960; }
+.forecast-bars { display: block; min-width: 100%; font-size: 10px; fill: var(--ink); }
+.forecast-gridline { stroke: var(--line); }
+.forecast-zero { stroke: var(--ink); stroke-width: 1.5; }
+.forecast-positive { fill: #226abb; }
+.forecast-negative { fill: #ad3449; }
+.detail-period { display: grid; gap: .35rem; margin-bottom: .75rem; }
+.card-detail-nav { position: fixed; z-index: 44; inset: auto 0 0; display: flex; flex-wrap: nowrap; overflow-x: auto; margin: 0; padding: .5rem max(1rem, env(safe-area-inset-right)) calc(.5rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); background: var(--surface); border-top: 1px solid var(--line); }
+.card-detail-nav button { flex-shrink: 0; min-height: 44px; }
+body:has(.card-detail-nav) .floating-add { bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
+body:has(.card-detail-nav) .main { padding-bottom: calc(8.5rem + env(safe-area-inset-bottom)); }
+#review, #recurring { scroll-margin-top: 8rem; }

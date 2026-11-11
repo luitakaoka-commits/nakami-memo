@@ -135,6 +135,13 @@ const closeModals = page => page.evaluate(() => {
 
   await record('daily_use_home', async () => {
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
+    await page.locator('#menu-button').click();
+    assert(await page.locator('#sidebar').evaluate(menu => menu.open), 'ハンバーガーメニューが開かない');
+    await page.locator('#sidebar [data-page="cashflow"]').click();
+    assert(await page.locator('.forecast-bars .forecast-zero').count() === 1, '予測残高の0円基準線がない');
+    assert(await page.locator('.forecast-bars rect').count() > 1, '予測残高を棒グラフで確認できない');
+    assert(!(await page.locator('#sidebar').evaluate(menu => menu.open)), '画面切替後もメニューが開いている');
+    await page.evaluate(() => window.__YORYOKU__.setPage('home'));
     assert(await page.locator('[data-daily-home]').count() === 1, '新しい日常画面が表示されていない');
     assert((await page.locator('.daily-hero').innerText()).includes('9月15日'), '主要カードの15日締めが表示されていない');
     // 基準口座30万円−家賃8万円−カード8万円−予備15万円。別口座や予定給与は足さない。
@@ -360,6 +367,18 @@ const closeModals = page => page.evaluate(() => {
     await page.evaluate(() => window.__YORYOKU__.setPage('home'));
     await page.getByRole('button', { name: 'メール取込を確認', exact: true }).click();
     assert(await page.getByRole('heading', { name: '通知・メールからの取込候補' }).isVisible(), '未確認0件のホームから取込候補を確認できない');
+    assert(await page.locator('[data-mail-section="pending"]').getAttribute('aria-pressed') === 'true', '最初に未取り込みが表示されない');
+    await page.locator('.candidate-list').evaluate(node => {
+      const swipe = (type, field, clientX) => {
+        const event = new Event(type, { bubbles: true });
+        Object.defineProperty(event, field, { value: [{ clientX, clientY: 100 }] });
+        node.dispatchEvent(event);
+      };
+      swipe('touchstart', 'touches', 280);
+      swipe('touchend', 'changedTouches', 120);
+    });
+    assert(await page.locator('[data-mail-section="accepted"]').getAttribute('aria-pressed') === 'true', 'スワイプで取り込み済みに切り替わらない');
+    await page.locator('[data-mail-section="pending"]').click();
     const CANDIDATES = [
       { id: 'cand1', sourcePackage: 'jcb.co.jp', sourceLabel: 'JCB', detectedAt: '2026-08-24T10:00:00.000Z', usedDate: '2026-08-24', amount: 12000, cardHint: 'メインカード', merchant: 'ローソン', type: 'purchase', status: 'pending', fingerprint: 'fp-a', note: '' },
       { id: 'cand2', sourcePackage: 'rakuten-card.co.jp', sourceLabel: '楽天カード', detectedAt: '2026-08-24T10:05:00.000Z', usedDate: '2026-08-24', amount: 12000, cardHint: 'メインカード', type: 'purchase', status: 'pending', fingerprint: 'fp-a', note: '' },
@@ -654,9 +673,16 @@ const closeModals = page => page.evaluate(() => {
     const names = () => page.locator('#page-container .list-row');
     assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '「すべて」に明細が混ざっている');
     assert(await names().filter({ hasText: 'セブン' }).count() === 0, '「すべて」に新しい明細が混ざっている');
-    await page.click('[data-plan-filter="payment"]');
-    assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '「支払い」に明細が混ざっている');
-    await page.click('[data-plan-filter="details"]');
+    assert(await page.locator('.plan-grid button').count() >= 28, '予定に月間カレンダーがない');
+    const day = page.locator('.plan-grid button').first();
+    await day.click();
+    assert(await day.getAttribute('aria-pressed') === 'true', 'カレンダーの日付を選べない');
+    assert(await names().filter({ hasText: 'ローソン' }).count() === 0, '日付を選んだ予定に明細が混ざっている');
+    await day.click();
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-plan-section="details"]').click();
+    assert(await page.locator('.card-detail-nav').isVisible(), '明細のカード切替が表示されない');
+    assert(await page.locator('#detail-period').isVisible(), '利用期間を選べない');
     assert(await page.locator('[data-plan-detail-card="c1"]').count() === 1, '1枚目のカードが選べない');
     assert(await page.locator('[data-plan-detail-card="c2"]').count() === 1, '2枚目のカードが選べない');
     assert(await names().filter({ hasText: 'セブン' }).count() === 1, '1枚目の明細が見えない');
@@ -675,7 +701,9 @@ const closeModals = page => page.evaluate(() => {
       state.transactions = state.transactions.filter(item => item.id !== 'dx-other');
       window.__YORYOKU__.setPage('plans');
     });
-    await page.click('[data-plan-filter="all"]');
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-page="plans"]:not([data-plan-section])').click();
+    assert(await page.locator('.card-detail-nav').count() === 0, '予定にカード切替が表示されている');
   });
 
   await record('duplicate_statement_blocked', async () => {

@@ -48,6 +48,7 @@
     const projected = new Map(confirmed);
     const issues = [];
     const timeline = [];
+    const balancesByDate = [{ date: today, balances: Object.fromEntries(projected) }];
     // 開始残高の不足は、予定がない日や同日入金がある日でも残す。
     for (const [accountId, balance] of projected) {
       if (balance < 0) issues.push({ type: 'projected_shortfall', accountId, date: today, amount: -balance, phase: 'opening' });
@@ -108,6 +109,7 @@
       // 入金・振替は当日引落に間に合う保証がないので、同日の判定後に反映。
       for (const event of day.filter(item => item.kind === 'income')) projected.set(event.accountId, add(projected.get(event.accountId), event.amount));
       for (const event of day.filter(item => item.kind === 'transfer')) projected.set(event.toAccountId, add(projected.get(event.toAccountId), event.amount));
+      balancesByDate.push({ date, balances: Object.fromEntries(projected) });
       // カード以外も含め、各口座の不足と水道代等の不確実な予定を追跡する。
       for (const [accountId] of accounts) {
         if (projected.get(accountId) < 0) issues.push({ type: 'projected_shortfall', accountId, date, amount: -projected.get(accountId) });
@@ -123,7 +125,7 @@
         : nextPayments.some(item => item.status === 'review') ? 'review' : 'safe';
     const futureStatus = issues.some(issue => issue.type === 'projected_shortfall') ? 'shortfall'
       : !timeline.length || issues.length || [...accounts.values()].some(isUnreliable) ? 'review' : 'safe';
-    return { nextDate, nextStatus, nextPayments, futureStatus, timeline, issues };
+    return { nextDate, nextStatus, nextPayments, futureStatus, timeline, balancesByDate, issues };
   }
 
   function spendingAllowance(input, { deadline, accountId, reserve = 0 } = {}) {
