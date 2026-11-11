@@ -1460,3 +1460,40 @@ body:has(.card-detail-nav) .main { padding-bottom: calc(8.5rem + env(safe-area-i
 .prototype-flow .candidate-row { display: grid; margin-bottom: 14px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .prototype-flow .candidate-edit-fields { grid-template-columns: minmax(0, 1fr); }
 .prototype-flow .candidate-edit-fields input, .prototype-flow .candidate-edit-fields select { min-height: 44px; font-size: 16px; }
+
+.plan-marks { display: grid; grid-template-columns: repeat(3, minmax(0, 12px)); justify-content: center; min-height: 15px; gap: 1px; font-size: 13px; line-height: 1; }
+.plan-mark { display: inline-grid; place-items: center; width: 16px; min-height: 16px; line-height: 1; }
+.plan-mark svg { width: 100%; height: auto; stroke-width: 2; }
+.plan-marks .plan-mark { width: 100%; min-height: 15px; border-radius: 3px; background: var(--soft); }
+.plan-marks .plan-mark:only-child { grid-column: 2; }
+.plan-mark.in { color: var(--chart-positive); }
+.plan-mark.out { color: var(--chart-negative); }
+.plan-mark.saving { color: #467057; }
+.plan-mark.nisa { color: #695185; }
+.plan-mark.reimbursement { color: #236c72; }
+.plan-mark.transfer { color: #715b42; }
+.plan-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; }
+.plan-legend > span, .plan-kind { display: flex; align-items: center; gap: 4px; }
+.plan-mark svg { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+.plan-calendar { --soft: #f4efe6; --chart-positive: #2873bf; --chart-negative: #c53c45; }
+
+.account-summary-row { padding-block: 12px; border-top: 1px solid var(--line); }
+.account-actions { justify-content: flex-start; }
+.account-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.money-credit-card { min-height: 96px; display: grid; align-content: space-between; gap: 12px; padding: 12px; border-radius: 12px; color: white; background: #713745; overflow-wrap: anywhere; }
+.money-credit-card[data-style="1"] { background: #276457; }
+.money-credit-card[data-style="2"] { background: #3b5370; }
+.money-credit-card .ui-icon { width: 24px; height: 24px; }
+.account-card-grid section > p { font-size: 12px; }
+.account-card-grid .account-actions { flex-wrap: wrap; gap: 4px; }
+.record-summary .ledger.summary-strip { display: block; margin: 0 0 12px; }
+.record-summary .ledger .stat-card { min-height: 0; box-shadow: none; border: 0; background: transparent; }
+.record-summary .ledger .ledger-total { border-top: 1px solid var(--line); }
+.record-chart-type { display: grid; gap: 4px; }
+.record-chart .chart-card { padding-inline: 0; border: 0; box-shadow: none; }
+.settings-flow > details > summary, #subaccounts > summary { min-height: 44px; cursor: pointer; font-weight: 500; }
+.settings-flow > details > .form-stack { margin-top: 12px; }
+
+.prototype-flow.daily-home { display: block; }
+.prototype-flow .page-heading .eyebrow { display: block; margin: 0 0 4px; color: var(--muted); font-size: 12px; font-weight: 400; letter-spacing: 0; }
+.money-header-caption { font-size: 12px; color: var(--muted); white-space: nowrap; }

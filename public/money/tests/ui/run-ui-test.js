@@ -105,6 +105,52 @@ const closeModals = page => page.evaluate(() => {
   await page.goto(`http://localhost:${PORT}${APP_PATH}`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => Boolean(window.__YORYOKU__), null, { timeout: 10000 }).catch(() => {});
 
+  const openSettingsSection = async section => {
+    const panel = page.locator(`[data-settings-section="${section}"]`);
+    if (!(await panel.evaluate(element => element.open))) await panel.locator('summary').click();
+  };
+  const selectPlanDay = async date => {
+    const calendar = page.locator('[data-plan-month]');
+    const target = date.slice(0, 7);
+    for (let step = 0; step < 12; step++) {
+      const month = await calendar.getAttribute('data-plan-month');
+      if (month === target) break;
+      await calendar.locator(`[data-plan-month-step="${month < target ? 1 : -1}"]`).click();
+    }
+    await calendar.locator(`[data-plan-day="${date}"]`).click();
+  };
+
+  await record('independent_mobile_menu_routes', async () => {
+    const routes = { home: '資金繰り・試算', cashflow: '支払いの見通し', plans: '予定', records: '記録', imports: 'メール確認', accounts: '口座・カード', shift: 'シフト・給与', receipts: 'レシート', review: 'ふりかえり・ムダ支出', recurring: '定期支払い', settings: '設定' };
+    for (const width of [320, 375, 390, 414]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const [route, label] of Object.entries(routes)) {
+        await page.locator('#menu-button').click();
+        await page.locator(`#sidebar [data-page="${route}"]`).click();
+        assert((await page.locator('#page-title').innerText()) === label, `${label}の独立画面が開かない`);
+        assert(await page.locator('#sidebar [aria-current="page"]').count() === 1, `${label}で現在位置が複数表示される`);
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${label}が${width}pxで横にはみ出す`);
+        assert(await page.locator('#floating-add').isVisible(), `${label}でFABが使えない`);
+        if (route === 'records') assert(!(await page.locator('#page-container').innerText()).includes('レシート'), '記録にレシートが残っている');
+        if (route === 'settings') assert(await page.locator('#recurring-plan-form').count() === 0, '設定に定期支払いが残っている');
+        if (route === 'plans') {
+          const legend = page.locator('.plan-legend');
+          assert(await legend.locator('.plan-mark').count() === 6, '予定の凡例に6種類のアイコンがない');
+          assert(await legend.locator('[data-kind="income"]').innerText() === '+' && await legend.locator('[data-kind="payment"]').innerText() === '−', '収入・支出の記号が試作と違う');
+          assert(await legend.locator('svg').count() === 4, '貯金・NISA・立替回収・振込の独自アイコンがない');
+        }
+      }
+    }
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-page="receipts"]').click();
+    await page.reload({ waitUntil: 'networkidle' });
+    assert((await page.locator('#page-title').innerText()) === 'レシート', 'レシート画面を再読み込みすると別の画面になる');
+    await page.locator('#menu-button').click();
+    await page.locator('#sidebar [data-page="home"]').click();
+    await page.evaluate(() => history.replaceState(null, '', location.pathname));
+    await page.setViewportSize({ width: 390, height: 844 });
+  });
+
   await record('approved_cashflow_layout', async () => {
     const sections = page.locator('[data-daily-home] > .sheet');
     assert(await sections.count() === 3, '資金繰りの3つの枠が揃っていない');
@@ -269,6 +315,7 @@ const closeModals = page => page.evaluate(() => {
     const snapshot = await page.evaluate(() => structuredClone(window.__YORYOKU__.getState()));
     try {
       await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+      await openSettingsSection('calculation');
       await page.locator('#settings-horizon').selectOption('30');
       await page.locator('#settings-form [type="submit"]').click();
       await page.evaluate(() => window.__YORYOKU__.setPage('home'));
@@ -287,6 +334,7 @@ const closeModals = page => page.evaluate(() => {
       await page.getByText('引落の内訳', { exact: true }).click();
       assert((await page.locator('[data-daily-outlook] > .eyebrow').innerText()).includes('30日間'), '再読込後の画面が90日へ戻る');
       await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+      await openSettingsSection('calculation');
       await page.locator('#settings-horizon').selectOption('90');
       await page.locator('#settings-form [type="submit"]').click();
       await page.evaluate(() => window.__YORYOKU__.setPage('cashflow'));
@@ -607,6 +655,8 @@ const closeModals = page => page.evaluate(() => {
   await record('settle_and_unsettle', async () => {
     await closeModals(page);
     await page.evaluate(() => window.__YORYOKU__.setPage('plans'));
+    const plannedDate = await page.evaluate(() => window.__YORYOKU__.getState().transactions.filter(item => item.status === 'planned' && !item.cardId).map(item => item.dueDate).sort()[0]);
+    await selectPlanDay(plannedDate);
     await page.waitForSelector('[data-action="settle-event"]');
     const id = await page.$eval('[data-action="settle-event"]', el => el.dataset.id);
     const before = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').currentBalance);
@@ -660,6 +710,7 @@ const closeModals = page => page.evaluate(() => {
       return ['dx-st', 'dx-old', 'dx-new'];
     });
     assert(ids.length === 3, '検証用データを作れなかった');
+    await selectPlanDay('2026-10-13');
     await page.waitForTimeout(200);
 
     const toggle = page.locator('[data-action="toggle-details"][data-id="dx-st"]');
@@ -731,6 +782,7 @@ const closeModals = page => page.evaluate(() => {
 
   await record('duplicate_statement_blocked', async () => {
     await closeModals(page);
+    await selectPlanDay('2026-10-13');
     const before = await page.evaluate(() => window.__YORYOKU__.getState().transactions.length);
     assert(await page.locator('.statement-duplicate-warning').count() === 1, '既存の重複した総額に警告が出ない');
     await page.click('#floating-add');
@@ -779,6 +831,7 @@ const closeModals = page => page.evaluate(() => {
     assert(await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').balanceEvidence?.source === 'bank-manual'), '銀行残高の確認が保存されていない');
     const before = await page.evaluate(() => window.__YORYOKU__.getState().accounts.find(a => a.id === 'a1').currentBalance);
     await page.evaluate(() => window.__YORYOKU__.setPage('plans'));
+    await selectPlanDay('2026-10-13');
     await page.waitForTimeout(150);
     await page.click('[data-action="settle-event"][data-id="dx-st"]');
     await page.getByText('引落を記録する前にカード会社の請求額を確認してください', { exact: true }).waitFor();
@@ -924,7 +977,7 @@ const closeModals = page => page.evaluate(() => {
     assert(summary[2].value.includes('40,000'), `差引が合っていない: ${summary[2].value}`);
 
     const donuts = await page.evaluate(() => document.querySelectorAll('#page-container .donut svg').length);
-    assert(donuts === 2, `円グラフが2つ描かれていない: ${donuts}`);
+    assert(donuts === 1, `選択した内訳の円グラフが1つ描かれていない: ${donuts}`);
     const arcs = await page.evaluate(() => document.querySelectorAll('#page-container .chart-card:first-child .donut-arc').length);
     assert(arcs === 2, `支出の内訳が2区分になっていない: ${arcs}`);
 
@@ -938,6 +991,9 @@ const closeModals = page => page.evaluate(() => {
     const extra = await page.evaluate(() => document.querySelector('#page-container .record-extra').textContent);
     assert(extra.includes('20,000'), `貯蓄・投資が別枠で出ていない: ${extra.slice(0, 80)}`);
     assert(!legend.some(row => row.includes('貯金')), '貯金が支出のグラフに混ざっている');
+    await page.locator('#record-chart-type').selectOption('income');
+    assert((await page.locator('.record-chart .chart-card h2').innerText()) === '収入', '収入の内訳へ切り替わらない');
+    await page.locator('#record-chart-type').selectOption('expense');
   });
 
   await record('records_period_filter', async () => {
@@ -1202,7 +1258,7 @@ const closeModals = page => page.evaluate(() => {
         { ...base, id: 'rc3-002', lineNo: 2, rawName: '値引', name: '値引', unit: '', amount: -50, category: '食品', outcome: 'in_stock', outcomeAt: '' },
         { ...base, id: 'rc3-003', lineNo: 3, rawName: '牛乳', name: '牛乳', unit: '本', amount: 258, category: '飲料', outcome: 'in_stock', outcomeAt: '' }
       ]);
-      api.setRecordTab('transactions');
+      api.setPage('review');
     });
     await page.waitForSelector('#page-container .waste-card');
     const wasteText = await page.textContent('#page-container .waste-card .summary-strip');
@@ -1608,6 +1664,7 @@ const closeModals = page => page.evaluate(() => {
   });
   await record('cloud_snapshot_export', async () => {
     await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+    await openSettingsSection('backup');
     const button = page.locator('[data-action="export-cloud"]');
     const [file] = await Promise.all([page.waitForEvent('download'), button.click()]);
     assert(file.suggestedFilename().startsWith('yoryoku-cloud-snapshot-'), '原本のファイル名が不正');
@@ -1625,7 +1682,7 @@ const closeModals = page => page.evaluate(() => {
     } finally { page.off('download', onDownload); }
   });
   await record('recurring_plan_settings', async () => {
-    await page.evaluate(() => window.__YORYOKU__.setPage('settings'));
+    await page.evaluate(() => window.__YORYOKU__.setPage('recurring'));
     const form = page.locator('#recurring-plan-form');
     const methods = await page.evaluate(() => {
       const state = window.__YORYOKU__.getState();
@@ -1655,6 +1712,7 @@ const closeModals = page => page.evaluate(() => {
       localStorage.setItem('okane-unsaved:test-user:other-workspace', '{"marker":"other-workspace"}');
       window.__YORYOKU__.setPage('settings');
     });
+    await openSettingsSection('backup');
     const [file] = await Promise.all([page.waitForEvent('download'), page.locator('[data-action="export-recovery"]').click()]);
     const payload = JSON.parse(fs.readFileSync(await file.path(), 'utf8'));
     assert(payload.format === 'money-unsaved-recovery-v1', '退避ファイルの形式が不正');
@@ -1702,6 +1760,7 @@ const closeModals = page => page.evaluate(() => {
     });
     const form = page.locator('#settings-form');
     try {
+      await openSettingsSection('calculation');
       await form.locator('#settings-deadline').selectOption('card-closing');
       await form.locator('[name="deadline-card"]').first().check();
       await form.locator('[name="deadline-card"]').last().check();

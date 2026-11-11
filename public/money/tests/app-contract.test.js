@@ -54,6 +54,7 @@ function createWindow() {
     matchMedia: () => ({ matches: false }),
     confirm: () => true,
     requestAnimationFrame: noop,
+    addEventListener: noop,
     document: {
       querySelector: () => element(),
       querySelectorAll: () => [],
