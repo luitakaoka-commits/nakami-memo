@@ -5,6 +5,18 @@
   const editor = document.querySelector('#plan-editor');
   const form = editor.querySelector('form');
   const kinds = { payment: '支払い', income: '収入', saving: '貯金', nisa: 'NISA', reimbursement: '立替回収', transfer: '振込' };
+  const marks = {
+    income: { style: 'in', icon: '+' },
+    payment: { style: 'out', icon: '−' },
+    saving: { style: 'saving', icon: '<path d="M5 9a6 6 0 0 1 5-3l3-3v3h2a5 5 0 0 1 5 4h2v5h-3l-2 4h-3v-3H9v3H6l-2-4a5 5 0 0 1 1-6zM3 11c-2 0-2-3 0-3m7 1h4m3 1h.1"/>' },
+    nisa: { style: 'nisa', icon: '<path d="M3 3v18h18M7 15l5-5 4 3 5-7m-5 0h5v5"/>' },
+    reimbursement: { style: 'reimbursement', icon: '<path d="M4 8h11a5 5 0 0 1 0 10H9M8 4 4 8l4 4"/><path d="M5 15v6m-2-4h4m-4 2h4"/>' },
+    transfer: { style: 'transfer', icon: '<path d="M3 8h17m-4-4 4 4-4 4M21 16H4m4-4-4 4 4 4"/>' }
+  };
+  function mark(kind) {
+    const { style, icon } = marks[kind];
+    return `<span class="plan-mark ${style}" data-kind="${kind}" aria-hidden="true">${icon.startsWith('<') ? `<svg viewBox="0 0 24 24" focusable="false">${icon}</svg>` : icon}</span>`;
+  }
   const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   const yen = amount => '¥' + amount.toLocaleString('ja-JP');
   const plans = [
@@ -12,7 +24,11 @@
     { id: 2, date: '2026-11-13', name: '給与', amount: 78000, kind: 'income' },
     { id: 3, date: '2026-11-15', name: '生活費', amount: 20000, kind: 'payment' },
     { id: 4, date: '2026-12-05', name: '仕送り', amount: 55000, kind: 'income' },
-    { id: 5, date: '2026-12-10', name: 'カード引落', amount: 120000, kind: 'payment', statement: true, card: '三井住友' }
+    { id: 5, date: '2026-12-10', name: 'カード引落', amount: 120000, kind: 'payment', statement: true, card: '三井住友' },
+    { id: 6, date: '2026-11-16', name: '積立貯金', amount: 10000, kind: 'saving' },
+    { id: 7, date: '2026-11-18', name: 'NISA積立', amount: 5000, kind: 'nisa' },
+    { id: 8, date: '2026-11-20', name: '立替分の入金', amount: 3200, kind: 'reimbursement' },
+    { id: 9, date: '2026-11-24', name: '口座間の振込', amount: 20000, kind: 'transfer' }
   ];
   const details = [
     { date: '2026-11-09', name: 'スーパー', amount: 2480, card: 'JCB W', included: true },
@@ -25,7 +41,7 @@
     { start: '2026-10-16', end: '2026-11-15' },
     { start: '2026-09-16', end: '2026-10-15' }
   ];
-  let nextId = 6;
+  let nextId = 10;
   let month = '2026-11';
   let day = '2026-11-10';
   let showDetails = false;
@@ -72,25 +88,21 @@
     const cells = Array.from({ length: last }, (_, i) => {
       const date = month + '-' + String(i + 1).padStart(2, '0');
       const daily = rows.filter(item => item.date === date);
-      const groups = [
-        { name: '収入', sign: '+', style: 'in', count: daily.filter(item => ['income', 'reimbursement'].includes(item.kind)).length },
-        { name: '支出', sign: '−', style: 'out', count: daily.filter(item => item.kind === 'payment').length },
-        { name: '資金移動', sign: '↔', style: 'move', count: daily.filter(item => !['income', 'reimbursement', 'payment'].includes(item.kind)).length }
-      ].filter(group => group.count);
-      const label = [`${number}月${i + 1}日`, `${daily.length}件`, ...groups.map(group => group.name + group.count + '件')].join('、');
-      return `<button type="button" data-plan-day="${date}" aria-label="${label}" aria-pressed="${date === day}"><span>${i + 1}</span><span class="plan-marks" aria-hidden="true">${groups.map(group => `<span class="plan-mark ${group.style}">${group.sign}</span>`).join('')}</span></button>`;
+      const groups = Object.keys(marks).map(kind => ({ kind, count: daily.filter(item => item.kind === kind).length })).filter(group => group.count);
+      const label = [`${number}月${i + 1}日`, `${daily.length}件`, ...groups.map(({ kind, count }) => (kind === 'payment' ? '支出' : kinds[kind]) + count + '件')].join('、');
+      return `<button type="button" data-plan-day="${date}" aria-label="${label}" aria-pressed="${date === day}"><span>${i + 1}</span><span class="plan-marks" aria-hidden="true">${groups.map(group => mark(group.kind)).join('')}</span></button>`;
     });
     screen.innerHTML = `
       <div class="plan-toolbar"><button type="button" class="text-button" data-plan-details>明細</button><button type="button" class="primary-button" data-plan-add>予定を追加</button></div>
       <section class="sheet plan-calendar" aria-label="予定カレンダー">
         <div class="plan-toolbar"><button type="button" class="icon-button" data-plan-month="-1" aria-label="前月">‹</button><h2>${year}年${number}月</h2><button type="button" class="icon-button" data-plan-month="1" aria-label="翌月">›</button></div>
         <div class="plan-grid">${[...'日月火水木金土'].map(label => `<span>${label}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(offset)}${cells.join('')}</div>
-        <p class="plan-legend"><span class="plan-mark in">＋ 収入</span><span class="plan-mark out">− 支出</span><span class="plan-mark move">↔ 資金移動</span></p>
+        <p class="plan-legend">${Object.keys(marks).map(kind => `<span>${mark(kind)}${kind === 'payment' ? '支出' : kinds[kind]}</span>`).join('')}</p>
       </section>
       <section class="sheet"><h2>${number}月${Number(day.slice(-2))}日の予定</h2>
         ${rows.filter(item => item.date === day).map(item => `
           <article class="plan-row"><div class="plan-toolbar"><strong>${escape(item.name)}</strong><strong>${yen(item.amount)}</strong></div>
-          <p class="support">${escape(item.card || kinds[item.kind])}${item.included ? ' · 請求総額の内訳' : item.confirmed ? ' · 請求額確認済み' : ''}</p>
+          <p class="support plan-kind">${mark(item.kind)}${escape(kinds[item.kind])}${item.card ? ' · ' + escape(item.card) : ''}${item.confirmed ? ' · 請求額確認済み' : ''}</p>
           ${item.id ? `<div class="mail-actions">${item.statement && !item.confirmed ? `<button class="text-button" data-plan-action="confirm" data-id="${item.id}">請求額を確認</button>` : ''}
           <button class="text-button" data-plan-action="settle" data-id="${item.id}">${item.statement ? '引落を記録' : '確定'}</button>
           <button class="text-button" data-plan-action="edit" data-id="${item.id}">編集</button>

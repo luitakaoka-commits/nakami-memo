@@ -111,12 +111,19 @@ body.modal-open { overflow: hidden; }
 .plan-grid > span { padding: 6px 0; font-size: 12px; }
 .plan-grid button { position: relative; padding: 0 0 4px; border: 1px solid transparent; background: transparent; border-radius: 8px; }
 .plan-grid button[aria-pressed="true"] { border-color: var(--brand); color: var(--brand); }
-.plan-marks { display: flex; justify-content: center; min-height: 15px; gap: 1px; font-size: 13px; line-height: 1; }
-.plan-marks .plan-mark { display: grid; place-items: center; width: 12px; min-height: 15px; border-radius: 3px; background: var(--soft); }
+.plan-marks { display: grid; grid-template-columns: repeat(3, minmax(0, 12px)); justify-content: center; min-height: 15px; gap: 1px; font-size: 13px; line-height: 1; }
+.plan-mark { display: inline-grid; place-items: center; width: 16px; min-height: 16px; line-height: 1; }
+.plan-mark svg { width: 100%; height: auto; stroke-width: 2; }
+.plan-marks .plan-mark { width: 100%; min-height: 15px; border-radius: 3px; background: var(--soft); }
+.plan-marks .plan-mark:only-child { grid-column: 2; }
 .plan-mark.in { color: var(--chart-positive); }
 .plan-mark.out { color: var(--chart-negative); }
-.plan-mark.move { color: var(--muted); }
+.plan-mark.saving { color: #467057; }
+.plan-mark.nisa { color: #695185; }
+.plan-mark.reimbursement { color: #236c72; }
+.plan-mark.transfer { color: #715b42; }
 .plan-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; }
+.plan-legend > span, .plan-kind { display: flex; align-items: center; gap: 4px; }
 .detail-period { display: grid; gap: 4px; margin: 12px 0; }
 .detail-period select { width: 100%; min-width: 0; border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 4px 8px; }
 .detail-card-panel { flex: 0 0 100%; min-width: 0; scroll-snap-align: start; scroll-snap-stop: always; }
