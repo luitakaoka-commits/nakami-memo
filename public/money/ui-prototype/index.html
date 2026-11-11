@@ -9,13 +9,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="styles.css?v=operation-notes">
-  <script src="notices.js?v=operation-notes" defer></script>
+  <link rel="stylesheet" href="styles.css?v=glass-notes">
+  <script src="notices.js?v=glass-notes" defer></script>
   <script src="mail.js?v=operation-notes" defer></script>
   <script src="plans.js?v=operation-notes" defer></script>
-  <script src="overview.js?v=operation-notes" defer></script>
+  <script src="overview.js?v=glass-notes" defer></script>
   <script src="extras.js?v=operation-notes" defer></script>
-  <script src="app.js?v=operation-notes" defer></script>
+  <script src="app.js?v=glass-notes" defer></script>
 </head>
 <body>
   <div class="prototype-notice">UI試作</div>
@@ -81,10 +81,10 @@
     <div class="dialog-heading"><h2 id="extra-editor-title"></h2><button type="button" class="icon-button" data-extra-close aria-label="閉じる">×</button></div>
     <form class="mail-fields"></form>
   </dialog>
-  <dialog id="operation-dialog" class="detail-dialog" aria-labelledby="operation-title">
+  <dialog id="operation-dialog" class="detail-dialog" aria-labelledby="operation-title" aria-describedby="operation-message">
     <h2 id="operation-title"></h2>
     <form class="mail-fields">
-      <div class="operation-note"><span class="note-mark" aria-hidden="true">!</span><p></p></div>
+      <p id="operation-message" class="note-glass"></p>
       <label hidden>残高への反映<select name="reflected" required></select></label>
       <button class="primary-button" type="submit">確認</button>
       <button class="text-button" type="button" data-operation-cancel>キャンセル</button>

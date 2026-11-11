@@ -71,9 +71,9 @@
       <section class="sheet"><h2 class="section-heading">確認事項</h2><button class="check-row" data-detail="account"><span>口座残高<small>${account.verifiedDate ? '確認日 ' + shortDate(account.verifiedDate) : '銀行残高は未確認'}</small></span><span class="check-count">1口座 ›</span></button><button class="check-row" data-detail="bill"><span>請求額<small>12月分 · 見込み</small></span><span class="check-count">1件 ›</span></button><button class="check-row" data-route="メール確認"><span>メール</span><span class="check-count" data-mail-count>${window.moneyMail.pendingCount()}件 ›</span></button></section>`;
     $('#forecast-content').innerHTML = blank || `${banner()}
       <section class="sheet"><p class="date-label">${formatDate(startDate)}〜${formatDate(data.rows.at(-1).date)}</p><div class="forecast-head"><p id="forecast-event" class="support">11/9 · 現在の口座残高</p><strong id="forecast-amount">${yen(data.opening)}</strong></div>${chart(data.rows)}
-      ${note('登録した入出金がすべて予定どおりに行われた場合の残高です。')}
-      ${data.sameDayIncome ? note('引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。') : ''}
-      ${shortage ? note(formatDate(shortage.date) + (shortage.debit ? 'の引落後、' : 'の時点で、') + '残高が' + yenText(shortage.balance) + '不足する見込みです。') : ''}</section>
+      ${note('登録した入出金がすべて予定どおりに行われた場合の残高です。', '予測残高について')}
+      ${data.sameDayIncome ? note('引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。', '同日の入金と引落') : ''}
+      ${shortage ? note(formatDate(shortage.date) + (shortage.debit ? 'の引落後、' : 'の時点で、') + '残高が' + yenText(shortage.balance) + '不足する見込みです。', '残高不足について') : ''}</section>
       <section class="sheet"><h2 class="section-heading">入出金と残高</h2><div class="table-wrap"><table><thead><tr><th scope="col">日付 / 内容</th><th scope="col">入出金</th><th scope="col">残高</th></tr></thead><tbody>${data.rows.map(row => `<tr><td>${shortDate(row.date)}<br>${escape(row.name)}<small>${row.type}</small></td><td class="${row.amount > 0 ? 'income' : ''}">${row.amount ? (row.amount > 0 ? '+' : '') + yen(row.amount) : '—'}</td><td class="${row.balance < 0 ? 'negative' : ''}">${yen(row.balance)}</td></tr>`).join('')}</tbody></table></div></section>`;
     $('#announcement').textContent = $('#preview-state').selectedOptions[0].textContent;
     menu();
@@ -121,7 +121,7 @@
   }
   function openDetail(kind) {
     const content = {
-      account: ['口座残高', note(window.moneyOverview.balanceText(window.moneyOverview.primaryAccount()))],
+      account: ['口座残高', '<p class="amount">' + yen(window.moneyOverview.primaryBalance()) + '</p>' + note(window.moneyOverview.balanceText(window.moneyOverview.primaryAccount()), '銀行残高の確認')],
       bill: ['請求額', '<dl class="ledger"><div><dt>12/10</dt><dd>¥120,000</dd></div><div><dt>状態</dt><dd>見込み</dd></div></dl>']
     };
     $('#detail-title').textContent = content[kind][0];

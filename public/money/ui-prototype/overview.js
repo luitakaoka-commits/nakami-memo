@@ -78,8 +78,8 @@
   function renderAccounts() {
     const primary = primaryAccount();
     accounts.innerHTML = `<div class="plan-toolbar"><button type="button" class="text-button" data-edit="account">口座を追加</button></div>
-      <section class="sheet"><h2>基準口座</h2><p class="support">${escape(primary.name)}</p>${note(balanceText(primary))}${actions('account', primary.id)}</section>
-      <details class="sheet" id="subaccounts" ${subaccountsOpen ? 'open' : ''}><summary>サブ口座</summary>${bankAccounts.filter(item => item !== primary).map(item => `<article class="plan-row"><strong>${escape(item.name)}</strong>${note(balanceText(item))}${actions('account', item.id)}</article>`).join('') || '<p class="support">口座なし</p>'}</details>
+      <section class="sheet"><h2>基準口座</h2><p class="support">${escape(primary.name)}</p><p class="amount">${yen(primary.balance)}</p>${note(balanceText(primary), '銀行残高の確認')}${actions('account', primary.id)}</section>
+      <details class="sheet" id="subaccounts" ${subaccountsOpen ? 'open' : ''}><summary>サブ口座</summary>${bankAccounts.filter(item => item !== primary).map(item => `<article class="plan-row"><div class="plan-toolbar"><strong>${escape(item.name)}</strong><strong>${yen(item.balance)}</strong></div>${note(balanceText(item), '銀行残高の確認')}${actions('account', item.id)}</article>`).join('') || '<p class="support">口座なし</p>'}</details>
       <div class="plan-toolbar"><h2 class="section-heading">クレジットカード</h2><button type="button" class="text-button" data-edit="card">カードを追加</button></div>
       <div class="account-card-grid">${bankCards.map(item => `<section><article class="account-card ${item.style || 'jcb'}"><strong>${escape(item.name)}</strong><span aria-hidden="true">▣</span><small>${item.number || ''}</small></article><p class="support">${item.closing ? item.closing + '日' : '月末'}締め · ${item.payment ? item.payment + '日' : '月末'}払い</p>${actions('card', item.id)}</section>`).join('')}</div>`;
     accounts.querySelector('#subaccounts').addEventListener('toggle', event => { subaccountsOpen = event.target.open; });
