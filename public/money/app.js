@@ -96,6 +96,7 @@
   let planMonth = '';
   let planDate = '';
   let recordChartType = 'expense';
+  let reviewMonth = '';
   let detailPeriod = '';
   let dailyCheckScope = 'all';
   let planFilter = 'all';
@@ -696,7 +697,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=94" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=95" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1563,13 +1564,6 @@
 
   const PAYMENT_METHODS = { cash: '現金', card: 'カード', emoney: '電子マネー', unknown: '不明' };
 
-  const RECEIPT_STATUS = {
-    pending: { label: '未確認', className: 'badge-planned' },
-    accepted: { label: '確認済み', className: 'badge-settled' },
-    needs_review: { label: '要確認', className: 'badge-warn' },
-    ignored: { label: '無視', className: 'badge-muted' }
-  };
-
   /**
    * レシート一覧の置き場所（2026-09-15）。未確認と確認済みを同じ一覧に並べると、
    * 見終わったものに埋もれて、まだ見ていないレシートを探しにくい。
@@ -1690,21 +1684,20 @@
     receipts.forEach(receipt => { counts[receiptListTabOf(receipt)] += 1; });
     const visibleTabs = RECEIPT_LIST_TABS.filter(tab => tab.key !== 'ignored' || counts.ignored > 0 || receiptListTab === 'ignored');
     const currentTab = RECEIPT_LIST_TABS.find(tab => tab.key === receiptListTab) || RECEIPT_LIST_TABS[0];
-    const tabButtons = visibleTabs.map(tab => `<button type="button" class="filter-button ${tab.key === currentTab.key ? 'active' : ''}" data-action="receipt-list-tab" data-tab="${tab.key}" aria-pressed="${tab.key === currentTab.key}">${tab.label} ${counts[tab.key]}件</button>`).join('');
+    const statusOptions = visibleTabs.map(tab => `<option value="${tab.key}" ${tab.key === currentTab.key ? 'selected' : ''}>${tab.label} ${counts[tab.key]}件</option>`).join('');
 
     const rows = sortedReceipts().filter(receipt => receiptListTabOf(receipt) === currentTab.key).map(receipt => {
       const lines = receiptLinesOf(receipt.id);
       const folded = finance.foldReceiptDiscounts(lines);
       const productCount = folded.filter(item => !item.adjustment).length;
       const discountCount = lines.filter(item => Number(item.amount) < 0).length;
-      const status = RECEIPT_STATUS[receipt.status] || RECEIPT_STATUS.pending;
       const opened = openReceiptId === receipt.id;
       const lineSum = lines.reduce((sum, item) => sum + Number(item.amount || 0), 0);
       const mismatched = lines.length > 0 && lineSum !== Number(receipt.total || 0);
-      return `<div class="receipt-row">
-        <div class="candidate-row">
+      return `<article class="sheet receipt-row">
+        <div class="receipt-card-body">
           <div class="candidate-main">
-            <div class="candidate-head"><strong>${esc(receipt.storeName || '店名なし')}</strong><span class="badge ${status.className}">${status.label}</span></div>
+            <div class="plan-view-toolbar"><h2>${esc(receipt.storeName || '店名なし')}</h2><strong>${formatAbsoluteYen(receipt.total)}</strong></div>
             <small>${formatDate(receipt.purchasedAt, true)}・${formatAbsoluteYen(receipt.total)}・${productCount}品${discountCount ? `（値引き${discountCount}件を含む）` : ''}・${esc(PAYMENT_METHODS[receipt.paymentMethod] || '不明')}</small>
             ${mismatched ? `<small class="value-negative">明細の合計 ${formatAbsoluteYen(lineSum)} が合計金額と合っていません</small>` : ''}
             ${receipt.note ? `<small>${esc(receipt.note)}</small>` : ''}
@@ -1718,18 +1711,12 @@
           </div>
         </div>
         ${opened ? `<div class="receipt-line-list">${folded.map(renderReceiptLineView).join('') || emptyBlock('明細がありません', '「編集」から明細行を追加できます。')}</div>` : ''}
-      </div>`;
+      </article>`;
     }).join('');
 
     return `
-      <section class="card info-card"><p class="check-detail">レシートの明細は<strong>共有スペースにだけ</strong>保存します。今使える金額や支払い能力チェックには影響しません。捨てた記録は、「取引」タブの「ムダ支出」に集計されます。</p></section>
-      <section class="card list-card">
-        <div class="list-card-header"><div><span class="eyebrow">${currentTab.label} ${counts[currentTab.key]}件</span><h2>レシート一覧</h2></div><button class="button button-quiet button-small" data-action="add-receipt">レシートを追加</button></div>
-        <div class="filters receipt-list-tabs">${tabButtons}</div>
-        <div class="receipt-list">${rows || (receipts.length
-          ? emptyBlock(currentTab.empty[0], currentTab.empty[1])
-          : emptyBlock('レシートがありません', '「レシートを追加」から店名・日付・合計と明細行を入力してください。'))}</div>
-      </section>`;
+      <div class="plan-view-toolbar receipt-toolbar"><label>状態 <select id="receipt-status">${statusOptions}</select></label><button type="button" class="button button-primary" data-action="add-receipt">追加</button></div>
+      <div class="receipt-list">${rows || `<p class="sheet support">${esc(receipts.length ? currentTab.empty[0] : 'レシートなし')}</p>`}</div>`;
   }
 
   /**
@@ -2280,7 +2267,7 @@
     return finance.repeatedWasteRanking(decoratedReceiptItems(), { limit, aliases: itemAliases });
   }
 
-  function renderWasteCard(range, summary) {
+  function renderWasteCard(range, summary, label = rangeLabel(range)) {
     if (!receiptsAvailable()) return '';
     const items = decoratedReceiptItems();
     if (!items.length) return '';
@@ -2291,7 +2278,7 @@
     const slices = waste.total ? chartSlices(waste) : [];
 
     return `<section class="card chart-card waste-card" id="review">
-      <div class="list-card-header"><div><span class="eyebrow">ムダ支出</span><h2>${esc(rangeLabel(range))}に捨てたもの</h2></div><strong class="value-negative">${formatAbsoluteYen(waste.total)}</strong></div>
+      <div class="list-card-header"><div><span class="eyebrow">ムダ支出</span><h2>${esc(label)}に捨てたもの</h2></div><strong class="value-negative">${formatAbsoluteYen(waste.total)}</strong></div>
       <div class="summary-strip">
         <div class="stat-card"><span>廃棄額</span><strong class="value-negative">${formatAbsoluteYen(waste.total)}</strong></div>
         <div class="stat-card"><span>食費に対する割合</span><strong>${foodTotal > 0 ? `${Math.round(waste.total / foodTotal * 100)}%` : '—'}</strong></div>
@@ -2422,21 +2409,23 @@
 
   function renderForecastBars(view) {
     const points = view.assessment.balancesByDate.map(point => ({ date: point.date, value: point.balances[view.primary.id] }));
-    const magnitude = Math.max(10000, ...points.map(point => Math.abs(point.value)));
-    const unit = Math.ceil(magnitude / 30000) * 10000;
-    const top = Math.max(unit, Math.ceil(Math.max(...points.map(point => point.value)) / unit) * unit);
-    const bottom = Math.min(0, Math.floor(Math.min(...points.map(point => point.value)) / unit) * unit);
-    const y = value => (top - value) * 160 / (top - bottom) + 12;
-    const width = Math.max(290, points.length * 42 + 55);
+    const values = points.map(point => point.value);
+    const roughStep = Math.max(10000, Math.max(...values.map(Math.abs)) / 4);
+    const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+    const unit = [1, 2, 5, 10].map(step => step * magnitude).find(step => step >= roughStep);
+    const bottom = Math.floor(Math.min(0, ...values) / unit) * unit;
+    const top = Math.max(unit, Math.ceil(Math.max(0, ...values) / unit) * unit);
+    const y = value => 202 - (value - bottom) / (top - bottom) * 182;
+    const width = Math.max(340, points.length * 40 + 58);
     const ticks = [];
     for (let amount = top; amount >= bottom; amount -= unit) {
-      ticks.push(`<line x1="51" x2="${width}" y1="${y(amount)}" y2="${y(amount)}" class="${amount === 0 ? 'forecast-zero' : 'forecast-gridline'}"/><text x="46" y="${y(amount) + 4}" text-anchor="end">${amount ? amount / 10000 + '万' : '0円'}</text>`);
+      ticks.push(`<line x1="52" x2="${width - 6}" y1="${y(amount)}" y2="${y(amount)}" class="${amount === 0 ? 'forecast-zero' : 'forecast-gridline'}"/><text x="46" y="${y(amount) + 3}" text-anchor="end">${amount ? amount / 10000 + '万円' : '0円'}</text>`);
     }
     const bars = points.map((point, index) => {
-      const x = 56 + index * (width - 56) / points.length;
-      return `<rect x="${x}" y="${y(Math.max(0, point.value))}" width="24" height="${Math.abs(y(0) - y(point.value))}" class="${point.value < 0 ? 'forecast-negative' : 'forecast-positive'}"><title>${formatDate(point.date)} ${formatDisplayedAmount(point.value)}</title></rect><text x="${x + 12}" y="190" text-anchor="middle">${formatDate(point.date)}</text>`;
+      const x = 52 + (index + .5) * (width - 58) / points.length;
+      return `<rect x="${x - 11}" y="${y(Math.max(0, point.value))}" width="22" height="${Math.abs(y(0) - y(point.value))}" class="${point.value < 0 ? 'forecast-negative' : 'forecast-positive'}"><title>${formatDate(point.date)} ${formatDisplayedAmount(point.value)}</title></rect><text x="${x}" y="225" text-anchor="middle">${formatDate(point.date)}</text>`;
     });
-    return `<div class="table-scroll"><svg class="forecast-bars" role="img" aria-label="${esc(view.primary.name)}の予測残高。${esc(points.map(point => `${formatDate(point.date)} ${formatDisplayedAmount(point.value)}`).join('、'))}" width="${width}" height="200" viewBox="0 0 ${width} 200">${ticks.join('')}${bars.join('')}</svg></div>`;
+    return `<div class="table-scroll"><svg class="forecast-bars" role="img" aria-label="${esc(view.primary.name)}の予測残高。${esc(points.map(point => `${formatDate(point.date)} ${formatDisplayedAmount(point.value)}`).join('、'))}" style="min-width:${width === 340 ? 0 : width}px" viewBox="0 0 ${width} 240">${ticks.join('')}${bars.join('')}</svg></div>`;
   }
 
   function renderCashflow() {
@@ -2732,9 +2721,14 @@
   }
 
   function renderReviewPage() {
-    const range = recordRange();
+    const month = reviewMonth || today().slice(0, 7);
+    const range = finance.calendarMonthRange(month);
     const summary = finance.summarizePeriod(state.transactions, range, { basis: recordBasis });
-    return `<div class="prototype-flow"><div class="page-heading"><h1>ふりかえり・ムダ支出</h1></div>${renderReviewPrompt()}${renderRangeControl(range)}${renderWasteCard(range, summary) || '<section class="sheet">0件</section>'}${renderAliasSettings()}</div>`;
+    const items = decoratedReceiptItems();
+    const months = [...new Set([month, ...items.map(item => item.purchasedAt.slice(0, 7)).filter(Boolean)])].sort().reverse();
+    const options = months.map(value => `<option value="${esc(value)}" ${month === value ? 'selected' : ''}>${esc(formatMonthLabel(value))}</option>`).join('');
+    const rows = items.filter(item => item.receiptStatus === 'accepted' && item.purchasedAt.startsWith(month)).map(renderReceiptLineView).join('');
+    return `<div class="prototype-flow"><div class="page-heading"><h1>ふりかえり・ムダ支出</h1></div><div class="plan-view-toolbar"><label>対象月 <select id="review-month">${options}</select></label></div>${renderWasteCard(range, summary, formatMonthLabel(month)) || '<section class="sheet"><h2>ムダ支出</h2><p>0品</p></section>'}<section class="sheet"><h2>買ったもの</h2>${rows || '<p>対象なし</p>'}${renderReviewPrompt()}</section>${renderAliasSettings()}</div>`;
   }
 
   function renderRecords() {
@@ -2870,15 +2864,24 @@
         <div class="work-side"><strong>${formatFlowAmount(entry.amount, 'in')}</strong><div class="list-actions"><button class="mini-button" data-action="edit-work" data-id="${entry.id}" aria-label="${formatDate(entry.date, true)}のシフトを編集">編集</button><button class="mini-button danger" data-action="delete-work" data-id="${entry.id}" aria-label="${formatDate(entry.date, true)}のシフトを削除">削除</button></div></div>
       </div>`).join('');
 
-    return `
-      <div class="page-heading"><div><span class="eyebrow">シフト</span><h1>シフト</h1></div><button class="button button-primary button-small" data-action="add-work">シフトを追加</button></div>
-
-      <section class="card shift-control-card">
+    const { startDate, endDate } = finance.calendarMonthRange(salary.workMonth);
+    const offset = new Date(`${startDate}T00:00:00Z`).getUTCDay();
+    const hoursByDay = new Map();
+    for (const entry of salary.entries) hoursByDay.set(entry.date, (hoursByDay.get(entry.date) || 0) + entry.hours);
+    const days = Array.from({ length: Number(endDate.slice(-2)) }, (_, index) => {
+      const date = `${salary.workMonth}-${String(index + 1).padStart(2, '0')}`;
+      const hours = hoursByDay.get(date);
+      return `<button type="button" data-action="add-work" data-work-date="${date}" aria-label="${formatDate(date, true)}${hours ? '、' + formatHours(hours) : ''}">${index + 1}${hours ? `<small class="shift-hours">${hours}h</small>` : ''}</button>`;
+    }).join('');
+    return `<div class="prototype-flow">
+      <div class="page-heading"><div><p class="eyebrow">${formatDate(today(), true)}</p><h1>シフト・給与</h1></div></div>
+      <section class="sheet plan-calendar shift-control-card" aria-label="シフトカレンダー">
         <label class="shift-month-field"><span>対象の支給月</span><select id="shift-month">${options}</select></label>
         <div class="shift-meta">
           <div><span>対象勤務月</span><strong>${formatMonthLabel(salary.workMonth)}</strong><small>${formatDate(salary.workStartDate)}〜${formatDate(salary.workEndDate)}</small></div>
           <div><span>支給予定日</span><strong>${formatDate(salary.paymentDate, true)}</strong><small>${movedForward ? `${formatDate(salary.scheduledPaymentDate)}が休日のため前営業日` : '基本支給日どおり'}</small></div>
         </div>
+        <div class="plan-grid">${[...'日月火水木金土'].map(day => `<span aria-hidden="true">${day}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(offset)}${days}</div>
       </section>
 
       ${renderSalaryRecordCard(salaryRecord, paymentMonth)}
@@ -2892,35 +2895,64 @@
 
       ${needsRate ? '<section class="card notice-card"><strong>時給が未設定です</strong><p>設定の給与設定で基本時給を入力すると、シフトから見込み額を計算します。</p><button class="button button-quiet button-small" data-page="settings">給与設定へ</button></section>' : ''}
 
-      <section class="card list-card">
-        <div class="list-card-header"><div><span class="eyebrow">${formatMonthLabel(salary.workMonth)}の勤務</span><h2>シフト一覧</h2></div><small>${salary.entries.length}件</small></div>
+      <section class="sheet">
+        <div class="plan-view-toolbar"><h2>シフト一覧</h2><button type="button" class="button button-quiet" data-action="add-work">シフトを追加</button></div>
         <div class="work-list">${rows || emptyBlock('この勤務月のシフトはありません', '「シフトを追加」から登録してください。')}</div>
-      </section>`;
+      </section></div>`;
   }
 
-  let recurringEditId = '';
+  let recurringEditId = null;
   function renderRecurringSettings() {
     const plan = state.recurringPlans.find(item => item.id === recurringEditId);
-    const method = plan?.cardId ? 'card:' + plan.cardId : plan?.sourceAccountId ? 'account:' + plan.sourceAccountId : '';
+    const primary = state.accounts.find(item => item.isPrimary || item.role === 'primary') || state.accounts[0];
+    const method = plan?.cardId ? 'card:' + plan.cardId : plan?.sourceAccountId ? 'account:' + plan.sourceAccountId : primary ? 'account:' + primary.id : '';
+    const startDate = plan?.startDate || today();
     const options = [
       ...state.accounts.map(account => ['account:' + account.id, account.name + '（口座）']),
       ...state.cards.map(card => ['card:' + card.id, card.name + '（カード）'])
     ];
     const rows = state.recurringPlans.filter(item => !item.kind || item.kind === 'payment').map(item =>
-      `<div class="settings-inline"><span>${esc(item.name || '定期予定')}${item.isActive === false ? '（停止中）' : ''}</span><button class="button button-quiet button-small" data-action="edit-recurring" data-id="${esc(item.id)}">編集</button></div>`
+      `<article class="sheet"><div class="plan-view-toolbar"><h2>${esc(item.name || '定期予定')}</h2><strong>${formatAbsoluteYen(item.amount)}</strong></div><p class="support">${recurringIntervalLabel(item.intervalMonths || 1)} · ${esc(item.cardId ? cardName(item.cardId) : accountName(item.sourceAccountId))}${item.isActive === false ? ' · 停止中' : ''}</p><div class="list-actions"><button type="button" class="button button-quiet" data-action="edit-recurring" data-id="${esc(item.id)}">編集</button><button type="button" class="button button-quiet" data-action="toggle-recurring" data-id="${esc(item.id)}">${item.isActive === false ? '再開' : '停止'}</button></div></article>`
     ).join('');
-    return `<section class="settings-card" id="recurring"><h2>定期支払い</h2>${rows}
+    return `<div class="plan-view-toolbar"><button type="button" class="button button-primary" data-action="edit-recurring" data-id="">定期支払いを追加</button></div>${rows || '<p class="sheet support">定期支払いなし</p>'}${recurringEditId === null ? '' : `
+      <div class="modal-backdrop" id="recurring-editor"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="recurring-title"><div class="modal-header"><h2 id="recurring-title">${plan ? '定期支払いを編集' : '定期支払いを追加'}</h2><button type="button" class="icon-button" data-action="cancel-recurring-edit" aria-label="閉じる">×</button></div>
       <form id="recurring-plan-form" class="form-stack">
         <label><span>名前</span><input name="name" required maxlength="40" value="${esc(plan?.name || '')}"></label>
-        <label><span>見込み金額（円）</span><input name="amount" type="number" min="1" step="1" required value="${esc(plan?.amount ?? '')}"></label>
+        <label><span>見込み金額</span><input name="amount" type="number" min="1" step="1" inputmode="numeric" required value="${esc(plan?.amount ?? '')}"></label>
         <label><span>支払い方法</span><select name="method" required><option value="">選択してください</option>${options.map(([value, name]) => `<option value="${esc(value)}" ${method === value ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
-        <label><span>開始日</span><input name="start" type="date" required value="${esc(plan?.startDate || '')}"><small>カード払いは利用日を指定します。月末に同じ日がない月は末日に計上します。</small></label>
+        <label><span data-recurring-start>${method.startsWith('card:') ? '最初の利用日' : '最初の支払日'}</span><input name="start" type="date" required value="${esc(startDate)}"></label>
         <label><span>間隔</span><select name="interval">${Array.from({ length: 12 }, (_, index) => index + 1).map(interval => `<option value="${interval}" ${(plan?.intervalMonths ?? 1) === interval ? 'selected' : ''}>${interval === 1 ? '毎月' : interval === 2 ? '隔月' : interval + 'か月ごと'}</option>`).join('')}</select></label>
         ${plan ? `<label class="check-row"><input name="active" type="checkbox" ${plan.isActive === false ? '' : 'checked'}><span>計算に含める</span></label>` : ''}
-        <button class="button button-primary" type="submit">${plan ? '変更を保存' : '定期支払いを追加'}</button>
-        ${plan ? '<button class="button button-quiet" type="button" data-action="cancel-recurring-edit">編集を閉じる</button>' : ''}
+        <div data-recurring-note>${recurringDateNote(method, startDate, plan?.intervalMonths || 1)}</div>
+        <button class="button button-primary recurring-submit" type="submit">保存</button>
+        <button class="button button-quiet recurring-cancel" type="button" data-action="cancel-recurring-edit">キャンセル</button>
       </form>
-    </section>`;
+    </section></div>`}`;
+  }
+
+  function recurringIntervalLabel(interval) {
+    return interval === 1 ? '毎月' : interval === 2 ? '隔月' : `${interval}か月ごと`;
+  }
+
+  function recurringDateNote(method, startDate, interval) {
+    if (!method || !startDate) return '';
+    const day = Number(startDate.slice(-2));
+    const end = `${finance.shiftMonthKey(today().slice(0, 7), 13)}-01`;
+    const upcoming = finance.expandScheduledTransactions([{ id: 'recurring-preview', kind: 'payment', name: '定期支払い', amount: 1, sourceAccountId: 'preview', startDate, dayOfMonth: day, intervalMonths: interval }], today(), end)[0];
+    const date = startDate >= today() ? startDate : upcoming?.dueDate;
+    return date ? renderGuidance('説明', `${recurringIntervalLabel(interval)}払いです。次回の${method.startsWith('card:') ? '利用日' : '支払日'}は${formatDate(date, true)}です。`) : '';
+  }
+
+  async function toggleRecurringPlan(id) {
+    const plan = state.recurringPlans.find(item => item.id === id);
+    if (!plan) return;
+    plan.isActive = plan.isActive === false;
+    try {
+      if (persist() === false) throw new Error('保存を開始できませんでした');
+      await cloud?.flushPendingSave?.();
+      showToast(plan.isActive ? '再開しました' : '停止しました');
+    } catch (_) { showToast('定期支払いを同期できませんでした'); }
+    renderPage();
   }
 
   async function saveRecurringPlan(event) {
@@ -2949,7 +2981,7 @@
       intervalMonths, sourceAccountId: accountId, cardId: card?.id || '', isActive: !previous || fields.has('active') };
     if (previous) state.recurringPlans = state.recurringPlans.map(plan => plan.id === next.id ? next : plan);
     else state.recurringPlans.push(next);
-    recurringEditId = '';
+    recurringEditId = null;
     try {
       if (persist() === false) throw new Error('保存を開始できませんでした');
       await cloud?.flushPendingSave?.();
@@ -4060,7 +4092,6 @@
     if (name === 'submit-inventory') { submitInventory(); return; }
     if (name === 'edit-receipt') { openReceiptModal(action.dataset.id); return; }
     if (name === 'delete-receipt') { deleteReceiptRow(action.dataset.id); return; }
-    if (name === 'receipt-list-tab') { receiptListTab = RECEIPT_LIST_TABS.some(tab => tab.key === action.dataset.tab) ? action.dataset.tab : 'unchecked'; openReceiptId = ''; renderPage(); return; }
     if (name === 'toggle-receipt') { openReceiptId = openReceiptId === action.dataset.id ? '' : action.dataset.id; renderPage(); return; }
     if (name === 'add-receipt-line') { addReceiptLine(); return; }
     if (name === 'remove-receipt-line') { removeReceiptLine(action.dataset.index); return; }
@@ -4095,11 +4126,12 @@
     if (name === 'forget-candidate-card') { forgetCandidateCard(Number(action.dataset.index)); return; }
     if (name === 'ignore-candidate') { ignoreCandidate(action.dataset.id); return; }
     if (name === 'delete-candidate') { deleteCandidate(action.dataset.id); return; }
-    if (name === 'add-work') { closeAddMenu(); openWorkModal(); }
+    if (name === 'add-work') { closeAddMenu(); openWorkModal(); if (action.dataset.workDate) $('#work-date').value = action.dataset.workDate; }
     if (name === 'edit-work') openWorkModal(action.dataset.id);
     if (name === 'delete-work') deleteWork(action.dataset.id);
     if (name === 'reset-what-if') updateWhatIf(0);
-    if (name === 'edit-recurring' || name === 'cancel-recurring-edit') { recurringEditId = name === 'edit-recurring' ? action.dataset.id : ''; renderPage(); }
+    if (name === 'edit-recurring' || name === 'cancel-recurring-edit') { recurringEditId = name === 'edit-recurring' ? action.dataset.id : null; renderPage(); $('#recurring-editor [aria-label="閉じる"]')?.focus({ preventScroll: true }); }
+    if (name === 'toggle-recurring') void toggleRecurringPlan(action.dataset.id);
     if (name === 'export') exportData();
     if (name === 'export-recovery') exportRecoveryData();
     if (name === 'export-cloud') void exportCloudData(action);
@@ -4134,6 +4166,26 @@
     const menu = $('#sidebar');
     const content = $('#page-container');
     content.addEventListener('change', event => {
+      if (event.target.id === 'review-month') {
+        reviewMonth = event.target.value;
+        renderPage();
+        $('#review-month')?.focus();
+        return;
+      }
+      if (event.target.matches('#recurring-plan-form :is([name="method"], [name="start"], [name="interval"])')) {
+        const form = $('#recurring-plan-form');
+        const { method, start, interval } = form.elements;
+        $('[data-recurring-start]').textContent = method.value.startsWith('card:') ? '最初の利用日' : '最初の支払日';
+        $('[data-recurring-note]').innerHTML = start.validity.valid ? recurringDateNote(method.value, start.value, Number(interval.value)) : '';
+        return;
+      }
+      if (event.target.id === 'receipt-status') {
+        receiptListTab = event.target.value;
+        openReceiptId = '';
+        renderPage();
+        $('#receipt-status')?.focus();
+        return;
+      }
       if (event.target.id === 'record-chart-type') {
         recordChartType = event.target.value === 'income' ? 'income' : 'expense';
         recordCategory = '';
