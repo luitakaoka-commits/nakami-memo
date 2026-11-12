@@ -119,6 +119,12 @@ const closeModals = page => page.evaluate(() => {
     }
     await calendar.locator(`[data-plan-day="${date}"]`).click();
   };
+  const selectOctoberRecords = async () => {
+    if (!(await page.locator('.range-month').count())) await page.locator('[data-action="range-mode"][data-mode="month"]').click();
+    if ((await page.locator('.range-month strong').innerText()) === '2026年9月') {
+      await page.locator('[data-action="range-month"][data-step="1"]').click();
+    }
+  };
 
   await record('independent_mobile_menu_routes', async () => {
     const routes = { home: '資金繰り・試算', cashflow: '支払いの見通し', plans: '予定', records: '記録', imports: 'メール確認', accounts: '口座・カード', shift: 'シフト・給与', receipts: 'レシート', review: 'ふりかえり・ムダ支出', recurring: '定期支払い', settings: '設定' };
@@ -882,6 +888,7 @@ const closeModals = page => page.evaluate(() => {
 
     // 記録画面でも、確定した総額から明細を展開できる
     await page.evaluate(() => window.__YORYOKU__.setPage('records'));
+    await selectOctoberRecords();
     await page.waitForTimeout(200);
     const listed = await page.evaluate(() => [...document.querySelectorAll('#page-container .list-row')].length);
     const absorbedRows = await page.evaluate(() => [...document.querySelectorAll('#page-container .list-row')]
@@ -933,6 +940,7 @@ const closeModals = page => page.evaluate(() => {
   await record('statement_release_on_unsettle', async () => {
     await closeModals(page);
     await page.evaluate(() => window.__YORYOKU__.setPage('records'));
+    await selectOctoberRecords();
     await page.waitForTimeout(150);
     await page.click('#page-container [data-action="edit-event"][data-id="dx-st"]');
     await page.waitForSelector('#event-modal:not([hidden])');
@@ -947,6 +955,7 @@ const closeModals = page => page.evaluate(() => {
     assert(released.statement === 'planned', '総額が未確定に戻っていない');
     assert(released.oldItem === 'planned', `吸収済みの明細が未確定に戻っていない: ${released.oldItem}`);
     assert(released.absorbedBy === '', '吸収の紐付けが残っている');
+    await page.locator('[data-action="range-month"][data-step="-1"]').click();
   });
 
   await record('records_charts', async () => {
@@ -1000,12 +1009,17 @@ const closeModals = page => page.evaluate(() => {
 
   await record('records_period_filter', async () => {
     await closeModals(page);
+    const rowDates = () => page.locator('#page-container .list-row .list-date').allTextContents();
+    const september = await rowDates();
+    assert(september.length > 0 && september.every(date => date.startsWith('9/')), '9月の履歴に別の月の取引が残っている');
     await page.click('#page-container [data-action="range-month"][data-step="-1"]');
     await page.waitForTimeout(200);
     const prev = await page.evaluate(() => document.querySelector('#page-container .range-month strong').textContent.trim());
     assert(prev === '2026年8月', `前の月に移動していない: ${prev}`);
     const augExpense = await page.evaluate(() => document.querySelectorAll('#page-container .summary-strip .stat-card')[1].querySelector('strong').textContent);
     assert(augExpense.includes('99,999'), `8月の支出が出ていない: ${augExpense}`);
+    const august = await rowDates();
+    assert(august.length > 0 && august.every(date => date.startsWith('8/')), '8月の履歴に別の月の取引が残っている');
 
     await page.click('#page-container [data-action="range-month"][data-step="1"]');
     await page.waitForTimeout(200);
@@ -1020,6 +1034,8 @@ const closeModals = page => page.evaluate(() => {
       .map(card => card.querySelector('strong').textContent.trim()));
     assert(narrow[0].includes('¥0'), `期間外の収入が残っている: ${narrow[0]}`);
     assert(narrow[1].includes('30,000'), `期間内の支出になっていない: ${narrow[1]}`);
+    const narrowed = await rowDates();
+    assert(narrowed.length > 0 && narrowed.every(date => /^9\/[1-5]$/.test(date)), '指定期間の履歴に範囲外の取引が残っている');
 
     // 凡例をタップして一覧を絞り込む
     await page.click('#page-container [data-action="range-mode"][data-mode="month"]');
@@ -1340,6 +1356,7 @@ const closeModals = page => page.evaluate(() => {
     });
     const october = await page.evaluate(() => window.__YORYOKU__.getState().transactions.find(item => item.salaryPaymentMonth === '2026-10'));
     assert(october && october.amount === 4800, `10月支給の見込みが作られていない: ${JSON.stringify(october)}`);
+    await selectOctoberRecords();
     await page.click(`#page-container [data-action="delete-event"][data-id="${october.id}"]`);
     await page.waitForTimeout(200);
     const dismissed = await page.evaluate(() => {
@@ -1356,6 +1373,7 @@ const closeModals = page => page.evaluate(() => {
     assert(!dismissed.exists && !dismissed.changed, `消した見込みが作り直された: ${JSON.stringify(dismissed)}`);
     assert(dismissed.months.includes('2026-10'), '消した月を覚えていない');
     assert(dismissed.virtual === 0, '消した月の見込みが裏で足されている');
+    await page.locator('[data-action="range-month"][data-step="-1"]').click();
   });
 
   await record('mail_missing_card_or_usage_date_never_falls_back', async () => {
@@ -1534,6 +1552,7 @@ const closeModals = page => page.evaluate(() => {
         window.__TEST_STATE_SINK__(copy, { initial: true });
         api.setPage('records'); api.setRecordTab('transactions');
       });
+      await selectOctoberRecords();
       await page.locator('#record-search').fill('');
       const clear = page.locator('[data-action="filter-category"][data-category=""]');
       if (await clear.count()) await clear.click();
@@ -1594,6 +1613,7 @@ const closeModals = page => page.evaluate(() => {
     const open = async () => {
       await page.evaluate(() => window.__YORYOKU__.setPage('records'));
       await page.evaluate(() => window.__YORYOKU__.setRecordTab('transactions'));
+      await selectOctoberRecords();
       await page.locator('#record-search').fill('');
       const clearCategory = page.locator('[data-action="filter-category"][data-category=""]');
       if (await clearCategory.count()) await clearCategory.click();
