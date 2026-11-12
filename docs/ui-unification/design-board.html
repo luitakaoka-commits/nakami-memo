@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>くらしノート UI統一 — デザインボード（改訂版）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ===== 最新プロトタイプ（お金管理 ui-prototype）のトークン ===== */
+  :root{
+    --font:"Kiwi Maru","Yu Gothic",sans-serif;
+    --paper:#fffdf8; --surface:#ffffff; --soft:#f4efe6;
+    --ink:#352c2b; --muted:#71645f; --line:#dfd6c9;
+    --brand:#713745; --on-brand:#ffffff;
+    --income:#276457; --income-soft:#edf5f1;
+    --warning:#865316; --warning-soft:#fff3dc;
+    --danger:#a3373b; --danger-soft:#fff0ef;
+    --veil:#241b25a3; --shadow:#352c2b1a;
+    --space-xs:6px; --space-sm:12px; --space-md:20px; --space-lg:28px;
+    --radius:20px; --radius-control:10px;
+    --duration:240ms; --ease:cubic-bezier(.2,.75,.2,1);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--soft); color:var(--ink);
+    font:400 15px/1.8 var(--font);}
+  h1,h2,h3,p{margin:0;}
+  strong,h2,h3,th,label{font-weight:500;}
+
+  /* ===== ボード全体 ===== */
+  .board{max-width:1760px; margin:0 auto; padding:36px 28px 44px;}
+
+  /* ===== ヘッダー：監査サマリ ===== */
+  .summary{background:var(--paper); border:1px solid var(--line);
+    border-radius:var(--radius); padding:28px 32px; margin-bottom:32px;}
+  .kicker{font-size:12px; color:var(--muted); margin-bottom:4px;}
+  .summary h1{font-size:clamp(23px,3vw,30px); font-weight:500; line-height:1.5;}
+  .lead{color:var(--muted); font-size:13px; margin-top:8px; max-width:880px;}
+  .cols{display:grid; grid-template-columns:1fr 1fr; gap:32px; margin-top:20px;}
+  @media(max-width:900px){.cols{grid-template-columns:1fr;}}
+  .summary h2{font-size:18px; margin-bottom:12px;}
+  .mess{list-style:none; margin:0; padding:0;}
+  .mess li{display:flex; gap:12px; padding:10px 0; border-top:1px solid var(--line);}
+  .mess li:first-child{border-top:0; padding-top:0;}
+  .mess .no{flex:none; width:27px; height:27px; border:1px solid var(--line);
+    border-radius:50%; display:grid; place-items:center; color:var(--brand); font-weight:500;}
+  .mess b{font-weight:500; display:block;}
+  .mess .ev{display:block; color:var(--muted); font-size:12px;}
+  .rules{list-style:none; margin:0; padding:0;}
+  .rules li{display:flex; gap:10px; padding:7px 0; border-top:1px solid var(--line); font-size:14px;}
+  .rules li:first-child{border-top:0; padding-top:0;}
+  .rules .dot{flex:none; width:8px; height:8px; border-radius:50%; background:var(--brand); margin-top:9px;}
+  .rules b{font-weight:500; color:var(--brand);}
+  .swatches{display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; font-size:12px; color:var(--muted);}
+  .swatches .sw{display:flex; align-items:center; gap:6px;}
+  .swatches i{width:16px; height:16px; border-radius:5px; border:1px solid var(--line); display:inline-block;}
+  .swatches code{font-family:inherit; color:var(--ink);}
+
+  /* ===== 画面モック ===== */
+  .mocks{display:flex; flex-wrap:wrap; gap:36px; justify-content:center; align-items:flex-start;}
+  figure.mock{margin:0; width:390px; max-width:100%;}
+  figcaption{font-weight:500; font-size:15px; margin-bottom:12px;}
+  figcaption small{display:block; font-weight:400; color:var(--muted); font-size:12px;}
+  .phone{border:1px solid var(--line); border-radius:36px; padding:10px; background:var(--surface);
+    box-shadow:0 12px 32px var(--shadow);}
+  .screen{position:relative; border-radius:26px; overflow:hidden; background:var(--paper);
+    height:760px; display:flex; flex-direction:column;}
+
+  /* ヘッダー（プロトタイプの app-header） */
+  .app-header{position:relative; display:flex; align-items:center; gap:var(--space-sm);
+    padding:8px 16px; border-bottom:1px solid var(--line); background:var(--paper); flex:none;}
+  .icon-button{display:grid; place-items:center; width:44px; min-width:44px; height:44px;
+    border:1px solid transparent; background:transparent; border-radius:var(--radius-control); padding:0;}
+  .icon-button svg{width:24px; height:24px; fill:none; stroke:var(--ink); stroke-width:1.7;
+    stroke-linecap:round; stroke-linejoin:round;}
+  .app-header strong{font-size:15px;}
+  .header-caption{margin-left:auto; font-size:12px; color:var(--muted);}
+
+  /* 本文と見出し */
+  .main{flex:1; overflow:hidden; padding:var(--space-lg) 20px 0;}
+  .page-heading{margin-bottom:var(--space-md);}
+  .eyebrow{font-size:12px; color:var(--muted); margin-bottom:4px;}
+  .page-heading h3{font-size:clamp(23px,6vw,30px); line-height:1.5; font-weight:500;}
+
+  /* シート */
+  .sheet{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:var(--space-md); margin-bottom:var(--space-md);}
+  .sheet-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:4px;}
+  .sheet-title{font-size:12px; color:var(--muted);}
+  .sheet-link{font-size:12px; color:var(--brand);}
+  .amount-sheet{padding-block:var(--space-lg); border-color:var(--brand);}
+  .date-label{display:inline-block; color:var(--brand); font-size:14px; font-weight:500;}
+  .amount{font-size:clamp(36px,11.8vw,56px); line-height:1.4; letter-spacing:-.035em;
+    margin:14px 0 10px; font-variant-numeric:tabular-nums;}
+  .amount small{font-size:.42em; letter-spacing:0; margin-left:6px;}
+  .support{color:var(--muted); font-size:12px; line-height:1.9;}
+
+  /* 明細行（ledger） */
+  .ledger-row{display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+    padding-block:8px; font-size:13px; border-top:1px solid var(--line);}
+  .sheet > .ledger-row:first-child, .sheet-head + .ledger-row{border-top:0;}
+  .ledger-row .l{min-width:0;}
+  .ledger-row .name{font-size:13px;}
+  .ledger-row .meta{display:block; color:var(--muted); font-size:12px;}
+  .ledger-row .r{flex:none; display:flex; align-items:center; gap:12px; text-align:right;}
+  .ledger-row .val{white-space:nowrap; font-variant-numeric:tabular-nums;}
+  .ledger-row .val small{display:block; color:var(--muted); font-size:11px;}
+
+  /* 状態チップ（.status） */
+  .status{font-size:12px; padding:6px 10px; border-radius:var(--radius-control); white-space:nowrap;}
+  .status.warning{color:var(--warning); background:var(--warning-soft);}
+  .status.danger{color:var(--danger); background:var(--danger-soft);}
+  .status.income{color:var(--income); background:var(--income-soft);}
+  .quiet{font-size:12px; color:var(--muted); white-space:nowrap;}
+
+  /* チェック行 */
+  .check-row{display:flex; justify-content:space-between; align-items:center; gap:12px;
+    padding:12px 0; border-top:1px solid var(--line); font-size:15px;}
+  .sheet > .check-row:first-child, .sheet-head + .check-row{border-top:0;}
+  .check-row small{display:block; color:var(--muted); font-size:12px;}
+  .check-count{flex:none; color:var(--brand); font-size:13px; white-space:nowrap; font-variant-numeric:tabular-nums;}
+
+  /* グループ見出し */
+  .group-title{font-size:11px; color:var(--muted); margin:0 0 6px;}
+
+  /* ボタン */
+  .primary-button{display:block; width:100%; border:0; padding:10px 16px; min-height:44px;
+    background:var(--brand); color:var(--on-brand); border-radius:var(--radius-control);
+    font:inherit; font-weight:500; font-size:15px; text-align:center;}
+  .text-button{display:inline-block; border:0; border-bottom:1px solid var(--brand); padding:8px 0;
+    color:var(--brand); background:transparent; font-size:13px; min-height:44px;}
+
+  /* フローティング追加ボタン（プライマリボタンの形） */
+  .fab{position:absolute; right:var(--space-md); bottom:var(--space-lg); width:52px; height:52px;
+    border-radius:var(--radius-control); background:var(--brand); color:var(--on-brand);
+    display:grid; place-items:center; font-size:26px; line-height:1;
+    box-shadow:0 8px 20px var(--shadow);}
+
+  /* レシピ詳細 */
+  .recipe-title{font-size:clamp(23px,6vw,30px); line-height:1.5; font-weight:500;}
+  .recipe-meta{color:var(--muted); font-size:12px; margin-top:4px;}
+  .recipe-sec{font-size:14px; font-weight:500; color:var(--brand); margin:12px 0 4px;}
+  .ing{display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+    padding-block:8px; font-size:13px; border-top:1px solid var(--line);}
+  .recipe-sec + .ing{border-top:0;}
+  .ing .amt{white-space:nowrap; font-variant-numeric:tabular-nums;}
+  .step{display:flex; gap:12px; padding-block:8px; font-size:13px; border-top:1px solid var(--line);}
+  .recipe-sec + .step{border-top:0;}
+  .step .n{flex:none; color:var(--brand); font-weight:500;}
+
+  .foot{max-width:1200px; margin:30px auto 0; color:var(--muted); font-size:12px; text-align:center;}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <!-- ===== ヘッダー：監査サマリ ===== -->
+  <header class="summary">
+    <div class="kicker">くらしノート UI統一 ・ デザイン下準備（改訂版）</div>
+    <h1>最新のお金管理プロトタイプの言葉で、在庫と作り置きを揃える</h1>
+    <p class="lead">統一の基準は本番の M5 ではなく、お金管理の最新UIプロトタイプです。点検の結論と統一ルールの要約を置きます。根拠（トークンの実測値つき）は audit.md にあります。下の4画面は、統一後の見た目の確認用です。</p>
+    <div class="cols">
+      <section>
+        <h2>「ぐちゃぐちゃ」の主な原因（上位3つ）</h2>
+        <ol class="mess">
+          <li><span class="no">1</span><div><b>色と書体が3系統ある</b>
+            <span class="ev">背景は濃色／薄緑／グレーの3通り。書体は明朝・システム・Noto Sans と別々で、余白の物差しも揃っていない。</span></div></li>
+          <li><span class="no">2</span><div><b>画面の文法が違う</b>
+            <span class="ev">在庫は統計を並べるダッシュボード型、つくりおきはチップ行＋リスト＋下部ナビ型。情報の優先順位の付け方が揃っていない。</span></div></li>
+          <li><span class="no">3</span><div><b>状態の表し方が違う</b>
+            <span class="ev">在庫は色付きピル、つくりおきは淡色背景と透明度。期限も残量も「状態」が中核なのに、表し方が別々。</span></div></li>
+        </ol>
+      </section>
+      <section>
+        <h2>統一ルール（最新プロトタイプを共通言語に）</h2>
+        <ul class="rules">
+          <li><span class="dot"></span><span><b>色</b>：紙 <code>#fffdf8</code> の上に白いシート。バーガンディはアクセントだけ。</span></li>
+          <li><span class="dot"></span><span><b>形</b>：シートの角丸 20px、操作部品 10px。区切りは1pxの罫線、影は使わない。</span></li>
+          <li><span class="dot"></span><span><b>余白</b>：6 / 12 / 20 / 28px の4段階だけを使う。</span></li>
+          <li><span class="dot"></span><span><b>文字</b>：Kiwi Maru のみ。本文400、項目と見出し500。数字は等幅数字。</span></li>
+          <li><span class="dot"></span><span><b>階層</b>：シートの積み重ね。小さな見出し → ラベル → 大きな数字の順。</span></li>
+          <li><span class="dot"></span><span><b>状態</b>：淡色背景＋意味色のチップに統一。意味は収入・注意・危険の3色。</span></li>
+          <li><span class="dot"></span><span><b>遷移</b>：下部タブなし。固定ヘッダー＋左から出るサイドバー。</span></li>
+          <li><span class="dot"></span><span><b>文言</b>：画面の文章は必要最小限。動きは 240ms。</span></li>
+        </ul>
+        <div class="swatches">
+          <span class="sw"><i style="background:#fffdf8"></i>紙 <code>#fffdf8</code></span>
+          <span class="sw"><i style="background:#ffffff"></i>シート <code>#ffffff</code></span>
+          <span class="sw"><i style="background:#713745"></i>ブランド <code>#713745</code></span>
+          <span class="sw"><i style="background:#dfd6c9"></i>罫線 <code>#dfd6c9</code></span>
+          <span class="sw"><i style="background:#352c2b"></i>文字 <code>#352c2b</code></span>
+          <span class="sw"><i style="background:#865316"></i>注意 <code>#865316</code></span>
+          <span class="sw"><i style="background:#a3373b"></i>危険 <code>#a3373b</code></span>
+        </div>
+      </section>
+    </div>
+  </header>
+
+  <!-- ===== 画面モック ===== -->
+  <div class="mocks">
+
+    <!-- ① 在庫ホーム -->
+    <figure class="mock">
+      <figcaption>① なかみメモ ・ ホーム<small>先頭のシートは「期限が近いもの」の件数だけを大きく</small></figcaption>
+      <div class="phone"><div class="screen">
+        <header class="app-header">
+          <span class="icon-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></span>
+          <span class="header-caption">なかみメモ</span>
+        </header>
+        <div class="main">
+          <div class="page-heading"><p class="eyebrow">11月13日（金）</p><h3>ホーム</h3></div>
+          <section class="sheet amount-sheet">
+            <span class="date-label">期限が近いもの</span>
+            <div class="amount">3<small>件</small></div>
+            <p class="support">今日まで 1件 ・ 明日まで 1件</p>
+          </section>
+          <section class="sheet">
+            <div class="sheet-head"><span class="sheet-title">まず使うもの</span><span class="sheet-link">期限順</span></div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">木綿豆腐</span><small class="meta">冷蔵庫 ・ 1丁</small></div>
+              <div class="r"><span class="status warning">今日まで</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">牛乳</span><small class="meta">冷蔵庫 ・ 1本</small></div>
+              <div class="r"><span class="status warning">明日まで</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">卵</span><small class="meta">冷蔵庫 ・ 6個</small></div>
+              <div class="r"><span class="status warning">あと3日</span></div>
+            </div>
+          </section>
+          <section class="sheet">
+            <div class="check-row"><span>在庫ぜんぶ<small>すべての場所</small></span><span class="check-count">42件</span></div>
+            <div class="check-row"><span>少なくなったもの<small>買い物リストの候補</small></span><span class="check-count">2件</span></div>
+            <span class="text-button">期限リストを見る</span>
+          </section>
+        </div>
+        <span class="fab">＋</span>
+      </div></div>
+    </figure>
+
+    <!-- ② 期限リスト -->
+    <figure class="mock">
+      <figcaption>② なかみメモ ・ 期限リスト<small>緊急度でグループ化し、状態はチップと静かな文字で示す</small></figcaption>
+      <div class="phone"><div class="screen">
+        <header class="app-header">
+          <span class="icon-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></span>
+          <span class="header-caption">なかみメモ</span>
+        </header>
+        <div class="main">
+          <div class="page-heading"><p class="eyebrow">近い順</p><h3>期限リスト</h3></div>
+          <p class="group-title">すぐ使う ・ 3件</p>
+          <section class="sheet">
+            <div class="ledger-row">
+              <div class="l"><span class="name">ヨーグルト</span><small class="meta">冷蔵庫 ・ 2個</small></div>
+              <div class="r"><span class="status danger">期限切れ</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">木綿豆腐</span><small class="meta">冷蔵庫 ・ 1丁</small></div>
+              <div class="r"><span class="status warning">今日まで</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">牛乳</span><small class="meta">冷蔵庫 ・ 1本</small></div>
+              <div class="r"><span class="status warning">明日まで</span></div>
+            </div>
+          </section>
+          <p class="group-title">今週中 ・ 3件</p>
+          <section class="sheet">
+            <div class="ledger-row">
+              <div class="l"><span class="name">卵</span><small class="meta">冷蔵庫 ・ 6個</small></div>
+              <div class="r"><span class="status warning">あと3日</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">食パン</span><small class="meta">冷凍庫 ・ 4枚</small></div>
+              <div class="r"><span class="quiet">あと4日</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">ロースハム</span><small class="meta">冷蔵庫 ・ 1パック</small></div>
+              <div class="r"><span class="quiet">あと5日</span></div>
+            </div>
+          </section>
+          <p class="group-title">まだ余裕 ・ 2件</p>
+          <section class="sheet">
+            <div class="ledger-row">
+              <div class="l"><span class="name">米</span><small class="meta">食品庫 ・ 2kg</small></div>
+              <div class="r"><span class="quiet">あと20日</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">味噌</span><small class="meta">冷蔵庫 ・ 1個</small></div>
+              <div class="r"><span class="quiet">余裕あり</span></div>
+            </div>
+          </section>
+        </div>
+        <span class="fab">＋</span>
+      </div></div>
+    </figure>
+
+    <!-- ③ 作り置きホーム -->
+    <figure class="mock">
+      <figcaption>③ つくりおきノート ・ ホーム<small>先頭のシートは「今ある作り置き」の品数だけを大きく</small></figcaption>
+      <div class="phone"><div class="screen">
+        <header class="app-header">
+          <span class="icon-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></span>
+          <span class="header-caption">つくりおき</span>
+        </header>
+        <div class="main">
+          <div class="page-heading"><p class="eyebrow">11月13日（金）</p><h3>ホーム</h3></div>
+          <section class="sheet amount-sheet">
+            <span class="date-label">今ある作り置き</span>
+            <div class="amount">4<small>品</small></div>
+            <p class="support">今日まで 1品 ・ 合計 8食分</p>
+          </section>
+          <section class="sheet">
+            <div class="sheet-head"><span class="sheet-title">あるもの</span><span class="sheet-link">期限順</span></div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">鶏そぼろ</span><small class="meta">冷蔵庫</small></div>
+              <div class="r"><span class="val">3食分</span><span class="status warning">今日まで</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">肉じゃが</span><small class="meta">冷蔵庫</small></div>
+              <div class="r"><span class="val">2食分</span><span class="status warning">あと2日</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">ほうれん草の胡麻和え</span><small class="meta">冷蔵庫</small></div>
+              <div class="r"><span class="val">1食分</span><span class="status warning">あと3日</span></div>
+            </div>
+            <div class="ledger-row">
+              <div class="l"><span class="name">味噌汁の具セット</span><small class="meta">冷凍庫</small></div>
+              <div class="r"><span class="val">2食分</span><span class="quiet">余裕あり</span></div>
+            </div>
+          </section>
+          <section class="sheet">
+            <div class="sheet-head"><span class="sheet-title">次に作る</span></div>
+            <div class="check-row"><span>にんじんしりしり<small>卵とにんじんが家にあります</small></span><span class="check-count">作れる</span></div>
+            <span class="text-button">レシピを見る</span>
+          </section>
+        </div>
+        <span class="fab">＋</span>
+      </div></div>
+    </figure>
+
+    <!-- ④ レシピ詳細 -->
+    <figure class="mock">
+      <figcaption>④ つくりおきノート ・ レシピ詳細<small>レシピは1枚のシートに、材料は明細行で</small></figcaption>
+      <div class="phone"><div class="screen">
+        <header class="app-header">
+          <span class="icon-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></span>
+          <strong>レシピ</strong>
+          <span class="header-caption">つくりおき</span>
+        </header>
+        <div class="main">
+          <section class="sheet">
+            <h3 class="recipe-title">肉じゃが</h3>
+            <p class="recipe-meta">4食分 ・ 冷蔵で3日</p>
+            <h4 class="recipe-sec">材料</h4>
+            <div class="ing"><span>じゃがいも</span><span class="amt">4個</span></div>
+            <div class="ing"><span>玉ねぎ</span><span class="amt">1個</span></div>
+            <div class="ing"><span>にんじん</span><span class="amt">1本</span></div>
+            <div class="ing"><span>牛こま切れ肉</span><span class="amt">200g</span></div>
+            <div class="ing"><span>醤油</span><span class="amt">大さじ3</span></div>
+            <div class="ing"><span>みりん</span><span class="amt">大さじ2</span></div>
+            <div class="ing"><span>砂糖</span><span class="amt">大さじ1</span></div>
+            <h4 class="recipe-sec">作り方</h4>
+            <div class="step"><span class="n">1</span><span>野菜は大きめに切り、じゃがいもは水にさらす。</span></div>
+            <div class="step"><span class="n">2</span><span>油で牛肉と玉ねぎを炒め、野菜を加える。</span></div>
+            <div class="step"><span class="n">3</span><span>だしと調味料を入れ、落とし蓋をして15分煮る。</span></div>
+            <div class="step"><span class="n">4</span><span>火を止めて10分置き、味を含ませる。</span></div>
+          </section>
+          <button class="primary-button" type="button">作り置きに加える</button>
+        </div>
+      </div></div>
+    </figure>
+
+  </div>
+  <p class="foot">デザイン下準備（実装なし）／ 色・角丸・書体・余白は、お金管理の最新UIプロトタイプ（ui-prototype）の tokens.css 実測値 ／ 詳細は audit.md</p>
+</div>
+</body>
+</html>
