@@ -212,113 +212,214 @@
   gap: 24px;
 }
 
+/* ===== シェル（2026-11 UI 統一 TASK2）=====
+   プロトタイプ（reference/prototype-styles.css）の .app-header / .sidebar / .menu-link / main の形。
+   下部タブ・常設サイドバーは置かない（audit §4-1 の7） */
 .ui-app-shell {
-  display: grid;
   min-height: 100svh;
-  grid-template-columns: 232px minmax(0, 1fr);
   background: var(--paper);
 }
 
-.ui-sidebar {
+.ui-app-header {
   position: sticky;
   top: 0;
+  z-index: 20;
   display: flex;
-  height: 100svh;
-  flex-direction: column;
-  gap: 28px;
-  border-right: 1px solid var(--sidebar-rule);
-  padding: 24px 16px 18px;
-  background: var(--sidebar);
+  align-items: center;
+  gap: var(--space-sm);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 20px;
+  padding-top: max(6px, env(safe-area-inset-top));
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
+  background: var(--paper);
+}
+
+.ui-app-header__title {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink);
-}
-
-.ui-sidebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 0 8px;
-}
-
-.ui-sidebar-nav {
-  display: grid;
-  gap: 6px;
-}
-
-.ui-nav-link {
-  display: flex;
-  min-height: 46px;
-  align-items: center;
-  gap: 12px;
-  border-radius: 11px;
-  padding: 0 12px;
-  color: var(--sidebar-copy);
-  font-size: 0.9rem;
+  font-size: 15px;
   font-weight: var(--weight-label);
-  transition: background var(--duration) var(--ease), color var(--duration) var(--ease), transform var(--duration) var(--ease);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ui-nav-link:hover,
-.ui-nav-link[data-active="true"] {
-  background: var(--sidebar-active);
+.ui-app-header__caption {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ui-icon-button {
+  display: grid;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease);
+}
+
+.ui-icon-button:hover {
+  background: var(--soft);
+}
+
+/* 左からすべり込むモーダル。右側だけ角を丸め、罫線1本・影なし。背面は --veil */
+.ui-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(86vw, 340px);
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 0;
+  overflow-y: auto;
+  background: var(--surface);
   color: var(--ink);
 }
 
-.ui-sidebar-footer {
-  display: grid;
-  gap: 12px;
+.ui-sidebar[open] {
+  animation: ui-slide-in var(--duration) var(--ease);
+}
+
+.ui-sidebar::backdrop {
+  background: var(--veil);
+}
+
+.ui-sidebar__inner {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: 28px 20px;
+  padding-top: max(28px, env(safe-area-inset-top));
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+}
+
+.ui-sidebar__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.ui-sidebar__brand {
+  padding: 0 12px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: var(--weight-label);
+}
+
+.ui-sidebar__footer {
   margin-top: auto;
-  border-top: 1px solid var(--sidebar-rule);
-  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-sm);
+}
+
+.ui-menu-group {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.ui-menu-group__title {
+  margin: 0;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ui-menu-link {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: var(--weight-body);
+  text-align: left;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.ui-menu-link > svg {
+  flex: none;
+}
+
+.ui-menu-link > span:not(.ui-menu-link__badge) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-menu-link:hover,
+.ui-menu-link[aria-current="page"] {
+  background: var(--soft);
+}
+
+.ui-menu-link[aria-current="page"],
+.ui-menu-link[data-shared="true"] {
+  color: var(--brand);
+}
+
+.ui-menu-link__badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--brand);
+  font-size: 12px;
+}
+
+.ui-menu-link__badge--muted {
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ui-account {
   min-width: 0;
-  color: var(--sidebar-copy);
-  font-size: 0.78rem;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.ui-sidebar-logout,
-.ui-mobile-logout {
-  display: inline-flex;
-  min-height: 42px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid var(--sidebar-rule);
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--ink);
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: var(--weight-label);
-  transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+body.ui-modal-open {
+  overflow: hidden;
 }
 
-.ui-sidebar-logout:hover {
-  background: var(--sidebar-active);
+@keyframes ui-slide-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
 }
 
-.ui-main-shell {
-  min-width: 0;
-}
-
+/* 本文は最大 600px・中央寄せ。保管場所の一覧だけはカードを3列に並べるので広めに残す */
 .ui-main {
+  width: 100%;
+  max-width: 600px;
   min-width: 0;
-  padding: 32px clamp(20px, 4vw, 56px) 56px;
-}
-
-.ui-content {
-  width: min(100%, 1180px);
   margin: 0 auto;
+  padding: 28px 20px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
 }
 
-.ui-mobile-header {
-  display: none;
-}
-
-.ui-mobile-nav {
-  display: none;
+.ui-main[data-wide="true"] {
+  max-width: 960px;
 }
 
 .ui-page-head {
@@ -345,19 +446,6 @@
   overflow-wrap: anywhere;
 }
 
-/* 作り替えは TASK2。ここでは旧来の濃色背景が白い文字ごと消えないよう、白いシートに寄せただけ */
-.ui-commandbar {
-  display: grid;
-  grid-template-columns: minmax(0, 0.65fr) minmax(300px, 1fr);
-  align-items: end;
-  gap: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 28px;
-  background: var(--surface);
-  color: var(--ink);
-}
-
 .ui-kicker {
   margin: 0 0 10px;
   color: var(--muted);
@@ -366,25 +454,11 @@
   letter-spacing: 0.06em;
 }
 
-.ui-commandbar h1 {
-  margin: 0;
-  color: var(--ink);
-  font-size: clamp(2rem, 4vw, 3rem);
-  font-weight: var(--weight-label);
-  line-height: 1.05;
-}
-
-.ui-commandbar__actions {
-  display: flex;
-  align-items: end;
-  justify-content: end;
-  gap: 8px;
-}
-
 .ui-search-form {
   display: flex;
+  flex: 1;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-xs);
 }
 
 .ui-search-form .ui-input {
@@ -392,38 +466,138 @@
   background: var(--surface);
 }
 
-.ui-stat-grid {
+/* ===== ホーム：シートの積み重ね（design-board ①） ===== */
+.ui-sheets {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.ui-stat {
-  display: grid;
-  gap: 14px;
+  gap: var(--space-md);
   min-width: 0;
-  border-top: 3px solid var(--brand);
-  border-bottom: 1px solid var(--line);
-  padding: 15px 2px 14px;
 }
 
-.ui-stat__label {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: var(--weight-label);
+/* ホームの検索と追加。ヘッダー直下にコンパクトに */
+.ui-home-tools {
+  display: flex;
+  min-width: 0;
+  gap: var(--space-xs);
 }
 
-.ui-stat__value {
-  color: var(--ink);
-  font-size: 2rem;
-  font-weight: var(--weight-label);
-  line-height: 1;
+.ui-sheet,
+.ui-sheets > .ui-section {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  background: var(--surface);
 }
 
-.ui-grid-two {
+.ui-sheet {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 32px;
+  gap: var(--space-sm);
+}
+
+/* 先頭シート：ブランド色の罫線と広めの上下余白（プロトタイプの .amount-sheet） */
+.ui-sheet--lead {
+  border-color: var(--brand);
+  padding-block: var(--space-lg);
+  gap: 0;
+}
+
+.ui-sheet__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.ui-sheet__title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: var(--weight-body);
+}
+
+.ui-sheet__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: var(--space-sm);
+}
+
+.ui-sheet__link {
+  color: var(--brand);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ui-sheet__link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ui-amount {
+  margin: var(--space-sm) 0 var(--space-xs);
+  color: var(--ink);
+  font-size: clamp(36px, 11.8vw, 56px);
+  font-weight: var(--weight-body);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ui-amount small {
+  margin-left: 6px;
+  font-size: 0.42em;
+  letter-spacing: 0;
+}
+
+.ui-support {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.9;
+}
+
+.ui-sheet--lead > .ui-list {
+  margin-top: var(--space-md);
+}
+
+/* 行（ItemCard）の作り替えは TASK3。シートの中では枠を外し、罫線で区切るだけにする */
+.ui-sheet .ui-list {
+  gap: 0;
+}
+
+.ui-sheet .ui-list > .ui-item-card {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: var(--space-sm) 0;
+}
+
+.ui-sheet .ui-list > .ui-item-card:first-child {
+  border-top: 0;
+}
+
+.ui-sheet--lead .ui-list > .ui-item-card:first-child {
+  border-top: 1px solid var(--line);
+}
+
+.ui-area-groups {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.ui-area-group {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.ui-area-group__name {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: var(--weight-body);
 }
 
 .ui-section {
@@ -1216,86 +1390,20 @@
   }
 }
 
-@media (max-width: 820px) {
-  .ui-app-shell {
-    display: block;
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
-  }
-
-  .ui-sidebar {
-    display: none;
-  }
-
-  .ui-mobile-header {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    display: flex;
-    min-height: 62px;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--line);
-    padding: 0 16px;
-    background: var(--paper);
-  }
-
-  .ui-mobile-brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .ui-mobile-logout {
-    width: 42px;
-    border-color: var(--line);
-    background: var(--surface);
-    color: var(--ink);
-  }
-
-  .ui-mobile-nav {
-    position: fixed;
-    inset: auto 0 0;
-    z-index: 30;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    border-top: 1px solid var(--line);
-    padding-bottom: env(safe-area-inset-bottom);
-    background: var(--surface);
-  }
-
-  .ui-mobile-nav .ui-nav-link {
-    min-height: 62px;
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
-    border-radius: 0;
-    padding: 4px 2px;
-    color: var(--muted);
-    font-size: 0.67rem;
-  }
-
-  .ui-mobile-nav .ui-nav-link[data-active="true"] {
-    background: var(--soft);
-    color: var(--brand);
-  }
-
+/* 狭い端末（プロトタイプの 350px の段） */
+@media (max-width: 350px) {
   .ui-main {
-    padding: 22px 16px 34px;
+    padding-inline: 12px;
   }
 
-  .ui-commandbar {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-    gap: 20px;
-    padding: 22px;
+  .ui-sheet,
+  .ui-sheets > .ui-section {
+    padding: var(--space-sm);
   }
 
-  .ui-commandbar__actions {
-    justify-content: stretch;
-  }
-
-  .ui-commandbar__actions .ui-button {
-    flex: 1;
+  .ui-app-header {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
   }
 }
 
@@ -1310,12 +1418,6 @@
     justify-content: start;
   }
 
-  .ui-stat-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px 14px;
-  }
-
-  .ui-grid-two,
   .ui-form-grid,
   .ui-location-grid {
     grid-template-columns: 1fr;
@@ -1435,17 +1537,6 @@
 }
 
 /* ===== 同居人と共有（2026-09-28） ===== */
-.ui-mobile-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ui-mobile-household[data-shared="true"] {
-  border-color: var(--brand);
-  color: var(--brand);
-}
-
 .ui-household-member {
   display: flex;
   align-items: center;

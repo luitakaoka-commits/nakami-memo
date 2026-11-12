@@ -43,11 +43,3 @@
   --blue: var(--brand);
   --danger-line: color-mix(in srgb, var(--danger) 24%, var(--surface));
 }
-
-/* サイドバー専用。TASK2 でシェルを作り替えたら消す（明色ベースに寄せ済み） */
-:root {
-  --sidebar: var(--surface);
-  --sidebar-active: var(--soft);
-  --sidebar-copy: var(--muted);
-  --sidebar-rule: var(--line);
-}
