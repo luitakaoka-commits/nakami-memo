@@ -132,6 +132,8 @@ const closeModals = page => page.evaluate(() => {
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${label}が${width}pxで横にはみ出す`);
         assert(await page.locator('#floating-add').isVisible(), `${label}でFABが使えない`);
         if (route === 'records') assert(!(await page.locator('#page-container').innerText()).includes('レシート'), '記録にレシートが残っている');
+        if (route === 'shift') assert(await page.locator('.plan-grid [data-work-date]').count() >= 28, 'シフトの月間カレンダーがない');
+        if (route === 'recurring') assert(await page.locator('#recurring-plan-form').count() === 0, '定期支払いの編集フォームが一覧に出ている');
         if (route === 'settings') assert(await page.locator('#recurring-plan-form').count() === 0, '設定に定期支払いが残っている');
         if (route === 'plans') {
           const legend = page.locator('.plan-legend');
@@ -1178,21 +1180,21 @@ const closeModals = page => page.evaluate(() => {
       api.setPage('records');
       api.setRecordTab('receipts');
     });
-    await page.waitForSelector('#page-container [data-action="receipt-list-tab"]');
-    const stores = () => page.$$eval('#page-container .receipt-row .candidate-head strong', nodes => nodes.map(node => node.textContent.trim()));
-    const tabs = await page.$$eval('#page-container [data-action="receipt-list-tab"]', nodes => nodes.map(node => node.textContent.trim()));
+    await page.waitForSelector('#receipt-status');
+    const stores = () => page.$$eval('#page-container .receipt-row h2', nodes => nodes.map(node => node.textContent.trim()));
+    const tabs = await page.$$eval('#receipt-status option', nodes => nodes.map(node => node.textContent.trim()));
     assert(JSON.stringify(tabs) === JSON.stringify(['未確認 2件', '確認済み 1件']), `タブが違う（無視が0件なら出さない）: ${tabs}`);
     const unchecked = await stores();
     assert(JSON.stringify(unchecked.sort()) === JSON.stringify(['未確認ストア', '要確認ストア'].sort()), `未確認の一覧に確認済みが混ざっている: ${unchecked}`);
 
-    await page.click('#page-container [data-action="receipt-list-tab"][data-tab="checked"]');
+    await page.selectOption('#receipt-status', 'checked');
     await page.waitForTimeout(150);
     const checked = await stores();
     assert(JSON.stringify(checked) === JSON.stringify(['確認済みストア']), `確認済みの一覧が違う: ${checked}`);
     assert(await page.locator('#page-container [data-action="accept-receipt"]').count() === 0, '確認済みの一覧に「確認済みにする」が出ている');
 
     // 確認済みにしたら未確認の一覧から消え、確認済みの側に移る
-    await page.click('#page-container [data-action="receipt-list-tab"][data-tab="unchecked"]');
+    await page.selectOption('#receipt-status', 'unchecked');
     await page.waitForTimeout(150);
     await page.evaluate(() => {
       const api = window.__YORYOKU__;
@@ -1201,7 +1203,7 @@ const closeModals = page => page.evaluate(() => {
     });
     await page.waitForTimeout(150);
     assert(JSON.stringify(await stores()) === JSON.stringify(['要確認ストア']), '確認済みにしたのに未確認の一覧に残っている');
-    const moved = await page.$$eval('#page-container [data-action="receipt-list-tab"]', nodes => nodes.map(node => node.textContent.trim()));
+    const moved = await page.$$eval('#receipt-status option', nodes => nodes.map(node => node.textContent.trim()));
     assert(JSON.stringify(moved) === JSON.stringify(['未確認 1件', '確認済み 2件']), `件数が移っていない: ${moved}`);
   });
 
@@ -1690,9 +1692,14 @@ const closeModals = page => page.evaluate(() => {
       return { account: state.accounts[0].id, card: card.id, debit: card.accountId };
     });
     for (const [name, method] of [['水道テスト', 'account:' + methods.account], ['電気テスト', 'card:' + methods.card]]) {
+      await page.getByRole('button', { name: '定期支払いを追加', exact: true }).click();
+      assert(await page.getByRole('dialog', { name: '定期支払いを追加' }).isVisible(), '定期支払いの入力がダイアログで開かない');
+      const fieldSize = await form.locator('[name=name]').evaluate(element => ({ height: element.getBoundingClientRect().height, font: parseFloat(getComputedStyle(element).fontSize) }));
+      assert(fieldSize.height >= 44 && fieldSize.font >= 16, 'スマホで定期支払いの入力欄が小さすぎる');
       await form.locator('[name=name]').fill(name);
       await form.locator('[name=amount]').fill('4200');
       await form.locator('[name=method]').selectOption(method);
+      assert((await form.locator('[data-recurring-start]').innerText()) === (method.startsWith('card:') ? '最初の利用日' : '最初の支払日'), '支払い方法に応じた開始日の項目名が表示されない');
       await form.locator('[name=start]').fill('2026-11-20');
       await form.locator('[name=interval]').selectOption('2');
       await form.locator('[type=submit]').click();
