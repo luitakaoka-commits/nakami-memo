@@ -64,7 +64,7 @@ export function LoginForm() {
       <form className="ui-stack" onSubmit={handleSubmit}>
         {mode === "signup" && <label className="ui-form-field">表示名<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>}
         <label className="ui-form-field">メールアドレス<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-        <label className="ui-form-field">パスワード<input type="password" required minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        <label className="ui-form-field">パスワード<input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} required minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         {error && <p role="alert" className="ui-error">{error}</p>}
         <button type="submit" disabled={submitting} className="ui-button ui-button--primary ui-button--full"><LogIn size={17} strokeWidth={2} />{mode === "signup" ? "作成" : "ログイン"}</button>
       </form>
