@@ -697,7 +697,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=95" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=96" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2739,8 +2739,12 @@
     const filters = [['settled', '確定済み'], ['planned', '未確定'], ['all', 'すべて']];
 
     // 吸収済みの明細は総額の内訳なので、一覧には出さず総額をタップして見せる
-    let records = state.transactions.filter(transaction => transaction.status !== 'absorbed')
-      .filter(transaction => recordFilter === 'all' || transaction.status === recordFilter);
+    let records = state.transactions.filter(transaction => {
+      const date = transaction.dueDate;
+      return date && date >= range.startDate && date <= range.endDate
+        && transaction.status !== 'absorbed'
+        && (recordFilter === 'all' || transaction.status === recordFilter);
+    });
     if (recordCategory) records = records.filter(transaction => (transaction.category || 'その他') === recordCategory);
     if (searchQuery) records = records.filter(transaction => `${transaction.memo} ${transaction.category} ${accountName(transaction.sourceAccountId)} ${transaction.cardId ? cardName(transaction.cardId) : ''}`.toLowerCase().includes(searchQuery.toLowerCase()));
     records = sortedTransactions(records).reverse();
