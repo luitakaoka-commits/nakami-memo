@@ -697,7 +697,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=96" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=97" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -752,9 +752,22 @@
     const renderers = { home: renderHome, daily: renderDailyDetails, checks: renderDailyCheckDetails, plans: renderPlans, records: renderRecords, receipts: renderReceiptPage, review: renderReviewPage, recurring: renderRecurringPage, accounts: renderAccounts, shift: renderShift, settings: renderSettings, spendable: renderSpendable, cashflow: renderCashflow, imports: renderImports };
     const warning = ['home', 'daily', 'checks', 'plans', 'spendable', 'cashflow'].includes(currentPage) ? renderStatementDuplicateWarning() : '';
     $('#page-container').innerHTML = warning + renderers[currentPage]();
+    addHeadingDates();
     if (currentPage === 'spendable') requestAnimationFrame(() => {
       animateHeroAmount();
       updateWhatIf(whatIfAmount);
+    });
+  }
+
+  /* 試作（UI最終版 2026-11-13）どおり、どの画面も見出しの上に今日の日付を出す。見出しの組み方が画面ごとに違うので、描いたあとにそろえる */
+  function addHeadingDates() {
+    $$('#page-container .page-heading').forEach(heading => {
+      const title = heading.querySelector(':scope > h1');
+      if (!title || heading.querySelector('.eyebrow')) return;
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<p class="eyebrow">${esc(formatDate(today(), true))}</p>`;
+      heading.insertBefore(wrap, title);
+      wrap.append(title);
     });
   }
 
@@ -2587,7 +2600,7 @@
       const kinds = Object.keys(PLAN_MARKS).filter(kind => plansByDate.get(date)?.has(kind));
       return `<button type="button" data-plan-day="${date}" aria-pressed="${date === (planDate || today())}" aria-label="${formatDate(date, true)}${kinds.length ? '、' + kinds.map(kind => kindMeta(kind).label).join('、') : ''}"><span>${day}</span><span class="plan-marks" aria-hidden="true">${kinds.map(planMark).join('')}</span></button>`;
     });
-    return `<section class="sheet plan-calendar" data-plan-month="${month}" aria-label="予定カレンダー"><div class="plan-view-toolbar"><button type="button" class="mini-button" data-plan-month-step="-1" aria-label="前の月">‹</button><h2>${month.replace('-', '年')}月</h2><button type="button" class="mini-button" data-plan-month-step="1" aria-label="次の月">›</button></div><div class="plan-grid">${[...'日月火水木金土'].map(day => `<span aria-hidden="true">${day}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(firstWeekday)}${cells.join('')}</div><p class="plan-legend">${Object.keys(PLAN_MARKS).map(kind => `<span>${planMark(kind)}${kind === 'payment' ? '支出' : kindMeta(kind).label}</span>`).join('')}</p></section>`;
+    return `<section class="sheet plan-calendar" data-plan-month="${month}" aria-label="予定カレンダー"><div class="plan-view-toolbar"><button type="button" class="icon-button" data-plan-month-step="-1" aria-label="前の月">‹</button><h2>${formatMonthLabel(month)}</h2><button type="button" class="icon-button" data-plan-month-step="1" aria-label="次の月">›</button></div><div class="plan-grid">${[...'日月火水木金土'].map(day => `<span aria-hidden="true">${day}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(firstWeekday)}${cells.join('')}</div><p class="plan-legend">${Object.keys(PLAN_MARKS).map(kind => `<span>${planMark(kind)}${kind === 'payment' ? '支出' : kindMeta(kind).label}</span>`).join('')}</p></section>`;
   }
 
   function renderPlans() {
@@ -2602,7 +2615,7 @@
       <div class="plan-view-toolbar">${planFilter === 'details' ? '<button type="button" class="button button-quiet" data-page="plans">予定</button>' : '<button type="button" class="button button-quiet" data-page="plans" data-plan-section="details">明細</button><button type="button" class="button button-primary" data-action="add-event">予定を追加</button>'}</div>
       ${planFilter === 'details' ? renderPlanDetails(details) : `
         ${renderPlanCalendar(mainPlans)}
-        <section class="sheet"><h2>${formatDate(selectedDate, true)}の予定</h2><div class="list">${renderTransactionRows(filtered, false) || '<p>0件</p>'}</div></section>`}</div>`;
+        <section class="sheet"><h2>${Number(selectedDate.slice(5, 7))}月${Number(selectedDate.slice(8, 10))}日の予定</h2><div class="list">${renderTransactionRows(filtered, false) || '<p class="support">0件</p>'}</div></section>`}</div>`;
   }
 
   /* ==========================================================
@@ -2616,7 +2629,8 @@
    * ========================================================== */
 
   // 円グラフの配色。並び順は固定で、系列が減っても色は動かさない。
-  const CHART_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'];
+  // 最初の3色は試作（UI最終版）と同じ。4色目からは試作の意味色・予定の印の色を使う
+  const CHART_COLORS = ['#2873bf', '#c53c45', '#713745', '#276457', '#865316', '#695185'];
   const CHART_OTHER_COLOR = '#8b958f';
   const CHART_MAX_SLICES = 6;
 
@@ -2661,13 +2675,14 @@
     if (!total || !slices.length) {
       return '<div class="donut-empty"><div><strong>データがありません</strong>この期間の記録がまだありません。</div></div>';
     }
-    const radius = 38;
+    // 試作（UI最終版）の太い輪：外径100・内径62
+    const radius = 40.5;
     const circumference = 2 * Math.PI * radius;
-    const gap = slices.length > 1 ? 2 : 0;
+    const gap = 0;
     let offset = 0;
     const arcs = slices.map(slice => {
       const length = Math.max(circumference * slice.ratio - gap, 0.6);
-      const arc = `<circle class="donut-arc" cx="50" cy="50" r="${radius}" fill="none" stroke="${slice.color}" stroke-width="13" stroke-linecap="butt" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"><title>${esc(slice.label)} ${formatAbsoluteYen(slice.amount)}（${Math.round(slice.ratio * 100)}%）</title></circle>`;
+      const arc = `<circle class="donut-arc" cx="50" cy="50" r="${radius}" fill="none" stroke="${slice.color}" stroke-width="19" stroke-linecap="butt" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"><title>${esc(slice.label)} ${formatAbsoluteYen(slice.amount)}（${Math.round(slice.ratio * 100)}%）</title></circle>`;
       offset += circumference * slice.ratio;
       return arc;
     }).join('');
@@ -2749,17 +2764,34 @@
     if (searchQuery) records = records.filter(transaction => `${transaction.memo} ${transaction.category} ${accountName(transaction.sourceAccountId)} ${transaction.cardId ? cardName(transaction.cardId) : ''}`.toLowerCase().includes(searchQuery.toLowerCase()));
     records = sortedTransactions(records).reverse();
 
-    const netClass = summary.net >= 0 ? 'value-positive' : 'value-negative';
     const chart = recordChartType === 'income' ? renderChartCard('収入', summary.income, 'income') : renderChartCard('支出', summary.expense, 'expense');
-    return `<div class="prototype-flow">
+    // 試作（UI最終版 2026-11-13）の形：月送り → 収支と円グラフのシート → 履歴のシート。
+    // 期間の指定・集計のしかた・検索・絞り込みは試作に無いが、機能は残し、試作の文字ボタンと下線のタブで出す。
+    const monthMode = recordRangeMode === 'month';
+    const pager = monthMode
+      ? `<div class="plan-toolbar overview-pager range-month"><button type="button" class="icon-button" data-action="range-month" data-step="-1" aria-label="前の月">‹</button><h2><strong>${esc(rangeLabel(range))}</strong></h2><button type="button" class="icon-button" data-action="range-month" data-step="1" aria-label="次の月">›</button></div>`
+      : `<div class="range-custom record-range-custom"><label>開始日<input type="date" id="record-start" value="${esc(range.startDate)}"></label><label>終了日<input type="date" id="record-end" value="${esc(range.endDate)}"></label></div>`;
+    const options = `<div class="plan-toolbar record-options"><div class="range-tabs" role="group" aria-label="期間"><button type="button" class="filter-button ${monthMode ? 'active' : ''}" data-action="range-mode" data-mode="month" aria-pressed="${monthMode}">月ごと</button><button type="button" class="filter-button ${monthMode ? '' : 'active'}" data-action="range-mode" data-mode="custom" aria-pressed="${!monthMode}">期間を指定</button></div><div class="range-basis-buttons" role="group" aria-label="集計のしかた"><button type="button" class="filter-button ${recordBasis === 'real' ? 'active' : ''}" data-action="record-basis" data-basis="real" aria-pressed="${recordBasis === 'real'}">実質負担</button><button type="button" class="filter-button ${recordBasis === 'gross' ? 'active' : ''}" data-action="record-basis" data-basis="gross" aria-pressed="${recordBasis === 'gross'}">総額</button></div></div>`;
+    return `<div class="prototype-flow records-flow">
       ${heading}
-      ${renderRangeControl(range)}
-      <section class="sheet record-summary"><dl class="ledger summary-strip"><div class="stat-card"><dt><span>収入</span></dt><dd><strong class="value-positive">${formatFlowAmount(summary.income.total, 'in')}</strong></dd></div><div class="stat-card"><dt><span>支出</span></dt><dd><strong class="value-negative">${formatFlowAmount(summary.expense.total, 'out')}</strong></dd></div><div class="stat-card ledger-total"><dt><span>収支</span></dt><dd><strong class="${netClass}">${formatSigned(summary.net)}</strong></dd></div></dl>
-      <label class="record-chart-type">内訳<select id="record-chart-type"><option value="expense" ${recordChartType === 'expense' ? 'selected' : ''}>支出</option><option value="income" ${recordChartType === 'income' ? 'selected' : ''}>収入</option></select></label><div class="record-chart">${chart}</div></section>
-      <section class="card info-card record-extra"><div class="formula-row"><span>貯蓄・投資（支出とは別枠）</span><strong>${formatAbsoluteYen(summary.saving.total)}</strong></div><div class="formula-row"><span>立替した分</span><strong>${formatAbsoluteYen(summary.lendingTotal)}</strong></div><p class="form-note">${esc(rangeLabel(range))}の確定済みの記録から集計しています。${recordBasis === 'real' ? '支出は立替分を差し引いた実質負担です。' : '支出は立替分を含む総額です。'}カードの明細は請求総額の内訳なので、二重に数えていません。</p></section>
-      <div class="filters"><input class="search" id="record-search" value="${esc(searchQuery)}" placeholder="メモ・カテゴリ・口座を検索">${filters.map(([value, label]) => `<button class="filter-button ${recordFilter === value ? 'active' : ''}" data-record-filter="${value}">${label}</button>`).join('')}</div>
-      ${recordCategory ? `<div class="active-filter"><span>「${esc(recordCategory)}」で絞り込み中</span><button type="button" class="mini-button" data-action="filter-category" data-category="">解除</button></div>` : ''}
-      <section class="card list-card"><div class="list-card-header"><h2>${esc(rangeLabel(range))}の履歴</h2><small class="muted">${records.length}件</small></div><div class="list">${renderTransactionRows(records, false) || '<p>履歴なし</p>'}</div></section></div>`;
+      ${pager}
+      ${options}
+      <section class="sheet record-summary"><dl class="ledger summary-strip"><div class="stat-card"><dt><span>収入</span></dt><dd><strong>${formatAbsoluteYen(summary.income.total)}</strong></dd></div><div class="stat-card"><dt><span>支出</span></dt><dd><strong>${formatAbsoluteYen(summary.expense.total)}</strong></dd></div><div class="stat-card ledger-total"><dt><span>収支</span></dt><dd><strong>${formatDisplayedAmount(summary.net)}</strong></dd></div></dl>
+      <div class="record-chart-side"><div class="record-chart">${chart}</div><label class="record-chart-type">内訳 <select id="record-chart-type"><option value="expense" ${recordChartType === 'expense' ? 'selected' : ''}>支出</option><option value="income" ${recordChartType === 'income' ? 'selected' : ''}>収入</option></select></label></div></section>
+      <section class="sheet record-extra"><dl class="ledger"><div><dt>貯蓄・投資</dt><dd>${formatAbsoluteYen(summary.saving.total)}</dd></div><div><dt>立替した分</dt><dd>${formatAbsoluteYen(summary.lendingTotal)}</dd></div></dl>${renderGuidance('説明', `${rangeLabel(range)}の確定済みの記録から集計しています。${recordBasis === 'real' ? '支出は立替分を差し引いた実質負担です。' : '支出は立替分を含む総額です。'}貯蓄・投資は支出とは別枠です。カードの明細は請求総額の内訳なので、二重に数えていません。`)}</section>
+      <section class="sheet list-card"><h2>${esc(monthMode ? `${Number((recordMonth || today().slice(0, 7)).slice(5))}月` : rangeLabel(range))}の履歴</h2>
+      <div class="record-search"><input class="search" id="record-search" value="${esc(searchQuery)}" placeholder="検索" aria-label="メモ・カテゴリ・口座を検索"></div>
+      <div class="filters" role="group" aria-label="表示する記録">${filters.map(([value, label]) => `<button class="filter-button ${recordFilter === value ? 'active' : ''}" data-record-filter="${value}" aria-pressed="${recordFilter === value}">${label}</button>`).join('')}</div>
+      ${recordCategory ? `<div class="active-filter plan-toolbar"><span class="support">「${esc(recordCategory)}」で絞り込み中</span><button type="button" class="mini-button" data-action="filter-category" data-category="">解除</button></div>` : ''}
+      <div class="list">${renderTransactionRows(records, false) || '<p class="support">履歴なし</p>'}</div></section></div>`;
+  }
+
+  /** 試作（UI最終版）のカードの色：三井住友は緑、三菱UFJ（MUFG）はえんじ、ほかは淡い紙色 */
+  function creditCardStyle(name) {
+    const text = String(name || '').toUpperCase();
+    if (/三井住友|SMBC|ＳＭＢＣ/.test(text)) return 'smbc';
+    if (/三菱|MUFG|ＭＵＦＧ|UFJ/.test(text)) return 'mufg';
+    return 'jcb';
   }
 
   function renderAccounts() {
@@ -2771,7 +2803,7 @@
       ${primary ? `<section class="sheet"><h2>基準口座</h2><p>${esc(primary.name)}</p><p class="amount">${formatDisplayedAmount(primary.currentBalance)}</p>${accountBalanceNote(primary)}${actions('account', primary)}</section>` : ''}
       <details class="sheet" id="subaccounts" ${subaccountsOpen ? 'open' : ''}><summary>サブ口座</summary>${state.accounts.filter(item => item !== primary).map(item => `<article class="account-summary-row"><div class="plan-view-toolbar"><strong>${esc(item.name)}</strong><strong>${formatDisplayedAmount(item.currentBalance)}</strong></div>${accountBalanceNote(item)}${actions('account', item)}</article>`).join('') || '<p>口座なし</p>'}</details>
       <div class="plan-view-toolbar"><h2>クレジットカード</h2><button type="button" class="button button-quiet" data-action="add-card">カードを追加</button></div>
-      <div class="account-card-grid">${state.cards.map((item, index) => `<section><article class="money-credit-card" data-style="${index % 3}"><strong>${esc(item.name)}</strong>${icon('card')}</article><p>${item.closingDay ? `${item.closingDay}日締め` : '月末締め'} · ${item.paymentDay ? `${item.paymentDay}日払い` : '月末払い'}</p>${actions('card', item)}</section>`).join('')}</div></div>`;
+      <div class="account-card-grid">${state.cards.map(item => `<section><article class="money-credit-card account-card ${creditCardStyle(item.name)}"><strong>${esc(item.name)}</strong><span aria-hidden="true">▣</span></article><p>${item.closingDay ? `${item.closingDay}日締め` : '月末締め'} · ${item.paymentDay ? `${item.paymentDay}日払い` : '月末払い'}</p>${actions('card', item)}</section>`).join('')}</div></div>`;
   }
 
   function renderCloudSettings() {
@@ -2862,11 +2894,11 @@
       .map(key => `<option value="${key}"${key === paymentMonth ? ' selected' : ''}>${formatMonthLabel(key)}支給</option>`)
       .join('');
 
-    const rows = salary.entries.map(entry => `<div class="work-row">
-        <div class="work-date"><strong>${formatDate(entry.date, true)}</strong><span class="badge ${entry.status === 'worked' ? 'badge-settled' : 'badge-planned'}">${entry.status === 'worked' ? '勤務済み' : '勤務予定'}</span></div>
-        <div class="work-main"><strong>${formatHours(entry.hours)}</strong><small>${formatAbsoluteYen(entry.rate)}／時${entry.memo ? `・${esc(entry.memo)}` : ''}</small></div>
-        <div class="work-side"><strong>${formatFlowAmount(entry.amount, 'in')}</strong><div class="list-actions"><button class="mini-button" data-action="edit-work" data-id="${entry.id}" aria-label="${formatDate(entry.date, true)}のシフトを編集">編集</button><button class="mini-button danger" data-action="delete-work" data-id="${entry.id}" aria-label="${formatDate(entry.date, true)}のシフトを削除">削除</button></div></div>
-      </div>`).join('');
+    // 試作（UI最終版）の行：日付と時間を左右に、下に状態・時給・メモ、操作は下線の文字ボタン
+    const rows = salary.entries.map(entry => `<article class="plan-row work-row"><div class="plan-toolbar"><strong>${entry.date.replaceAll('-', '/')}</strong><strong>${formatHours(entry.hours)}</strong></div>
+        <p class="support">${entry.status === 'worked' ? '勤務済み' : '勤務予定'} · ${formatAbsoluteYen(entry.rate)}／時${entry.memo ? ` · ${esc(entry.memo)}` : ''} · ${formatFlowAmount(entry.amount, 'in')}</p>
+        <div class="mail-actions"><button class="mini-button" data-action="edit-work" data-id="${entry.id}" aria-label="${formatDate(entry.date, true)}のシフトを編集">編集</button><button class="mini-button danger" data-action="delete-work" data-id="${entry.id}" aria-label="${formatDate(entry.date, true)}のシフトを削除">削除</button></div>
+      </article>`).join('');
 
     const { startDate, endDate } = finance.calendarMonthRange(salary.workMonth);
     const offset = new Date(`${startDate}T00:00:00Z`).getUTCDay();
@@ -2880,28 +2912,23 @@
     return `<div class="prototype-flow">
       <div class="page-heading"><div><p class="eyebrow">${formatDate(today(), true)}</p><h1>シフト・給与</h1></div></div>
       <section class="sheet plan-calendar shift-control-card" aria-label="シフトカレンダー">
-        <label class="shift-month-field"><span>対象の支給月</span><select id="shift-month">${options}</select></label>
-        <div class="shift-meta">
-          <div><span>対象勤務月</span><strong>${formatMonthLabel(salary.workMonth)}</strong><small>${formatDate(salary.workStartDate)}〜${formatDate(salary.workEndDate)}</small></div>
-          <div><span>支給予定日</span><strong>${formatDate(salary.paymentDate, true)}</strong><small>${movedForward ? `${formatDate(salary.scheduledPaymentDate)}が休日のため前営業日` : '基本支給日どおり'}</small></div>
-        </div>
+        <div class="plan-toolbar overview-pager"><button type="button" class="icon-button" data-shift-month-step="-1" aria-label="前月">‹</button><h2>${formatMonthLabel(salary.workMonth)}</h2><button type="button" class="icon-button" data-shift-month-step="1" aria-label="翌月">›</button></div>
         <div class="plan-grid">${[...'日月火水木金土'].map(day => `<span aria-hidden="true">${day}</span>`).join('')}${'<span aria-hidden="true"></span>'.repeat(offset)}${days}</div>
+        <p class="support shift-payment-line"><label>支給月 <select id="shift-month">${options}</select></label> · 支給予定日 ${formatDate(salary.paymentDate, true)}${movedForward ? `（${formatDate(salary.scheduledPaymentDate)}が休日のため前営業日）` : ''}</p>
       </section>
+
+      <div class="shift-totals">
+        <section class="sheet"><h2>給与見込み額</h2><strong>${formatDisplayedAmount(salary.totalAmount)}</strong><p class="support">勤務済み ${formatDisplayedAmount(salary.confirmedAmount)}</p></section>
+        <section class="sheet"><h2>予定勤務時間</h2><strong>${formatHours(salary.plannedHours)}</strong><p class="support">勤務済み ${formatHours(salary.workedHours)}</p></section>
+      </div>
 
       ${renderSalaryRecordCard(salaryRecord, paymentMonth)}
 
-      <section class="summary-strip">
-        <div class="stat-card"><span>勤務済み額</span><strong class="value-positive">${formatDisplayedAmount(salary.confirmedAmount)}</strong></div>
-        <div class="stat-card"><span>予定込みの見込み額</span><strong class="value-positive">${formatDisplayedAmount(salary.totalAmount)}</strong></div>
-        <div class="stat-card"><span>勤務済み時間</span><strong>${formatHours(salary.workedHours)}</strong></div>
-        <div class="stat-card"><span>予定時間</span><strong>${formatHours(salary.plannedHours)}</strong></div>
-      </section>
-
-      ${needsRate ? '<section class="card notice-card"><strong>時給が未設定です</strong><p>設定の給与設定で基本時給を入力すると、シフトから見込み額を計算します。</p><button class="button button-quiet button-small" data-page="settings">給与設定へ</button></section>' : ''}
+      ${needsRate ? '<section class="sheet notice-card"><h2>時給が未設定です</h2><p class="support">設定の給与設定で基本時給を入力すると、シフトから見込み額を計算します。</p><div class="mail-actions"><button class="button button-quiet" data-page="settings">給与設定へ</button></div></section>' : ''}
 
       <section class="sheet">
         <div class="plan-view-toolbar"><h2>シフト一覧</h2><button type="button" class="button button-quiet" data-action="add-work">シフトを追加</button></div>
-        <div class="work-list">${rows || emptyBlock('この勤務月のシフトはありません', '「シフトを追加」から登録してください。')}</div>
+        <div class="work-list">${rows || '<p class="support">シフトなし</p>'}</div>
       </section></div>`;
   }
 
@@ -4047,6 +4074,14 @@
     if (planCardButton) { planDetailCardFilter = planCardButton.dataset.planDetailCard; detailPeriod = ''; renderPage(); return; }
     const recordButton = event.target.closest('[data-record-filter]');
     if (recordButton) { recordFilter = recordButton.dataset.recordFilter; renderPage(); return; }
+    // シフト・給与の月送り（試作の ‹ ›）。支給月を1か月ずつ動かす（選択肢から選ぶのと同じ）
+    const shiftStep = event.target.closest('[data-shift-month-step]');
+    if (shiftStep) {
+      shiftPaymentMonth = finance.shiftMonthKey(currentShiftPaymentMonth(), Number(shiftStep.dataset.shiftMonthStep));
+      renderPage();
+      $(`[data-shift-month-step="${shiftStep.dataset.shiftMonthStep}"]`)?.focus();
+      return;
+    }
     const action = event.target.closest('[data-action]');
     if (!action) return;
     const name = action.dataset.action;
