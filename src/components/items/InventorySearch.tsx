@@ -31,7 +31,7 @@ export function InventorySearch() {
 
       <section className="ui-section">
         <div className="ui-section__head"><h2 className="ui-section__title">検索結果</h2><span className="ui-section__count">{results.length}件</span></div>
-        <div className="ui-list">{results.length ? results.map((item) => <ItemCard key={item.id} item={item} locationLabel={locationLabelOf(item)} />) : <p className="ui-empty__title">該当なし</p>}</div>
+        <div className="ui-sheet"><div className="ui-list">{results.length ? results.map((item) => <ItemCard key={item.id} item={item} locationLabel={locationLabelOf(item)} />) : <p className="ui-empty__title">該当なし</p>}</div></div>
       </section>
     </div>
   );

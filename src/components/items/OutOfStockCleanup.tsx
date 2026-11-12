@@ -45,6 +45,19 @@ export function OutOfStockCleanup({ items }: { items: Item[] }) {
         </button>
       </div>
       <p className="ui-muted">0になったモノは、今は自動で在庫から消えます。前から0のまま残っている分だけ、ここで消してください。</p>
+      <div className="ui-list">
+        {empty.map((item) => (
+          <div key={item.id} className="ui-ledger-row">
+            <div className="ui-ledger-row__main">
+              <div className="ui-ledger-row__l"><p className="ui-ledger-row__name">{item.name}</p></div>
+              <div className="ui-ledger-row__r">
+                <span className="ui-ledger-row__val">{item.quantity}<small>{item.unit}</small></span>
+                <span className="ui-status ui-status--danger">在庫切れ</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
       {failure && <p role="alert" className="ui-error">{failure}</p>}
     </section>
   );

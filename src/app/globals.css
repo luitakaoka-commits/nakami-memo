@@ -563,24 +563,178 @@ body.ui-modal-open {
   margin-top: var(--space-md);
 }
 
-/* 行（ItemCard）の作り替えは TASK3。シートの中では枠を外し、罫線で区切るだけにする */
-.ui-sheet .ui-list {
+/* 明細行（ledger）の並び。行どうしは 1px の罫線だけで区切る */
+.ui-sheet .ui-list,
+.ui-list:has(> .ui-ledger-row),
+.ui-list:has(> * > .ui-ledger-row) {
   gap: 0;
 }
 
-.ui-sheet .ui-list > .ui-item-card {
-  border: 0;
+.ui-sheet--lead .ui-list > .ui-ledger-row:first-child,
+.ui-sheet--lead .ui-list > :first-child > .ui-ledger-row {
   border-top: 1px solid var(--line);
-  border-radius: 0;
-  padding: var(--space-sm) 0;
 }
 
-.ui-sheet .ui-list > .ui-item-card:first-child {
+/* 明細行（プロトタイプの .ledger / design-board ①②） */
+.ui-ledger-row {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-xs);
+  border-top: 1px solid var(--line);
+  padding-block: var(--space-sm);
+}
+
+.ui-list > .ui-ledger-row:first-child,
+.ui-list > :first-child > .ui-ledger-row {
   border-top: 0;
 }
 
-.ui-sheet--lead .ui-list > .ui-item-card:first-child {
-  border-top: 1px solid var(--line);
+.ui-ledger-row__main {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.ui-ledger-row__media {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  background: var(--soft);
+}
+
+.ui-ledger-row__l {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-ledger-row__name {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: var(--weight-label);
+  overflow-wrap: anywhere;
+}
+
+.ui-ledger-row__meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: var(--weight-body);
+  overflow-wrap: anywhere;
+}
+
+.ui-ledger-row__r {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: end;
+  gap: var(--space-sm);
+  text-align: right;
+}
+
+.ui-ledger-row__val {
+  color: var(--ink);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ui-ledger-row__val small {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ui-ledger-row__memo {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ui-ledger-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* ItemOutcomeActions の外枠（mt-2）を行の中では打ち消す */
+.ui-ledger-row__actions > div {
+  margin-top: 0;
+}
+
+/* 状態チップ（プロトタイプの .status）。淡色背景＋意味色の文字、角丸10px、12px */
+.ui-status {
+  display: inline-block;
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: var(--weight-body);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ui-status--income {
+  background: var(--income-soft);
+  color: var(--income);
+}
+
+.ui-status--warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.ui-status--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* 余裕のある状態はチップにせず、静かな文字で */
+.ui-quiet {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* グループ見出し＋ブランド色の件数（design-board ② / プロトタイプの check-count） */
+.ui-group {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-xs);
+}
+
+.ui-group__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.ui-group__title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: var(--weight-body);
+}
+
+.ui-count {
+  flex: 0 0 auto;
+  color: var(--brand);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .ui-area-groups {
@@ -637,7 +791,6 @@ body.ui-modal-open {
   min-width: 0;
 }
 
-.ui-item-card,
 .ui-location-card,
 .ui-form-surface,
 .ui-detail-card {
@@ -660,20 +813,10 @@ body.ui-modal-open {
   padding: clamp(20px, 4vw, 32px);
 }
 
-.ui-item-card {
-  display: flex;
-  min-width: 0;
-  gap: 15px;
-  padding: 13px;
-  transition: border-color var(--duration) var(--ease), transform var(--duration) var(--ease);
-}
-
-.ui-item-card:hover,
 .ui-location-card:hover {
   border-color: var(--brand);
 }
 
-.ui-item-card__media,
 .ui-location-card__media {
   position: relative;
   flex: 0 0 auto;
@@ -681,23 +824,15 @@ body.ui-modal-open {
   background: var(--soft);
 }
 
-.ui-item-card__media {
-  width: 72px;
-  height: 72px;
-  border-radius: 10px;
-}
-
 .ui-location-card__media {
   height: 142px;
 }
 
-.ui-item-card__body,
 .ui-location-card__body {
   min-width: 0;
   flex: 1;
 }
 
-.ui-item-card__top,
 .ui-location-card__top {
   display: flex;
   align-items: start;
@@ -706,7 +841,6 @@ body.ui-modal-open {
   min-width: 0;
 }
 
-.ui-item-card__name,
 .ui-location-card__name {
   margin: 0;
   color: var(--ink);
@@ -721,21 +855,6 @@ body.ui-modal-open {
   color: var(--muted);
   font-size: 0.75rem;
   overflow-wrap: anywhere;
-}
-
-.ui-item-card__quantity {
-  flex: 0 0 auto;
-  color: var(--ink);
-  font-size: 1.2rem;
-  font-weight: var(--weight-label);
-  line-height: 1;
-}
-
-.ui-item-card__badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 12px;
 }
 
 .ui-item-card__memo {
@@ -1055,15 +1174,16 @@ body.ui-modal-open {
   font-weight: var(--weight-label);
 }
 
+/* 旧バッジもチップの形（角丸10px・12px）に揃える。色の写像の作り替えは TASK4 */
 .ui-badge {
   display: inline-flex;
-  min-height: 24px;
   align-items: center;
-  border-radius: 999px;
-  padding: 0 8px;
-  font-size: 0.7rem;
-  font-weight: var(--weight-label);
-  line-height: 1;
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: var(--weight-body);
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .ui-badge--green {
