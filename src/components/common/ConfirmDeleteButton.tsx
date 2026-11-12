@@ -1,7 +1,7 @@
 "use client";
 
 import { Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 
 export function ConfirmDeleteButton({
   label = "削除",
@@ -17,9 +17,25 @@ export function ConfirmDeleteButton({
 }) {
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState("");
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const messageId = useId();
 
-  async function handleClick() {
-    if (!window.confirm(message)) return;
+  // 確認は window.confirm と同じ意味（OK なら消す・キャンセルなら何もしない）。見た目だけダイアログの型にそろえる
+  function handleClick() {
+    const dialog = dialogRef.current;
+    if (dialog && typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
+    if (window.confirm(message)) void runDelete();
+  }
+
+  function handleConfirm() {
+    dialogRef.current?.close();
+    void runDelete();
+  }
+
+  async function runDelete() {
     setFailure("");
     setLoading(true);
     try {
@@ -40,6 +56,13 @@ export function ConfirmDeleteButton({
         <Trash2 size={15} strokeWidth={1.9} />
         <span>{loading ? "削除中" : label}</span>
       </button>
+      <dialog ref={dialogRef} className="ui-dialog" aria-describedby={messageId}>
+        <p id={messageId} className="ui-dialog__message">{message}</p>
+        <div className="ui-dialog__actions">
+          <button type="button" onClick={() => dialogRef.current?.close()} className="ui-button ui-button--secondary">キャンセル</button>
+          <button type="button" onClick={handleConfirm} className="ui-button ui-button--danger-solid">{label}</button>
+        </div>
+      </dialog>
       {failure && <p role="alert" className="ui-error">{failure}</p>}
     </>
   );

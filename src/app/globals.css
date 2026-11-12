@@ -675,6 +675,47 @@ body.ui-modal-open {
   margin-top: 0;
 }
 
+/* 名前と操作を1行に並べる行（エリア管理）。操作は右寄せで、縦は中央にそろえる */
+.ui-ledger-row__main--center {
+  align-items: center;
+}
+
+.ui-ledger-row__main--center > .ui-ledger-row__actions {
+  flex: 0 0 auto;
+  justify-content: end;
+}
+
+/* 「使い切った／捨てた」（ItemOutcomeActions）。行の操作と同じ 6px 間隔で並べる */
+.ui-outcome__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* 保管場所の中身一覧：明細行の右下に削除ボタンを重ねる。
+   行の操作（編集・使い切った・捨てた）がボタンの下に潜らないよう、操作の右側をボタンの幅だけ空けておく */
+.ui-ledger-slot {
+  position: relative;
+  min-width: 0;
+}
+
+.ui-ledger-slot > .ui-ledger-row .ui-ledger-row__actions {
+  min-height: 36px;
+  padding-right: 88px;
+}
+
+.ui-ledger-slot__delete {
+  position: absolute;
+  right: 0;
+  bottom: var(--space-sm);
+}
+
+.ui-ledger-slot__delete > .ui-button {
+  min-height: 36px;
+  padding: 0 var(--space-xs);
+}
+
 /* 状態チップ（プロトタイプの .status）。淡色背景＋意味色の文字、角丸10px、12px */
 .ui-status {
   display: inline-block;
@@ -970,14 +1011,55 @@ body.ui-modal-open {
   background: var(--soft);
 }
 
+/* 危険の操作は、ふだんは罫線も塗りも無い静かな文字ボタン。確かめるダイアログの中でだけ塗る（--danger-solid） */
 .ui-button--danger {
-  border-color: var(--danger-line);
-  background: var(--surface);
+  background: transparent;
   color: var(--danger);
 }
 
 .ui-button--danger:hover {
   background: var(--danger-soft);
+}
+
+.ui-button--danger-solid {
+  background: var(--danger);
+  color: var(--on-brand);
+}
+
+/* 確かめるダイアログ（プロトタイプの .detail-dialog）。幅 min(90vw, 480px)・角丸20px・罫線1本・影なし・背面は --veil */
+.ui-dialog {
+  width: min(90vw, 480px);
+  max-width: none;
+  max-height: 85dvh;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-lg) var(--space-md);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+.ui-dialog[open] {
+  animation: ui-dialog-in var(--duration) var(--ease);
+}
+
+.ui-dialog::backdrop {
+  background: var(--veil);
+}
+
+.ui-dialog__message {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ui-dialog__actions {
+  display: flex;
+  justify-content: end;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
 }
 
 /* 旧来は濃色の帯の上で使う白ボタン。帯を白いシートにしたので、ここではブランド色のボタンにしておく（作り替えは TASK2） */
@@ -988,13 +1070,19 @@ body.ui-modal-open {
 
 .ui-form-surface {
   max-width: 860px;
-  padding: clamp(20px, 4vw, 32px);
+  padding: var(--space-lg) var(--space-md);
+}
+
+/* フォームの見出しの下は罫線1本で区切る */
+.ui-form-surface > .ui-page-head {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--space-sm);
 }
 
 .ui-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 16px;
+  gap: var(--space-md) var(--space-sm);
 }
 
 .ui-inline-form {
@@ -1045,35 +1133,51 @@ body.ui-modal-open {
 .ui-form-field {
   display: grid;
   min-width: 0;
-  gap: 7px;
+  gap: var(--space-xs);
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 13px;
   font-weight: var(--weight-label);
+}
+
+/* 入力欄の中の文字はラベルの 500 を引き継がず本文の 400・16px */
+.ui-form-field input,
+.ui-form-field select,
+.ui-form-field textarea {
+  font-size: 16px;
+  font-weight: var(--weight-body);
 }
 
 .ui-form-field--full {
   grid-column: 1 / -1;
 }
 
+/* 保存・戻るの行。上を罫線1本で区切る */
 .ui-form-actions {
   display: flex;
   justify-content: end;
-  gap: 8px;
-  margin-top: 4px;
+  gap: var(--space-sm);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-md);
+}
+
+.ui-form-actions .ui-button {
+  min-height: 44px;
+  padding: 0 var(--space-md);
 }
 
 .ui-form-note {
+  margin: 0;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 12px;
 }
 
 .ui-check-field {
   display: flex;
   min-height: 44px;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-sm);
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 13px;
   font-weight: var(--weight-label);
 }
 
@@ -1094,14 +1198,14 @@ body.ui-modal-open {
    チェック → 付けたら「残りがこの数以下で知らせる」の数と単位を横に並べる */
 .ui-restock {
   display: grid;
-  gap: 8px;
+  gap: var(--space-xs);
   min-width: 0;
 }
 
 .ui-restock__row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-sm);
 }
 
 .ui-restock__row input {
@@ -1111,70 +1215,95 @@ body.ui-modal-open {
 
 .ui-restock__unit {
   color: var(--ink);
-  font-size: 0.9rem;
-  font-weight: var(--weight-label);
+  font-size: 15px;
+  font-weight: var(--weight-body);
 }
 
 .ui-details {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: 16px 0;
+  padding: var(--space-md) 0;
 }
 
 .ui-details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
   cursor: pointer;
   color: var(--ink);
-  font-size: 0.88rem;
+  font-size: 15px;
   font-weight: var(--weight-label);
 }
 
 .ui-error {
-  border: 1px solid var(--danger-line);
   border-radius: var(--radius-control);
-  padding: 11px 13px;
+  padding: var(--space-sm);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 0.82rem;
+  font-size: 13px;
 }
 
+/* 空・読めなかったとき：白いシート（角丸20px・罫線1本）に、見出しと短い文、必要ならボタン */
 .ui-empty {
   display: grid;
   justify-items: start;
-  gap: 14px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  padding: 28px;
-  background: var(--surface);
-}
-
-.ui-loading {
-  display: grid;
-  min-height: 280px;
-  place-items: center;
+  gap: var(--space-sm);
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  padding: var(--space-md);
   background: var(--surface);
-  text-align: center;
-}
-
-.ui-loading__spinner {
-  width: 34px;
-  height: 34px;
-  margin: 0 auto 14px;
-  border: 3px solid var(--soft);
-  border-top-color: var(--brand);
-  border-radius: 999px;
-  animation: ui-spin 720ms linear infinite;
 }
 
 .ui-empty__title {
   margin: 0;
   color: var(--ink);
-  font-size: 0.96rem;
+  font-size: 15px;
   font-weight: var(--weight-label);
 }
 
-/* 旧バッジもチップの形（角丸10px・12px）に揃える。色の写像の作り替えは TASK4 */
+.ui-empty__text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* 読み込み中：シートの上にスケルトン（--soft の帯）を並べる（プロトタイプの .skeleton） */
+.ui-loading {
+  display: grid;
+  gap: var(--space-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-lg) var(--space-md);
+  background: var(--surface);
+}
+
+.ui-skeleton {
+  display: block;
+  width: 70%;
+  height: 18px;
+  border-radius: var(--radius-control);
+  background: var(--soft);
+}
+
+.ui-skeleton--short {
+  width: 30%;
+  height: 12px;
+}
+
+.ui-skeleton--lead {
+  width: 85%;
+  height: 60px;
+}
+
+.ui-loading__label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 旧バッジ（tsx から直接クラス名で使っている所が残る）も状態チップの意味色3つに写す。
+   green・blue・slate → 正常、amber → 注意、red → 危険（Badge.tsx の写像と同じ） */
 .ui-badge {
   display: inline-flex;
   align-items: center;
@@ -1186,14 +1315,11 @@ body.ui-modal-open {
   white-space: nowrap;
 }
 
-.ui-badge--green {
+.ui-badge--green,
+.ui-badge--blue,
+.ui-badge--slate {
   background: var(--income-soft);
   color: var(--income);
-}
-
-.ui-badge--blue {
-  background: var(--soft);
-  color: var(--brand);
 }
 
 .ui-badge--amber {
@@ -1206,23 +1332,18 @@ body.ui-modal-open {
   color: var(--danger);
 }
 
-.ui-badge--slate {
-  background: var(--soft);
-  color: var(--muted);
-}
-
 .ui-image-picker {
   display: grid;
-  gap: 8px;
+  gap: var(--space-xs);
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 13px;
   font-weight: var(--weight-label);
 }
 
 .ui-image-picker__row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-sm);
 }
 
 .ui-image-picker__preview {
@@ -1231,7 +1352,8 @@ body.ui-modal-open {
   height: 96px;
   flex: 0 0 auto;
   overflow: hidden;
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
   background: var(--soft);
 }
 
@@ -1240,16 +1362,16 @@ body.ui-modal-open {
   height: 100%;
   place-items: center;
   align-content: center;
-  gap: 5px;
+  gap: var(--space-xs);
   color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: var(--weight-label);
+  font-size: 12px;
+  font-weight: var(--weight-body);
 }
 
 .ui-image-picker__control {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-xs);
 }
 
 .ui-image-picker__input {
@@ -1264,16 +1386,16 @@ body.ui-modal-open {
 .ui-image-picker__button {
   display: inline-flex;
   width: fit-content;
-  min-height: 38px;
+  min-height: 44px;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-xs);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  padding: 0 11px;
+  padding: 0 var(--space-sm);
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 13px;
   font-weight: var(--weight-label);
   transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease), transform var(--duration) var(--ease);
 }
@@ -1301,12 +1423,12 @@ body.ui-modal-open {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-xs);
   min-width: 0;
   margin: 0;
-  color: var(--brand);
-  font-size: 0.76rem;
-  font-weight: var(--weight-label);
+  color: var(--income);
+  font-size: 12px;
+  font-weight: var(--weight-body);
 }
 
 .ui-image-picker__selection span {
@@ -1317,35 +1439,37 @@ body.ui-modal-open {
 
 .ui-image-picker__selection small {
   color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: var(--weight-label);
+  font-size: 12px;
+  font-weight: var(--weight-body);
 }
 
 .ui-image-picker__error {
   margin: 0;
   color: var(--danger);
-  font-size: 0.74rem;
-  font-weight: var(--weight-label);
+  font-size: 12px;
+  font-weight: var(--weight-body);
 }
 
+/* ダイアログの型（プロトタイプの .detail-dialog）：背面は --veil だけ、幅 min(90vw, 480px)、角丸20px、罫線1本・影なし */
 .ui-save-overlay {
   position: fixed;
   z-index: 100;
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: var(--space-md);
   background: var(--veil);
-  backdrop-filter: blur(10px);
   animation: ui-overlay-in var(--duration) var(--ease);
 }
 
 .ui-save-dialog {
-  width: min(100%, 360px);
+  width: min(90vw, 480px);
+  max-height: 85dvh;
+  overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 28px;
-  background: var(--surface);
+  padding: var(--space-lg) var(--space-md);
+  background: var(--paper);
   text-align: center;
   animation: ui-dialog-in var(--duration) var(--ease);
 }
@@ -1354,7 +1478,7 @@ body.ui-modal-open {
   display: grid;
   width: 48px;
   height: 48px;
-  margin: 0 auto 16px;
+  margin: 0 auto var(--space-sm);
   place-items: center;
   border-radius: 50%;
   background: var(--soft);
@@ -1362,8 +1486,8 @@ body.ui-modal-open {
 }
 
 .ui-save-dialog__icon--success {
-  background: var(--brand);
-  color: var(--on-brand);
+  background: var(--income-soft);
+  color: var(--income);
 }
 
 .ui-save-dialog__icon--error {
@@ -1378,24 +1502,25 @@ body.ui-modal-open {
 .ui-save-dialog__title {
   margin: 0;
   color: var(--ink);
-  font-size: 1.05rem;
+  font-size: 17px;
   font-weight: var(--weight-label);
 }
 
 .ui-save-dialog__detail {
   min-height: 1.4em;
-  margin: 7px 0 0;
+  margin: var(--space-xs) 0 0;
   color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: var(--weight-label);
+  font-size: 13px;
+  font-weight: var(--weight-body);
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 
 .ui-save-progress {
   height: 6px;
-  margin-top: 18px;
+  margin-top: var(--space-md);
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: var(--soft);
 }
 

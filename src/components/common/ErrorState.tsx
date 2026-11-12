@@ -10,7 +10,7 @@ export function ErrorState({
   return (
     <div role="alert" className="ui-empty">
       <h2 className="ui-empty__title">{title}</h2>
-      <p className="ui-muted">{detail || "通信状態を確認して、ページを再読み込みしてください。"}</p>
+      <p className="ui-empty__text">{detail || "通信状態を確認して、ページを再読み込みしてください。"}</p>
     </div>
   );
 }

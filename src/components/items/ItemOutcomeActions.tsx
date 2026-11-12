@@ -20,7 +20,7 @@ export function ItemOutcomeActions({ item }: { item: Item }) {
   const [done, setDone] = useState("");
 
   const recorded = outcomeLabel(item.outcome, item.outcomeReason);
-  if (recorded) return <p className="ui-item-card__meta">{recorded}</p>;
+  if (recorded) return <p className="ui-ledger-row__meta">{recorded}</p>;
   if (!canRecordOutcome(item)) return null;
 
   async function record(choice: Parameters<typeof recordItemOutcome>[2]) {
@@ -48,13 +48,13 @@ export function ItemOutcomeActions({ item }: { item: Item }) {
     }
   }
 
-  if (done) return <p className="ui-item-card__meta">{done}</p>;
+  if (done) return <p className="ui-ledger-row__meta">{done}</p>;
 
   return (
-    <div className="mt-2">
+    <div className="ui-outcome">
       {asking ? (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="ui-item-card__meta">捨てた理由は？</span>
+        <div className="ui-outcome__row">
+          <span className="ui-ledger-row__meta">捨てた理由は？</span>
           {DISCARD_REASONS.map((entry) => (
             <button
               key={entry.reason}
@@ -71,7 +71,7 @@ export function ItemOutcomeActions({ item }: { item: Item }) {
           </button>
         </div>
       ) : (
-        <div className="flex flex-wrap gap-1">
+        <div className="ui-outcome__row">
           <button type="button" disabled={busy} onClick={() => record({ kind: "consumed" })} className="ui-button ui-button--ghost">
             使い切った
           </button>

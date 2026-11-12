@@ -80,9 +80,9 @@ export function LocationDetail() {
         ) : (
           <div className="ui-list">
             {items.map((item) => (
-              <div key={item.id} className="relative">
+              <div key={item.id} className="ui-ledger-slot">
                 <ItemCard item={item} />
-                <div className="absolute bottom-3 right-3">
+                <div className="ui-ledger-slot__delete">
                   <ConfirmDeleteButton
                     label="削除"
                     message="このアイテムを削除しますか？"

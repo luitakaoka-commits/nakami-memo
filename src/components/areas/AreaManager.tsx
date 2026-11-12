@@ -63,14 +63,16 @@ export function AreaManager() {
       </section>
 
       {areas.length === 0 ? <EmptyState title="エリアがありません" /> : (
-        <div className="ui-list">
+        <div className="ui-sheet"><div className="ui-list">
           {areas.map((area) => (
-            <div key={area.id} className="ui-area-row">
-              <div className="ui-area-row__meta"><p className="ui-area-row__name">{area.name}</p><p className="ui-area-row__sort">並び順: {area.sortOrder ?? "未設定"}</p></div>
-              <div className="ui-area-row__actions"><button type="button" onClick={() => startEdit(area)} className="ui-button ui-button--secondary">編集</button><ConfirmDeleteButton onConfirm={async () => { if (!user) return; setError(""); await deleteArea(user.uid, area.id); }} onError={setError} message="このエリアを削除しますか？" /></div>
+            <div key={area.id} className="ui-ledger-row">
+              <div className="ui-ledger-row__main ui-ledger-row__main--center">
+                <div className="ui-ledger-row__l"><p className="ui-ledger-row__name">{area.name}</p><p className="ui-ledger-row__meta">並び順: {area.sortOrder ?? "未設定"}</p></div>
+                <div className="ui-ledger-row__actions"><button type="button" onClick={() => startEdit(area)} className="ui-button ui-button--ghost">編集</button><ConfirmDeleteButton onConfirm={async () => { if (!user) return; setError(""); await deleteArea(user.uid, area.id); }} onError={setError} message="このエリアを削除しますか？" /></div>
+              </div>
             </div>
           ))}
-        </div>
+        </div></div>
       )}
     </div>
   );
