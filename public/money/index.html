@@ -7,15 +7,15 @@
   <meta name="description" content="支払い・貯金・NISAを引いたあとに、今使える金額を確認するアプリ">
   <!-- 3アプリは「くらしノート」1つとしてインストールする。manifest は3アプリ共通のものを指す。 -->
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="icons/app-icon.svg?v=97" type="image/svg+xml">
+  <link rel="icon" href="icons/app-icon.svg?v=98" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icons/kurashi-note-apple-180.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="くらしノート">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=97">
-  <link rel="stylesheet" href="tokens.css?v=97">
+  <link rel="stylesheet" href="styles.css?v=98">
+  <link rel="stylesheet" href="tokens.css?v=98">
   <title>お金管理</title>
 </head>
 <body>
@@ -23,7 +23,7 @@
 
   <div id="auth-screen" class="auth-screen" hidden>
     <div class="auth-panel">
-      <div class="auth-brand"><img src="icons/app-icon.svg?v=97" alt=""><strong>お金管理</strong></div>
+      <div class="auth-brand"><img src="icons/app-icon.svg?v=98" alt=""><strong>お金管理</strong></div>
       <div class="auth-lock" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></div>
       <h1>ログイン</h1>
       <div class="form-stack">
@@ -346,15 +346,15 @@
   <input id="import-file" type="file" accept="application/json" hidden>
   <input id="restore-cloud-file" type="file" accept="application/json" hidden>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="finance-engine.js?v=97"></script>
-  <script>window.firebaseSyncReady = import('./firebase-sync.js?v=97').then(module => module.firebaseSync);</script>
-  <script src="redesign-legacy-adapter.js?v=97"></script>
-  <script src="redesign-readiness.js?v=97"></script>
-  <script src="redesign-deadline.js?v=97"></script>
-  <script src="redesign-bill-lifecycle.js?v=97"></script>
-  <script src="redesign-refund.js?v=97"></script>
-  <script src="daily-finance.js?v=97"></script>
-  <script src="app.js?v=97"></script>
+  <script src="finance-engine.js?v=98"></script>
+  <script>window.firebaseSyncReady = import('./firebase-sync.js?v=98').then(module => module.firebaseSync);</script>
+  <script src="redesign-legacy-adapter.js?v=98"></script>
+  <script src="redesign-readiness.js?v=98"></script>
+  <script src="redesign-deadline.js?v=98"></script>
+  <script src="redesign-bill-lifecycle.js?v=98"></script>
+  <script src="redesign-refund.js?v=98"></script>
+  <script src="daily-finance.js?v=98"></script>
+  <script src="app.js?v=98"></script>
   <script type="module">
     /* お金管理は試作どおり上の切り替えバーを出さない（2026-11-13 ユーザー決定）。ほかのアプリへはサイドメニューから移る。
        バーが担っていた「最後に開いたアプリを覚える」「ほかのアプリの切り替えシートに今の状態を出す」はここで続ける。 */

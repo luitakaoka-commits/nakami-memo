@@ -1785,3 +1785,16 @@ body {
 .prototype-flow .money-credit-card.account-card strong { font-size: 15px; }
 .prototype-flow .money-credit-card.account-card span { font-size: 20px; line-height: 1; }
 .records-flow .record-options .range-tabs .filter-button { flex: 0 0 auto; padding-inline: 12px; }
+
+/* 入力画面（試作：保存の下に文字ボタンのキャンセル、金額欄は1枚の枠） */
+.modal .modal-actions { display: flex; flex-direction: column-reverse; align-items: stretch; gap: 8px; margin-top: 12px; }
+.modal .modal-actions .button-primary { width: 100%; min-height: 44px; padding: 10px 16px; border: 0; border-radius: var(--radius-control); background: var(--brand); color: var(--on-brand); font-family: var(--font); font-size: 15px; font-weight: var(--weight-label); }
+.modal .modal-actions .button-quiet { width: auto; align-self: center; min-height: 44px; padding: 8px 0; border: 0; border-bottom: 1px solid var(--brand); border-radius: 0; background: transparent; color: var(--brand); font-family: var(--font); font-size: 13px; font-weight: var(--weight-label); box-shadow: none; }
+.modal :is(.amount-input, .unit-input) { min-height: 44px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: none; }
+.modal :is(.amount-input, .unit-input):focus-within { border-color: var(--brand); box-shadow: none; background: var(--paper); }
+.modal :is(.amount-input, .unit-input) > span { font-weight: var(--weight-body); font-size: 13px; }
+.modal :is(.amount-input, .unit-input) input { min-height: 40px !important; padding: 4px !important; font-size: 16px !important; font-weight: var(--weight-body); letter-spacing: 0; }
+.modal :is(.amount-input, .unit-input) input:focus-visible { outline: 0; }
+.modal :is(input, select, textarea):focus { box-shadow: none; }
+.modal input[type="checkbox"] { accent-color: auto; }
+.modal label.check-row, .modal .check-row { min-height: 36px; padding-block: 2px; }
