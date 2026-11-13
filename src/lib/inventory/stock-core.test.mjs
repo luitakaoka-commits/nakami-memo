@@ -8,6 +8,7 @@ import {
   linkId, median, nextBuyLabel, nextBuys, namesForMatching, productKey, sanitizeInsights, stockEventFor, usageStats,
   buildInsightsPrompt,
 } from "./stock-core.ts";
+import { formatQuantity, quantityChoices, quantityStep } from "./quantity-core.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -150,6 +151,35 @@ t("1日たったら考え直す（ホームを開いたとき）", () => {
   ok(isInsightStale(null, now), "初回");
   ok(!isInsightStale(now - 3_600_000, now), "1時間前");
   ok(isInsightStale(now - 25 * 3_600_000, now), "25時間前");
+});
+
+// ---- 数量のカルーセル（2026-11-14） ----
+
+t("数量のカルーセル：数える単位は1きざみ、0は出さない、いまの数を必ず含む", () => {
+  const list = quantityChoices(2, "冊");
+  eq(list.slice(0, 3), [1, 2, 3], "1から");
+  ok(!list.includes(0), "0 は出さない（使い切った／捨てたから）");
+  ok(list.includes(12) && list[list.length - 1] === 12, "上は12まで（2の2倍・10先より大きいほう）");
+  eq(quantityChoices(30, "個").at(-1), 60, "多いときは2倍まで");
+  ok(quantityChoices(0.5, "パック").includes(0.5), "端数のいまの数も入る");
+  eq(quantityChoices(0.5, "パック").slice(0, 2), [0.5, 1], "小さい順");
+});
+
+t("数量のカルーセル：g・mL は10きざみ（1000を超えたら50）、kg・L は0.1きざみ", () => {
+  eq(quantityChoices(300, "g").slice(0, 3), [10, 20, 30], "g");
+  ok(quantityChoices(300, "g").includes(300), "いまの数");
+  eq(quantityStep("mL", 1500), 50, "多いときは50");
+  eq(quantityChoices(1, "L").slice(0, 3), [0.1, 0.2, 0.3], "0.1 の誤差が出ない");
+  eq(formatQuantity(0.30000000000000004), "0.3", "表示");
+  ok(quantityChoices(5000, "g").length <= 151, "並びすぎない");
+});
+
+t("数量のカルーセルは一覧のカードから開き、0 にはしない", () => {
+  const card = read("src", "components", "items", "ItemCard.tsx");
+  ok(card.includes("<QuantityCarousel"), "カードから開けない");
+  const fire = read("src", "lib", "firebase", "firestore.ts");
+  ok(/export async function updateItemQuantity[\s\S]*?quantity > 0\)\) throw/.test(fire), "0 を保存できてしまう");
+  ok(/export async function updateItemQuantity[\s\S]*?shouldResetOutcome\(item, quantity\)/.test(fire), "数が戻ったときに「使い切った」の印を消していない");
 });
 
 // ---- ここから下は、記録を書く場所とルールの突き合わせ ----

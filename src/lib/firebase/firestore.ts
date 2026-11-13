@@ -12,7 +12,7 @@ import {
   where,
 } from "firebase/firestore";
 import type { AreaInput } from "@/lib/types/area";
-import type { ItemInput } from "@/lib/types/item";
+import type { Item, ItemInput } from "@/lib/types/item";
 import type { LocationInput } from "@/lib/types/location";
 import { OUTCOME_RESET, shouldResetOutcome } from "@/lib/inventory/outcome-core";
 import { createPublicToken } from "@/lib/utils/qr";
@@ -267,4 +267,15 @@ export async function deleteItem(userId: string, itemId: string) {
   const item = await getItem(userId, itemId);
   await deleteDoc(itemDoc(userId, itemId));
   if (item) await syncPublicByLocationIfNeeded(userId, item.locationId);
+}
+
+/**
+ * 数量だけを変える（一覧のカルーセルから。2026-11-14）。0 にはしない（0 は「使い切った／捨てた」から。在庫から消えるため）。
+ * 編集画面と同じく、数が戻ったら「使い切った／捨てた」の印を消し、公開中の保管場所なら公開ページも合わせる。
+ */
+export async function updateItemQuantity(userId: string, item: Item, quantity: number) {
+  if (!(Number.isFinite(quantity) && quantity > 0)) throw new Error("0にするときは「使い切った」か「捨てた」を押してください。");
+  const reset = shouldResetOutcome(item, quantity) ? OUTCOME_RESET : {};
+  await updateDoc(itemDoc(userId, item.id), { quantity, updatedAt: serverTimestamp(), ...reset });
+  await syncPublicByLocationIfNeeded(userId, item.locationId);
 }
