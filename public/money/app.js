@@ -237,6 +237,10 @@
       recurringPlanId: source.recurringPlanId || '',
       ...(source.scheduledDate ? { scheduledDate: source.scheduledDate } : {}),
       ...(source.statementEvidence ? { statementEvidence: source.statementEvidence } : {}),
+      // 請求額：カードアプリで見た日。明細：請求額に入っているかを本人が選んだ結果と、次の請求へ回した締め月（2026-11-13）
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(source.asOfDate || '') ? { asOfDate: source.asOfDate } : {}),
+      ...(['included', 'pending'].includes(source.statementInclusion) ? { statementInclusion: source.statementInclusion } : {}),
+      ...(/^\d{4}-\d{2}$/.test(source.billingCycleOverride || '') ? { billingCycleOverride: source.billingCycleOverride } : {}),
       ...(source.debitEvidence ? { debitEvidence: source.debitEvidence } : {}),
       ...(source.refundEvidence ? { refundEvidence: source.refundEvidence } : {}),
       // シフトから作った給与の取引だけが持つ。どの支給月か（'YYYY-MM'）と、手で直したか（2026-09-15）
@@ -329,6 +333,8 @@
           paymentDay: Number(card.paymentDay || 0),
           // 締め月から支払月までのオフセット。既定は「締め月の翌月」。
           paymentMonthOffset: Number.isFinite(Number(card.paymentMonthOffset)) ? Number(card.paymentMonthOffset) : 1,
+          // 利用がカードアプリの請求額に反映されるまでの日数。未設定ならエポス0日・ほか2日（finance-engine の reflectionDaysOf）
+          ...(Number.isInteger(Number(card.reflectionDays)) && card.reflectionDays !== '' && card.reflectionDays != null && Number(card.reflectionDays) >= 0 ? { reflectionDays: Number(card.reflectionDays) } : {}),
           createdAt: card.createdAt || nowIso(),
           updatedAt: card.updatedAt || nowIso()
         })) : [],
@@ -697,7 +703,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=98" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=101" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -2475,7 +2481,7 @@
       <div class="summary-strip"><div class="stat-card"><span>最初の不足見込み</span><strong>${shortfall ? formatDate(shortfall.date, true) : '未確認条件を確認'}</strong></div><div class="stat-card"><span>次のカード引落</span><strong>${assessment.nextDate ? formatDate(assessment.nextDate, true) : '未登録'}</strong></div></div>
       <ul>${reasonsShown.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></section>
       <section class="card daily-details" data-debit-assessment><h2>カード引落日の口座残高</h2>${renderGuidance('予測残高について', '登録した入出金がすべて予定どおりに行われた場合の残高です。')}${assessment.issues.some(issue => issue.type === 'same_day_income_unconfirmed') ? renderGuidance('同日の入金と引落', '引落日と入金日が同じ場合は、入金が引落に間に合うか確認してください。') : ''}<div class="table-scroll"><table class="timeline-table"><thead><tr><th>日付</th><th>引落口座</th><th>請求・追加の可能性</th><th>予測残高</th><th>状態</th></tr></thead><tbody>${timeline || '<tr><td colspan="5">引落予定が登録されていません。</td></tr>'}</tbody></table></div></section>
-      <section class="card daily-details"><h2>登録済みの入出金予定</h2><div class="daily-events">${events.map(e => `<div><span><strong>${formatDate(e.date, true)}</strong><small>${esc(accountName(e.accountId))}・${e.cardPayment ? 'カード請求' : e.kind === 'income' ? '予定入金' : e.kind === 'transfer' ? '予定振替' : '支払い'}</small></span><strong class="${e.kind === 'income' ? 'value-positive' : 'value-negative'}">${e.kind === 'income' ? '+' : '−'}${formatAbsoluteYen(e.amount + (e.additionalPossible || 0))}</strong></div>`).join('') || '<p>期間内の予定はありません。</p>'}</div><button class="button button-quiet" data-page="plans">予定を確認・修正</button></section>
+      <section class="card daily-details"><h2>登録済みの入出金予定</h2><div class="daily-events">${events.map(e => `<div><span><strong>${formatDate(e.date, true)}</strong><small>${e.cardPayment && e.cardId ? `${esc(cardName(e.cardId))}・カード請求（${esc(accountName(e.accountId))}から）` : `${esc(accountName(e.accountId))}・${e.cardPayment ? 'カード請求' : e.kind === 'income' ? '予定入金' : e.kind === 'transfer' ? '予定振替' : '支払い'}`}</small></span><strong class="${e.kind === 'income' ? 'value-positive' : 'value-negative'}">${e.kind === 'income' ? '+' : '−'}${formatAbsoluteYen(e.amount + (e.additionalPossible || 0))}</strong></div>`).join('') || '<p>期間内の予定はありません。</p>'}</div><button class="button button-quiet" data-page="plans">予定を確認・修正</button></section>
       ${renderDailyChecks(view)}</details></div>`;
   }
 
@@ -3070,16 +3076,74 @@
     return `${date} ${finance.jstTimeStringOf(transaction.transactionAt)}`;
   }
 
+  /**
+   * 請求総額の内訳（2026-11-13）。明細を「請求額に含まれている」と「まだ入っていない（上乗せ）」に分けて見せ、
+   * 明細ごとに入れ替え・次の請求へ回すことができる。含まれている明細の合計が請求額を上回るときは、重複の候補を出す。
+   */
   function renderStatementDetailPanel(statement, details) {
-    const total = details.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const diff = Number(statement.amount || 0) - total;
-    const rows = details.map(item => `<div class="detail-row"><div class="detail-when">${esc(formatUsageMoment(item))}</div><div class="detail-name">${esc(item.memo || 'カード利用')}${item.transactionAt ? '' : '<span class="detail-flag">時刻なし</span>'}${item.status === 'absorbed' ? `<button type="button" class="mini-button" data-action="correct-detail-card" data-id="${esc(item.id)}">カードを訂正</button><button type="button" class="mini-button" data-action="correct-detail-time" data-id="${esc(item.id)}">利用時刻を訂正</button>` : ''}</div><div class="detail-amount">${formatAbsoluteYen(Math.abs(Number(item.amount || 0)))}</div></div>`).join('');
+    const card = creditCard(statement.cardId);
+    const editable = statement.status === 'planned';
+    const isPending = item => editable && item.status === 'planned' && finance.isDetailPendingForStatement(item, statement, card);
+    const included = details.filter(item => !isPending(item));
+    const pending = details.filter(isPending);
+    const sum = list => list.reduce((total, item) => total + Number(item.amount || 0), 0);
+    const includedTotal = sum(included);
+    const diff = Number(statement.amount || 0) - includedTotal;
+    const keyOf = item => `${item.transactionDate || item.dueDate}:${item.amount}`;
+    const counts = details.reduce((map, item) => map.set(keyOf(item), (map.get(keyOf(item)) || 0) + 1), new Map());
+    const asOf = finance.statementAsOfDate(statement);
+    const row = item => {
+      const pendingNow = isPending(item);
+      const actions = editable && item.status === 'planned'
+        ? `<button type="button" class="mini-button" data-action="detail-inclusion" data-id="${esc(item.id)}" data-value="${pendingNow ? 'included' : 'pending'}">${pendingNow ? '請求額に含まれている' : 'まだ入っていない'}</button>${item.billingCycleOverride
+          ? `<button type="button" class="mini-button" data-action="detail-cycle-reset" data-id="${esc(item.id)}">元の請求に戻す</button>`
+          : `<button type="button" class="mini-button" data-action="detail-next-cycle" data-id="${esc(item.id)}">次の請求へ</button>`}`
+        : '';
+      return `<div class="detail-row${pendingNow ? ' detail-pending' : ''}"><div class="detail-when">${esc(formatUsageMoment(item))}</div><div class="detail-name">${esc(item.memo || 'カード利用')}${item.transactionAt ? '' : '<span class="detail-flag">時刻なし</span>'}${counts.get(keyOf(item)) > 1 ? '<span class="detail-flag">重複の可能性</span>' : ''}${pendingNow ? '<span class="detail-flag">上乗せ</span>' : ''}${actions}${item.status === 'absorbed' ? `<button type="button" class="mini-button" data-action="correct-detail-card" data-id="${esc(item.id)}">カードを訂正</button><button type="button" class="mini-button" data-action="correct-detail-time" data-id="${esc(item.id)}">利用時刻を訂正</button>` : ''}</div><div class="detail-amount">${formatAbsoluteYen(Math.abs(Number(item.amount || 0)))}</div></div>`;
+    };
     const note = diff === 0
-      ? '請求総額と明細の合計が一致しています。'
+      ? '請求総額と、含まれている明細の合計が一致しています。'
       : diff > 0
         ? `明細に出ていない利用が ${formatAbsoluteYen(diff)} あります。`
-        : `明細の合計が請求総額を ${formatAbsoluteYen(Math.abs(diff))} 上回っています。総額の入力をご確認ください。`;
-    return `<div class="detail-panel"><div class="detail-panel-head"><span>メール取込の明細 ${details.length}件</span><strong>${formatAbsoluteYen(total)}</strong></div><div class="detail-rows">${rows}</div><p class="detail-note ${diff < 0 ? 'warn-note' : ''}">${esc(note)}</p></div>`;
+        : `含まれている明細の合計が請求総額を ${formatAbsoluteYen(Math.abs(diff))} 上回っています。「重複の可能性」の明細や、まだ請求額に入っていない利用がないか確かめてください。`;
+    const head = editable && asOf
+      ? `<p class="detail-note">${esc(formatDate(asOf, true))}にカードアプリで見た額として扱います。${card ? `${finance.reflectionDaysOf(card) ? `その${finance.reflectionDaysOf(card)}日前より後の利用` : 'その日より後の利用'}は上乗せしています。` : ''}</p>`
+      : '';
+    return `<div class="detail-panel">${head}<div class="detail-panel-head"><span>請求額に含まれている明細 ${included.length}件</span><strong>${formatAbsoluteYen(includedTotal)}</strong></div><div class="detail-rows">${included.map(row).join('')}</div>${pending.length ? `<div class="detail-panel-head"><span>まだ入っていない明細（上乗せ）${pending.length}件</span><strong>${formatAbsoluteYen(sum(pending))}</strong></div><div class="detail-rows">${pending.map(row).join('')}</div>` : ''}<p class="detail-note ${diff < 0 ? 'warn-note' : ''}">${esc(note)}</p></div>`;
+  }
+
+  /**
+   * 請求総額の内訳から、明細の扱いを本人が決める（2026-11-13）。
+   *  detail-inclusion  … 請求額に「含まれている」／「まだ入っていない（上乗せ）」を切り替える
+   *  detail-next-cycle … 締め日をまたいで次の請求に回った明細を、次の締め月・引落日へ移す
+   *  detail-cycle-reset… 利用日から決まる元の請求へ戻す
+   * 金額・利用日・カードは変えない。
+   */
+  function updateStatementDetail(name, id, value) {
+    const item = state.transactions.find(transaction => transaction.id === id);
+    const card = item ? creditCard(item.cardId) : null;
+    if (!item || !card || item.entryType !== 'itemized' || item.status !== 'planned') return;
+    if (name === 'detail-inclusion') {
+      if (!['included', 'pending'].includes(value)) return;
+      item.statementInclusion = value;
+    } else if (name === 'detail-next-cycle') {
+      const cycle = finance.shiftMonthKey(finance.cardBillingCycleOf(item, card, holidayOptions()), 1);
+      const lastDay = finance.calendarMonthRange(cycle).endDate;
+      const closing = Number(card.closingDay || 0);
+      const anchor = closing ? `${cycle}-${String(Math.min(closing, Number(lastDay.slice(-2)))).padStart(2, '0')}` : lastDay;
+      item.billingCycleOverride = cycle;
+      item.dueDate = finance.calculateCardPaymentDate(anchor, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions());
+      delete item.statementInclusion;
+    } else {
+      delete item.billingCycleOverride;
+      delete item.statementInclusion;
+      if (item.transactionDate) item.dueDate = finance.calculateCardPaymentDate(item.transactionDate, card.closingDay, card.paymentDay, card.paymentMonthOffset ?? 1, holidayOptions());
+    }
+    item.updatedAt = nowIso();
+    persist(); renderPage();
+    showToast(name === 'detail-next-cycle' ? `次の請求（${formatDate(item.dueDate, true)}引落）へ移しました`
+      : name === 'detail-cycle-reset' ? '元の請求に戻しました'
+        : value === 'pending' ? '請求額に上乗せします' : '請求額に含まれているものとして扱います');
   }
 
   function renderTransactionRows(transactions, compact, dateMode = 'due') {
@@ -3181,6 +3245,7 @@
   /** 請求総額を選んだときに、内数として外れる明細を明示する */
   function updateEntryTypeNote() {
     $('#event-usage-time-wrap').hidden = eventEntryTypeValue() !== 'itemized';
+    $('#event-asof-wrap').hidden = $('#event-entry-type-wrap').hidden || eventEntryTypeValue() !== 'statement';
     const note = $('#event-entry-type-note');
     if (!note) return;
     const cardId = $('#event-card').value;
@@ -3371,6 +3436,8 @@
     $('#event-usage-date').value = transaction?.transactionDate || '';
     $('#event-usage-time').value = finance.jstTimeStringOf(transaction?.transactionAt);
     $('#event-entry-type').value = transaction?.entryType === 'itemized' ? 'itemized' : 'statement';
+    // 請求額をカードアプリで見た日（この日時点の合計として扱い、これより後の利用だけを上乗せする）
+    $('#event-asof').value = (transaction && finance.statementAsOfDate(transaction)) || today();
     $('#event-status').value = transaction?.status === 'settled' ? 'settled' : 'planned';
     $('#event-status-wrap').hidden = !transaction;
     $('#event-amount').value = transaction?.amount ?? '';
@@ -3553,7 +3620,9 @@
       transactionDate: usageDate, transactionAt, absorbedBy: current?.absorbedBy || '', dateEstimated: false,
       entryType: eventEntryTypeValue(), origin: current?.origin || '',
       status: eventStatusValue(current), sourceAccountId: $('#event-source').value, destinationAccountId: $('#event-destination').value || '', transferType: $('#event-transfer-type').value || 'internal', destinationName: $('#event-recipient').value.trim(), cardId: $('#event-kind').value === 'payment' ? ($('#event-card').value || '') : '', category: $('#event-category').value, memo: $('#event-memo').value.trim(), lendingAmount: Math.min(Number($('#event-lending').value || 0), Number($('#event-amount').value || 0)), affectsForecast: !$('#event-exclude').checked, recurringPlanId: current?.recurringPlanId || '', scheduledDate: current?.scheduledDate, settledAt: current?.settledAt || '', createdAt: current?.createdAt || '', updatedAt: nowIso(),
-      salaryPaymentMonth: current?.salaryPaymentMonth || '', salaryManual: current?.salaryManual === true
+      salaryPaymentMonth: current?.salaryPaymentMonth || '', salaryManual: current?.salaryManual === true,
+      asOfDate: eventEntryTypeValue() === 'statement' && $('#event-card').value ? ($('#event-asof').value || today()) : '',
+      statementInclusion: current?.statementInclusion, billingCycleOverride: current?.billingCycleOverride
     });
     // シフトから作った給与を、金額か日付を変えて保存したか、一度でも確定したら、もうシフトでは上書きしない
     if (current?.salaryPaymentMonth && (next.amount !== Number(current.amount) || next.dueDate !== current.dueDate
@@ -3626,6 +3695,8 @@
     if (!window.confirm(card.name + '・' + formatAbsoluteYen(transaction.amount) + '（引落日 ' + formatDate(transaction.dueDate, true) + '）\nカード会社で確認した請求額を保存します。')) return;
     transaction.statementEvidence = { source: 'issuer-manual', cardId: card.id, accountId: card.accountId,
       dueDate: transaction.dueDate, amount: transaction.amount, cycle, checkedAt: nowIso() };
+    // 今日カードアプリで確かめた額なので、「見た日」も今日にする（これより後の利用だけを上乗せする）
+    transaction.asOfDate = today();
     try {
       if (persist() === false) throw new Error('保存を開始できませんでした');
       await cloud?.flushPendingSave?.();
@@ -3788,6 +3859,7 @@
     $('#card-closing-day').value = current?.closingDay || 0;
     $('#card-payment-day').value = current?.paymentDay || 27;
     $('#card-payment-month-offset').value = String(current?.paymentMonthOffset ?? 1);
+    $('#card-reflection-days').value = String(finance.reflectionDaysOf(current || { name: '' }));
     $('#card-modal').hidden = false;
     $('#card-name').focus();
   }
@@ -3805,6 +3877,7 @@
       closingDay: Number($('#card-closing-day').value || 0),
       paymentDay: Number($('#card-payment-day').value || 0),
       paymentMonthOffset: Number($('#card-payment-month-offset').value ?? 1),
+      reflectionDays: Math.max(0, Math.min(31, Math.round(Number($('#card-reflection-days').value || 0)))),
       createdAt: current?.createdAt || nowIso(),
       updatedAt: nowIso()
     };
@@ -4110,6 +4183,7 @@
     if (name === 'add-event') { closeAddMenu(); openEventModal('', action.dataset.kind || 'payment'); }
     if (name === 'toggle-details') { toggleStatementDetails(action.dataset.id); return; }
     if (name === 'correct-detail-card') { openCardCorrection(action.dataset.id); return; }
+    if (name === 'detail-inclusion' || name === 'detail-next-cycle' || name === 'detail-cycle-reset') { updateStatementDetail(name, action.dataset.id, action.dataset.value); return; }
     if (name === 'correct-detail-time') { openDetailTime(action.dataset.id); return; }
     if (name === 'card-cancellation') { openCardCancellation(action.dataset.id); return; }
     if (name === 'edit-event') openEventModal(action.dataset.id);

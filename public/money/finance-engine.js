@@ -643,6 +643,10 @@
    */
   function cardBillingCycleOf(transaction, card, options = {}) {
     const closingDay = Number(card?.closingDay || 0);
+    // 締め日をまたいで次の請求に回った明細（本人が「次の請求へ」を選んだもの）
+    if (entryTypeOf(transaction) === ITEMIZED && /^\d{4}-\d{2}$/.test(transaction.billingCycleOverride || '')) {
+      return transaction.billingCycleOverride;
+    }
     if (entryTypeOf(transaction) === ITEMIZED && transaction.transactionDate) {
       return closingMonthOf(transaction.transactionDate, closingDay);
     }
@@ -682,6 +686,64 @@
       && typeof proof.checkedAt === 'string' && Number.isFinite(Date.parse(proof.checkedAt)));
   }
 
+  /* ---------- 請求額と明細の二重計上を防ぐ（2026-11-13 ユーザー決定）----------
+   * 請求額は「カードアプリで見た日」時点の合計。明細（メール通知）はカードアプリより早く届くので、
+   * 請求額には「見た日」の数日前までの利用しか入っていないことがある。
+   *  - 見た日から「反映までの日数」より前に使った明細 … 請求額に含まれているとみなし、上乗せしない
+   *  - それより後に使った明細（見た日の後の利用を含む） … まだ入っていないとみなし、請求額に上乗せする
+   *  - 本人が明細ごとに「含まれている」「まだ入っていない」を選んだら、それに従う
+   * 以前は、請求額を「確認済み」にするまで同じ期間の明細を全部上乗せしていた（二重計上）。
+   * 確認済みにすると今度は見た日より後の利用まで外していた（少なく見積もる）。 */
+
+  /** 利用がカードアプリの請求額に反映されるまでの日数。既定はエポスだけ0日（当日分まで反映）、ほかは2日（前日・当日は未反映） */
+  function reflectionDaysOf(card) {
+    const raw = card?.reflectionDays;
+    const days = Number(raw);
+    if (raw !== undefined && raw !== null && raw !== '' && Number.isInteger(days) && days >= 0 && days <= 31) return days;
+    return /EPOS|エポス/i.test(String(card?.name || '')) ? 0 : 2;
+  }
+
+  /** 日時（ISO）を日本の日付にする。日付だけならそのまま */
+  function japanDateOf(value) {
+    if (typeof value !== 'string' || !value) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const millis = Date.parse(value);
+    if (!Number.isFinite(millis)) return '';
+    return new Date(millis + 9 * 3600000).toISOString().slice(0, 10);
+  }
+
+  /** 請求額を「いつ時点の金額として」入れたか。古いデータは確認した日 → 最後に直した日 → 登録した日の順に代わりにする */
+  function statementAsOfDate(statement) {
+    // 確認の記録は、確認したときと同じ金額・カードのときだけ「見た日」の根拠にする（あとで金額を直したら無効）
+    const evidence = statement?.statementEvidence;
+    const checkedAt = evidence && evidence.amount === statement.amount && evidence.cardId === statement.cardId ? evidence.checkedAt : '';
+    for (const value of [statement?.asOfDate, checkedAt, statement?.updatedAt, statement?.createdAt]) {
+      const date = japanDateOf(value);
+      if (date) return date;
+    }
+    return '';
+  }
+
+  /**
+   * 請求額がいつ時点のものか分からない（古いデータ）・利用日が分からないため、含まれているか判断できない明細。
+   * 請求額の計算（groupCardCharges）では従来どおり内数として外し、ホームの試算では請求額が未確認なら「追加の可能額」に残す（安全側）
+   */
+  function isDetailInclusionUnknown(detail, statement) {
+    if (detail?.statementInclusion === 'pending' || detail?.statementInclusion === 'included') return false;
+    return !statementAsOfDate(statement) || !/^\d{4}-\d{2}-\d{2}$/.test(usageDateOf(detail || {}));
+  }
+
+  /** この明細が、同じ期間の請求額にまだ入っていない（上乗せする）か */
+  function isDetailPendingForStatement(detail, statement, card) {
+    if (detail?.statementInclusion === 'pending') return true;
+    if (detail?.statementInclusion === 'included') return false;
+    if (isDetailInclusionUnknown(detail, statement)) return false;
+    const asOf = statementAsOfDate(statement);
+    const usedOn = usageDateOf(detail || {});
+    const cutoff = toDateString(addDays(parseLocalDate(asOf), -reflectionDaysOf(card)));
+    return usedOn > cutoff;
+  }
+
   function groupCardCharges(transactions = [], cards = [], options = {}) {
     const cardsById = new Map((cards || []).map(card => [card.id, card]));
     const groups = new Map();
@@ -713,6 +775,12 @@
 
     return [...groups.values()].map(group => {
       const useStatement = group.statements.length > 0;
+      const card = cardsById.get(group.cardId) || null;
+      const latestStatement = group.statements.slice().sort((a, b) => statementAsOfDate(b).localeCompare(statementAsOfDate(a)))[0];
+      // 請求額がある期間の明細は、ここでは従来どおり全部を内数として外す（旧画面の計算の約束）。
+      // そのうち見た日より後の利用（まだ請求額に入っていない分）を pending として渡し、
+      // ホームの資金繰り・支払いの見通し（redesign-legacy-adapter.js）が請求額に上乗せする。
+      const pending = useStatement ? group.itemized.filter(item => isDetailPendingForStatement(item, latestStatement, card)) : [];
       const adopted = useStatement ? group.statements : group.itemized;
       const suppressed = useStatement ? group.itemized : [];
       const dueDates = adopted.map(item => item.dueDate).filter(Boolean).sort();
@@ -725,11 +793,17 @@
         adoptedTotal: sum(adopted),
         suppressed,
         suppressedTotal: sum(suppressed),
+        pending,
+        pendingTotal: sum(pending),
+        // 含まれているか判断できない明細（古いデータ）
+        unverified: suppressed.filter(item => isDetailInclusionUnknown(item, latestStatement)),
+        statementAsOf: useStatement ? statementAsOfDate(latestStatement) : '',
+        reflectionDays: reflectionDaysOf(card),
         statementTotal,
         itemizedTotal,
         dueDate: dueDates[0] || '',
-        // 明細の合計が請求総額を上回る場合、総額の入力漏れや誤りの可能性がある
-        itemizedExceedsStatement: useStatement && itemizedTotal > statementTotal
+        // 請求額に含まれているとみなした明細の合計が請求額を上回る場合、重複や入力漏れの可能性がある
+        itemizedExceedsStatement: useStatement && itemizedTotal - sum(pending) > statementTotal
       };
     }).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)) || a.cardName.localeCompare(b.cardName, 'ja'));
   }
@@ -2144,7 +2218,8 @@
     previousBusinessDay, nextBusinessDay, holidaysForYear,
     // カード
     calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills, capUnsettledCardCredits,
-    closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement, correctAbsorbedCard, setUnsettledCardCancellation,
+    closingMonthOf, cardBillingCycleOf, hasConfirmedCardStatement, groupCardCharges, detailsOfStatement,
+    reflectionDaysOf, statementAsOfDate, isDetailPendingForStatement, isDetailInclusionUnknown, correctAbsorbedCard, setUnsettledCardCancellation,
     // 記録の集計
     summarizePeriod,
     // 給与

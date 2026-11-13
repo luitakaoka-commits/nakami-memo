@@ -14,6 +14,7 @@ const { createSuite } = require(path.join(__dirname, 'finance-engine.tests.js'))
 /** JSONを1行だけ出力する独立スクリプト形式のテスト */
 const SUITES = [
   'daily-finance.test.js',
+  'statement-asof.test.js',
   'redesign-core.test.js',
   'redesign-backup.test.js',
   'sync-coordinator.test.js',

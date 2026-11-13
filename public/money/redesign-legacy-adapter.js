@@ -136,7 +136,7 @@
     const groups = engine.groupCardCharges(capped, namedCards, holidayOptions);
     for (const group of groups) {
       if (group.statements.length > 1) throw new Error('同じ請求期間に複数の総額があります');
-      const entries = [...group.adopted, ...group.suppressed];
+      const entries = [...group.statements, ...group.itemized];
       const recorded = entries.filter(item => item.isVirtual !== true);
       const dates = new Set((recorded.length ? recorded : entries).map(item => item.dueDate));
       if (dates.size !== 1 || !group.dueDate) throw new Error('カードの引落日が一致しません');
@@ -146,14 +146,16 @@
       const scheduled = group.itemized.filter(item => item.isVirtual === true);
       if (scheduled.length) issues.push({ type: 'card_recurring_inclusion_unverified', cardId: group.cardId, cycle: group.billingCycle });
       // 請求総額に含まれるか不明な定期予定は、別の口座支出や追加額として重ねない。
-      const suppressedActual = group.suppressed.filter(item => item.isVirtual !== true).reduce((total, item) => total + item.amount, 0);
       const detailsOnly = group.source === 'itemized';
       const statement = group.statements[0];
       const amountConfirmed = !detailsOnly && statement.sourceAccountId === group.accountId
         && engine.hasConfirmedCardStatement(statement, group.billingCycle);
-      // 発行会社の確定総額を照合できた期間は、同じ期間の利用通知を追加請求にしない。
-      const additionalPossible = amountConfirmed ? 0 : detailsOnly ? group.adoptedTotal : suppressedActual;
-      events.push({ id: `legacy-card:${group.key}`, date: dates.values().next().value, status: 'planned', amount: detailsOnly ? 0 : group.adoptedTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed, additionalPossible });
+      // 請求額に上乗せするのは、請求額を見た日より後の利用（まだ請求額に入っていない明細）だけ（2026-11-13）。
+      // 以前は確認済みでない請求額に同じ期間の明細を全部足しており、請求額に入っている分を二重に数えていた。
+      // いつ時点の請求額か分からない古いデータの明細は、請求額を確認していなければ可能額に残す（安全側。以前と同じ）。
+      const actual = list => (list || []).filter(item => item.isVirtual !== true).reduce((total, item) => total + item.amount, 0);
+      const additionalPossible = detailsOnly ? group.adoptedTotal : Math.max(0, actual(group.pending) + (amountConfirmed ? 0 : actual(group.unverified)));
+      events.push({ id: `legacy-card:${group.key}`, date: dates.values().next().value, status: 'planned', amount: detailsOnly ? 0 : group.statementTotal, accountId: group.accountId, kind: 'expense', cardPayment: true, amountConfirmed, additionalPossible, cardId: group.cardId });
       if (detailsOnly) issues.push({ type: 'legacy_card_details_unverified', cardId: group.cardId, cycle: group.billingCycle });
       if (!amountConfirmed) issues.push({ type: 'card_group_unverified', cardId: group.cardId, cycle: group.billingCycle });
     }
