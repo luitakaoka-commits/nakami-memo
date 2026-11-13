@@ -636,3 +636,4 @@ Codex のブランチ `codex/kurashi-ui-themes` の「小さな家」（なか�
 - **ルールを Console で公開し直すこと**（`stockEvents`・`productLinks`・`inventoryInsights` を足した）
 - 主に使うAIは **Gemini 4 Hydrogen**（`gemini-4-hydrogen`。2026-11-14 ユーザー指定）。レシピ提案・在庫AI・相談の3つとも `ai-server.ts` の `GEMINI_MODEL` を使う。混んでいれば flash 系の予備へ。Vercel の `GEMINI_MODEL` があればそちらが優先
 - **数量は一覧のカードから変えられる**（2026-11-14 ユーザー要望）。数を押すとカルーセル（`QuantityCarousel`）が開き、横に流す・数字を押す・−／＋で選ぶと、0.7秒後に保存（`updateItemQuantity`）。刻みは `quantity-core.ts`（数える単位1・g/mL 10（1000超は50）・kg/L 0.1）。**0 は出さない**（0は在庫から消えるので「使い切った／捨てた」から。日数とムダ支出がそちらで残る）
+- **LINE の中のブラウザでは Google のログインが通らない**（「missing initial state」で止まる。2026-11-14 ユーザー実機）。4アプリと入口のページの頭で `public/shared/open-external.js` を読み、LINE だと分かったら `openExternalBrowser=1`（LINE 公式の仕組み）を付けて開き直し、ふだんのブラウザへ出す。`open-external.test.mjs` が守る

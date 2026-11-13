@@ -28,6 +28,8 @@ const SUITES = [
   { name: "install", cwd: SHARED_DIR, file: "install.test.mjs" },
   { name: "rules", cwd: SHARED_DIR, file: "rules.test.mjs" },
   { name: "migrate", cwd: SHARED_DIR, file: "migrate.test.mjs" },
+  // LINE の中のブラウザで開かれたら、ふだんのブラウザで開き直す（2026-11-14）
+  { name: "open-external", cwd: SHARED_DIR, file: "open-external.test.mjs" },
   // なかみメモのレシピ提案。TypeScript のまま読むので型を剥がして動かす（Node 22.6 以降）
   {
     name: "recipes",

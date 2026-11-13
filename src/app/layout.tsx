@@ -33,6 +33,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="ja">
       <head>
+        {/* LINE の中のブラウザで開かれたら、ふだんのブラウザで開き直す（ログインが通らないため。2026-11-14）。React より先に効かせる */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script src="/shared/open-external.js" />
         {/* 新しい版を出したあと、前の版のページが CSS なしで出たら1回だけ読み込み直す（2026-09-28） */}
         <script dangerouslySetInnerHTML={{ __html: STALE_ASSET_RECOVERY }} />
       </head>
