@@ -583,4 +583,5 @@ Codex のブランチ `codex/kurashi-ui-themes` の「小さな家」（なか�
 「使い切った」は葉の色、「捨てた」は地の色で見分ける（`ui-button--used` / `ui-button--tossed`）。
 取り込んだのは見た目だけ。同じブランチにある「共有在庫に購入額を置かない」（private-price-migration）は**入れていない**。
 切り替えバーの「動き オン/オフ」も入れていない（端末の「視差効果を減らす」に従う）。
-つくりおきノートを直したら `public/recipe/sw.js` の VERSION を上げる（いま v19）。
+つくりおきノートを直したら `public/recipe/sw.js` の VERSION を上げる（いま v20）。
+文字は両方とも Google Fonts の **Kiwi Maru**（2026-11-14 ユーザー指定）。本文 400、見出し・項目名 500。600 以上の太さは無いので、太字の指定は 500 で出る（`font-synthesis-weight: none`）。

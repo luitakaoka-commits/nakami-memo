@@ -419,3 +419,8 @@ body { background: radial-gradient(120% 60% at 50% 0%, #faf1e0 0%, var(--canvas)
 .cover__preview[hidden] { display: none; }
 /* カードの中のボタンは、カードと同じ色に溶けないよう一段濃い面にする */
 .card .btn:not(.btn--primary):not(.btn--danger) { background: var(--bistro-plate); box-shadow: none; }
+
+/* 文字は Kiwi Maru（2026-11-14 ユーザー指定）。本文は 400、見出し・項目名は 500。
+   Kiwi Maru に 600 以上の太さは無いので、太字の指定はすべて 500 で出す（にせの太字を作らせない） */
+html { font-synthesis-weight: none; }
+body { font-weight: 400; }

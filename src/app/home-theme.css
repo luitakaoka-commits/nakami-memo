@@ -135,3 +135,8 @@ body { background: radial-gradient(120% 60% at 50% 0%, #fbf3e2 0%, var(--canvas)
   .ui-button, .ui-chip, .ui-nav-link, .home-room, .home-location { transition: none; }
   .ui-button:active:not(:disabled), .ui-chip:active, .ui-nav-link:active, .home-location:active { transform: none; }
 }
+
+/* 文字は Kiwi Maru（2026-11-14 ユーザー指定）。本文は 400、見出し・項目名は 500。
+   Kiwi Maru に 600 以上の太さは無いので、太字の指定はすべて 500 で出す（にせの太字を作らせない） */
+html { font-synthesis-weight: none; }
+body { font-weight: 400; }
