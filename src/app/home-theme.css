@@ -169,3 +169,9 @@ body { font-weight: 400; }
 .ui-button--remaining:hover { background: #f6dcae; }
 @media (max-width: 600px) { .ai-panel { padding: 16px; } .ai-row--pair .ai-choice { width: 100%; } .ai-row--pair .ai-choice .ui-button { flex: 1; } }
 @media (prefers-reduced-motion: reduce) { .ai-spin { animation: none; } }
+
+/* 在庫カードの「編集」と、画面ごとの操作（保管場所の「削除」など）を1列に並べる。
+   以前は「削除」をカードの右下に重ねていて、「使い切った／捨てた」を広げたら「捨てた」の上に乗った（2026-11-14） */
+.ui-item-card__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.ui-button--danger { border-color: transparent; background: var(--red-soft); color: var(--red); }
+.ui-button--danger:hover { background: #f6d6d6; }

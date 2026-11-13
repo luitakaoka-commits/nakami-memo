@@ -8,7 +8,8 @@ import { isLowStock } from "@/lib/utils/inventory";
 import { Badge } from "@/components/common/Badge";
 import { ItemOutcomeActions } from "./ItemOutcomeActions";
 
-export function ItemCard({ item, locationLabel }: { item: Item; locationLabel?: string }) {
+/** actions は「編集」の横に並べる操作（保管場所の画面の「削除」など）。カードの上に重ねて置かないこと（2026-11-14 に「捨てた」と重なった） */
+export function ItemCard({ item, locationLabel, actions }: { item: Item; locationLabel?: string; actions?: React.ReactNode }) {
   return (
     <article className="ui-item-card">
       <div className="ui-item-card__media">
@@ -29,7 +30,10 @@ export function ItemCard({ item, locationLabel }: { item: Item; locationLabel?: 
           {isLowStock(item) && <Badge tone="amber">買い替え時</Badge>}
         </div>
         {item.memo && <p className="ui-item-card__memo">{item.memo}</p>}
-        <Link href={`/app/items/${item.id}/edit`} className="ui-button ui-button--ghost mt-2">編集</Link>
+        <div className="ui-item-card__tools">
+          <Link href={`/app/items/${item.id}/edit`} className="ui-button ui-button--ghost">編集</Link>
+          {actions}
+        </div>
         <ItemOutcomeActions item={item} />
       </div>
     </article>
