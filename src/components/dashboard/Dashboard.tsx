@@ -5,6 +5,8 @@ import { CalendarClock, MapPin, PackageSearch, Plus, Search } from "lucide-react
 import { useMemo } from "react";
 import { locationLabelOf, useInventory } from "@/lib/hooks/useInventory";
 import { getExpiringItems, isLowStock, sortAreas, sortLocations } from "@/lib/utils/inventory";
+import { isRemainingSnoozed, japanDay } from "@/lib/inventory/stock-core";
+import { InventoryAssistant } from "@/components/dashboard/InventoryAssistant";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
@@ -17,7 +19,7 @@ export function Dashboard() {
 
   const expiringAll = useMemo(() => getExpiringItems(itemsWithLocation, 7), [itemsWithLocation]);
   const expiringItems = expiringAll.slice(0, 5);
-  const lowStockAll = useMemo(() => itemsWithLocation.filter(isLowStock), [itemsWithLocation]);
+  const lowStockAll = useMemo(() => itemsWithLocation.filter((item) => isLowStock(item) && !isRemainingSnoozed(item, japanDay(Date.now()))), [itemsWithLocation]);
   const lowStockItems = lowStockAll.slice(0, 5);
   const recentItems = useMemo(
     () => [...itemsWithLocation].sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0)).slice(0, 5),
@@ -56,6 +58,8 @@ export function Dashboard() {
         <div className="ui-stat"><span className="ui-stat__label">期限</span><strong className="ui-stat__value">{expiringAll.length}</strong></div>
         <div className="ui-stat"><span className="ui-stat__label">買い替え</span><strong className="ui-stat__value">{lowStockAll.length}</strong></div>
       </div>
+
+      <InventoryAssistant items={itemsWithLocation} />
 
       {areas.length === 0 ? <EmptyState title="エリアがありません" actionLabel="エリアを追加" href="/app/areas" /> : locations.length === 0 ? <EmptyState title="保管場所がありません" actionLabel="保管場所を追加" href="/app/locations/new" /> : null}
 

@@ -72,6 +72,8 @@ export type Item = {
   outcome?: string;
   outcomeAt?: string;
   outcomeReason?: string;
+  /** 「まだ残っている」を押した日（YYYY-MM-DD）。押してから数日は買い替え時の一覧に出さない（在庫AI。2026-11-14） */
+  remainingCheckedAt?: string | null;
   // serverTimestamp() の直後（pending write のスナップショット）では null になる。
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;

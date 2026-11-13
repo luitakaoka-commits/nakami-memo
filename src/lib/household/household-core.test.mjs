@@ -35,7 +35,7 @@ t("家に入っていなければ本人の場所、入っていれば家の場�
 });
 
 t("家に写すのは、なかみメモとつくりおきノートのデータだけ（お金管理は写さない）", () => {
-  eq([...HOUSEHOLD_COLLECTIONS], ["areas", "locations", "items", "tools", "consumptions", "recipes", "plans", "shopping"], "一覧");
+  eq([...HOUSEHOLD_COLLECTIONS], ["areas", "locations", "items", "tools", "consumptions", "recipes", "plans", "shopping", "stockEvents", "productLinks"], "一覧");
   ok(!HOUSEHOLD_COLLECTIONS.some((name) => ["receipts", "receiptItems", "transactions"].includes(name)), "お金管理が混ざっている");
 });
 

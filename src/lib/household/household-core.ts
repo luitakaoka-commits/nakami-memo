@@ -10,7 +10,8 @@
  */
 
 /** 家に写すコレクション。なかみメモ（areas〜consumptions）とつくりおきノート（recipes〜shopping） */
-export const HOUSEHOLD_COLLECTIONS = ["areas", "locations", "items", "tools", "consumptions", "recipes", "plans", "shopping"] as const;
+// stockEvents・productLinks は在庫AI（2026-11-14）。在庫AIの結果（inventoryInsights）はからだの記録を使うので写さない
+export const HOUSEHOLD_COLLECTIONS = ["areas", "locations", "items", "tools", "consumptions", "recipes", "plans", "shopping", "stockEvents", "productLinks"] as const;
 
 /**
  * 「使い切った／捨てた」をお金管理へ返す受け渡し箱（ユーザー決定 B）。

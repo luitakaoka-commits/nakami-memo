@@ -70,6 +70,13 @@ const SUITES = [
     file: "outcome-core.test.mjs",
     nodeArgs: ["--experimental-strip-types", "--no-warnings"],
   },
+  // 在庫AI（まだ残っている・次の買い時・同じ商品の候補・栄養。2026-11-14）
+  {
+    name: "inventory-ai",
+    cwd: path.join(ROOT, "src", "lib", "inventory"),
+    file: "stock-core.test.mjs",
+    nodeArgs: ["--experimental-strip-types", "--no-warnings"],
+  },
 ];
 
 const failures = [];

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BookmarkPlus, ChefHat, Check, CookingPot, HeartPulse, LoaderCircle, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { deleteSavedRecipe, recordCooking, saveRecipeToTsukurioki, type CookedRow } from "@/lib/firebase/kitchen";
+import { sinceOf } from "@/lib/firebase/stock";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useInventory } from "@/lib/hooks/useInventory";
 import { useSavedRecipes } from "@/lib/hooks/useSavedRecipes";
@@ -430,6 +431,9 @@ function CookedDialog({ recipe, items, savedRecipeId, onClose, onDone }: {
         locationId: byId.get(row.itemId)?.locationId,
         // 使い切ったときに、お金管理の明細へ返す先（レシートから入れた在庫だけが持つ）
         purchaseWorkspaceId: byId.get(row.itemId)?.purchaseWorkspaceId,
+        // 使い切ったときに「何日で使い切ったか」を残すため（在庫AI。2026-11-14）
+        since: (() => { const item = byId.get(row.itemId); return item ? sinceOf(item) : null; })(),
+        category: byId.get(row.itemId)?.category,
       })),
   );
   const [busy, setBusy] = useState(false);

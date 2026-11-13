@@ -1,4 +1,6 @@
 import { firebaseConfig } from "@/lib/firebase/config";
+// 主に使うAIは、レシピ提案・在庫AIと同じ（ai-server.ts。2026-11-14 から Gemini 4 Hydrogen）
+import { GEMINI_MODEL } from "@/lib/server/ai-server";
 import {
   buildSystemInstruction,
   createConsultThrottle,
@@ -29,7 +31,6 @@ import {
 
 export const maxDuration = 60;
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 const CONNECT_BUDGET_MS = 25_000;
 
 // 連打よけ（1人1分10回）

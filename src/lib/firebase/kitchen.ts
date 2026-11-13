@@ -19,6 +19,7 @@ import type { SavedRecipe } from "@/lib/types/recipe";
 import type { Tool, ToolInput } from "@/lib/types/tool";
 import { isOutOfStock, itemOutcomePatch, receiptLinePatch } from "@/lib/inventory/outcome-core";
 import { remainingQuantity } from "@/lib/recipes/suggest-core";
+import { japanDay, stockEventFor } from "@/lib/inventory/stock-core";
 import { db } from "./client";
 import { getActiveHousehold, spaceCollection, spaceDoc } from "./space";
 import { OUTCOME_QUEUE, outcomeQueueEntry, shouldQueueOutcome } from "@/lib/household/household-core";
@@ -114,6 +115,9 @@ export type CookedRow = {
   locationId?: string;
   /** レシートから入れた在庫だけが持つ。使い切ったときに、お金管理の明細へ返す先（2026-09-16）。 */
   purchaseWorkspaceId?: string;
+  /** 在庫に入れた日（YYYY-MM-DD）。使い切ったときの記録に使う（在庫AI。2026-11-14） */
+  since?: string | null;
+  category?: string;
 };
 
 /**
@@ -131,6 +135,10 @@ export async function recordCooking(userId: string, rows: CookedRow[], recipeTit
     const itemRef = spaceDoc(userId, "items", row.itemId);
     if (isOutOfStock(remainingQuantity(row.available, row.use))) batch.delete(itemRef);
     else batch.update(itemRef, { quantity: remainingQuantity(row.available, row.use), updatedAt: serverTimestamp() });
+    // 料理で使い切った分も「何日で使い切ったか」として残す（在庫AI。2026-11-14）
+    if (isOutOfStock(remainingQuantity(row.available, row.use))) {
+      batch.set(doc(spaceCollection(userId, "stockEvents")), { ...stockEventFor({ id: row.itemId, name: row.name, quantity: row.available, unit: row.unit, category: row.category, since: row.since }, "consumed", japanDay(Date.now())), recordedAt: serverTimestamp() });
+    }
     batch.set(doc(spaceCollection(userId, "consumptions")), {
       itemId: row.itemId,
       itemName: row.name,

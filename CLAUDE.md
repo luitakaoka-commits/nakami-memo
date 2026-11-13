@@ -623,3 +623,15 @@ Codex のブランチ `codex/kurashi-ui-themes` の「小さな家」（なか�
 
 - CLAUDE.md は 2026-09-11 にリポジトリへ入れられた作業メモが本体。2026-11-13 の引き継ぎ時に、まにぼーの短い引き継ぎ書が一度このファイルを置き換えてコミットされた（017c0f5）が、元のメモは 725b8d9 のツリーに残っていたため復元された。この追記は、落ち着いたら CLAUDE.md 末尾へ統合する
 
+
+### 在庫AI と「まだ残っている」（2026-11-14 ユーザー要望・決定）
+
+- 買い替え時のモノに **「まだ残っている」**。押した日を在庫（`remainingCheckedAt`）と記録に残し、**3日間** 買い替え時の一覧から外す（ユーザー決定「記録して数日隠す」）
+- 在庫は0で消える（09-21 決定）ので、**消えても残る記録** `stockEvents`（使い切った・捨てた・まだ残っている。家と共有）を足した。
+  書くのは4か所：使い切った／捨てた（`inventory-outcome.ts`）・なかみメモの作った（`kitchen.ts`）・つくりおきノートの作った（`store.js`）・まだ残っている（`stock.ts`）。`stock-core.test.mjs` が4か所を見て止める
+- **次の買い時は AI に作らせず計算する**（`stock-core.ts` の `nextBuys`）：在庫に入れた日（createdAt）→使い切った日の中央値。7日以内と、2回以上使い切った定番が切れているものを出す
+- **同じ商品の判断は「AIが候補を出し、本人が同じ／別を決める」**（ユーザー決定。意味の判断を自動でやらない、を守った形）。決定は `productLinks`（家と共有）
+- 栄養のかたより・買うとよいもの（からだの記録も参考）。結果は **本人の場所** `users/{uid}/inventoryInsights/current`（健康データを使うので家に置かない）
+- AI はホームを開いたとき、前回から1日以上たっていれば考え直す（ユーザー決定）。API は `/api/inventory/insights`。Gemini の呼び出しはレシピ提案と共通の `src/lib/server/ai-server.ts`
+- **ルールを Console で公開し直すこと**（`stockEvents`・`productLinks`・`inventoryInsights` を足した）
+- 主に使うAIは **Gemini 4 Hydrogen**（`gemini-4-hydrogen`。2026-11-14 ユーザー指定）。レシピ提案・在庫AI・相談の3つとも `ai-server.ts` の `GEMINI_MODEL` を使う。混んでいれば flash 系の予備へ。Vercel の `GEMINI_MODEL` があればそちらが優先

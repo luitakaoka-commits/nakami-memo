@@ -5,6 +5,9 @@ import { recordItemOutcome } from "@/lib/firebase/inventory-outcome";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { DISCARD_REASONS, canRecordOutcome, outcomeLabel } from "@/lib/inventory/outcome-core";
 import type { Item } from "@/lib/types/item";
+import { recordStillRemaining } from "@/lib/firebase/stock";
+import { isRemainingSnoozed, japanDay, REMAINING_SNOOZE_DAYS } from "@/lib/inventory/stock-core";
+import { isLowStock } from "@/lib/utils/inventory";
 
 /**
  * 在庫の「使い切った／捨てた」（Phase 4 手B）。
@@ -48,6 +51,24 @@ export function ItemOutcomeActions({ item }: { item: Item }) {
     }
   }
 
+  // 買い替え時のモノには「まだ残っている」も出す（2026-11-14 ユーザー要望）。押した日を残すと、
+  // 何日で使い切るかが分かって次の買い時を出せる。押してから数日は買い替え時の一覧に出さない
+  const askRemaining = isLowStock(item) && !isRemainingSnoozed(item, japanDay(Date.now()));
+
+  async function stillRemaining() {
+    if (!user) return;
+    setFailure("");
+    setBusy(true);
+    try {
+      await recordStillRemaining(user.uid, item);
+      setDone(`記録しました。${REMAINING_SNOOZE_DAYS}日後にまた聞きます。`);
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : "記録できませんでした。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (done) return <p className="ui-item-card__meta">{done}</p>;
 
   return (
@@ -75,6 +96,11 @@ export function ItemOutcomeActions({ item }: { item: Item }) {
           <button type="button" disabled={busy} onClick={() => record({ kind: "consumed" })} className="ui-button ui-button--ghost ui-button--used">
             使い切った
           </button>
+          {askRemaining && (
+            <button type="button" disabled={busy} onClick={stillRemaining} className="ui-button ui-button--ghost ui-button--remaining">
+              まだ残っている
+            </button>
+          )}
           <button type="button" disabled={busy} onClick={() => setAsking(true)} className="ui-button ui-button--ghost ui-button--tossed">
             捨てた
           </button>

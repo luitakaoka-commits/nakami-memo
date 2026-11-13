@@ -15,6 +15,9 @@ import {
 import { usedUpRows } from "../shared/cook-stock.js";
 
 let uid = null;
+
+/** 日本時間の日付（YYYY-MM-DD）。なかみメモの stock-core.ts の japanDay と同じ */
+function japanDay(millis) { return new Date(millis + 9 * 3600000).toISOString().slice(0, 10); }
 /* 同居人と共有している「家」（2026-09-28）。入っていれば households/{id}、無ければ users/{uid} を使う。
    なかみメモの src/lib/firebase/space.ts と同じ決め方にすること（ずれると2つのアプリで別の在庫を見る） */
 let householdId = null;
@@ -184,6 +187,18 @@ export async function decrementInventory(rows, recipeTitle) {
      お金管理の明細には「使い切った」を返す（2026-09-16）。返さないと、使い切ったのに
      週1回のふりかえりで何度も聞かれる。使い切ったので無駄は0円。 */
   const usedUp = new Set(usedUpRows(rows).map((row) => row.itemId));
+  /* 使い切った在庫は「何日で使い切ったか」を残す（なかみメモの在庫AIが次の買い時を出すのに使う。2026-11-14）。
+     在庫に入れた日は在庫の createdAt から取る。品名の正規化はなかみメモ側で読むときに行う（key は書かない） */
+  if (usedUp.size) {
+    const since = new Map((await readInventory().catch(() => [])).map((item) => [item.id, item.createdAt && typeof item.createdAt.toMillis === "function" ? japanDay(item.createdAt.toMillis()) : null]));
+    const today = japanDay(now.getTime());
+    usedUpRows(rows).forEach((row) => {
+      batch.set(doc(col("stockEvents")), {
+        itemId: row.itemId, name: String(row.name || ""), kind: "consumed", since: since.get(row.itemId) || null, at: today,
+        quantity: Number(row.available) || 0, unit: String(row.unit || ""), category: String(row.category || ""), recordedAt: now
+      });
+    });
+  }
   rows.forEach((row) => {
     if (usedUp.has(row.itemId)) batch.delete(doc(col("items"), row.itemId));
     else batch.update(doc(col("items"), row.itemId), {

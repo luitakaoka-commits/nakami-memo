@@ -16,6 +16,7 @@ import { db } from "./client";
 import { syncPublicByLocationIfNeeded } from "./public-location";
 import { itemDoc } from "./refs";
 import { getActiveHousehold, spaceCollection } from "./space";
+import { newStockEventRef, stockEventOf } from "./stock";
 
 export type OutcomeResult = {
   /** お金管理のレシート明細に返せた行数。0 ならレシート由来ではない（手で足した在庫） */
@@ -70,6 +71,8 @@ export async function recordItemOutcome(userId: string, item: Item, choice: Outc
   const patch = itemOutcomePatch(choice, new Date());
   const batch = writeBatch(db);
   batch.delete(itemDoc(userId, item.id));
+  // 在庫は消えても「何日で使い切ったか」は残す（在庫AIが次の買い時を出すのに使う。2026-11-14）
+  batch.set(newStockEventRef(userId), { ...stockEventOf(item, choice.kind === "consumed" ? "consumed" : "discarded"), recordedAt: serverTimestamp() });
 
   // 家に入っているときは受け渡し箱へ（同居人はお金管理に書けない。あなたがお金管理を開いたときに返る。決定 B）
   if (shouldQueueOutcome(getActiveHousehold(), item)) {

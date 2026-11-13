@@ -182,7 +182,10 @@ t("3アプリとも、家に入っていれば家の場所を使う（ずれる�
   ok(read("src", "lib", "firebase", "space.ts").includes("spaceSegments(userId, activeHouseholdId)"), "なかみメモ");
   ok(/collection\(db, "households", householdId, name\)/.test(read("public", "recipe", "store.js")), "つくりおきノート");
   ok(/collection\(db, 'households', householdId, name\)/.test(read("public", "money", "firebase-sync.js")), "お金管理（在庫に入れる）");
-  ok(/spaceSegments\(uid, householdId\)/.test(read("src", "app", "api", "recipes", "suggest", "route.ts")), "レシピ提案のサーバー");
+  // 2026-11-14 にレシピ提案の route.ts から ai-server.ts へ移した（在庫AIと共通）。中身の確認は同じ
+  ok(/spaceSegments\(uid, householdId\)/.test(read("src", "lib", "server", "ai-server.ts")), "レシピ提案・在庫AIのサーバー");
+  ok(/spaceBase[^;]*from "@\/lib\/server\/ai-server"/.test(read("src", "app", "api", "recipes", "suggest", "route.ts")), "レシピ提案のサーバーが共通の決め方を使っていない");
+  ok(/spaceBase[^;]*from "@\/lib\/server\/ai-server"/.test(read("src", "app", "api", "inventory", "insights", "route.ts")), "在庫AIのサーバーが共通の決め方を使っていない");
 });
 
 t("からだの記録（health）は本人の場所にだけ置け、同居人と共有する家には置けない", () => {

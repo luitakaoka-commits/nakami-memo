@@ -156,7 +156,9 @@ service cloud.firestore {
     function allowedUserCollection(name) {
       return name in [
         'areas', 'locations', 'items', 'tools', 'consumptions',
-        'recipes', 'plans', 'shopping'
+        'recipes', 'plans', 'shopping',
+        // 在庫AI（2026-11-14）。使い切った記録と、本人が決めた「同じ商品／別」。家と共有する
+        'stockEvents', 'productLinks'
       ];
     }
 
@@ -167,14 +169,15 @@ service cloud.firestore {
 
       allow read, write: if isOwner();
 
+      // inventoryInsights は在庫AIの結果（2026-11-14）。からだの記録を使うので本人の場所にだけ置き、家には許さない。
       // consultThreads は相談AIのやりとり（2026-11-13）。本人の相談なので本人の場所にだけ置き、家には許さない。
       // health はからだの記録（Samsung Health から取り込んだ値。2026-09-28）。健康データなので本人の場所にだけ置き、
       // 同居人と共有する家（households）には許さない。allowedUserCollection に入れないのはそのため
       match /{collection}/{docId} {
-        allow read, write: if isOwner() && (allowedUserCollection(collection) || collection == 'health' || collection == 'consultThreads');
+        allow read, write: if isOwner() && (allowedUserCollection(collection) || collection == 'health' || collection == 'consultThreads' || collection == 'inventoryInsights');
 
         match /{document=**} {
-          allow read, write: if isOwner() && (allowedUserCollection(collection) || collection == 'health' || collection == 'consultThreads');
+          allow read, write: if isOwner() && (allowedUserCollection(collection) || collection == 'health' || collection == 'consultThreads' || collection == 'inventoryInsights');
         }
       }
     }

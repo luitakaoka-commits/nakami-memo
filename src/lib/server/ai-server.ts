@@ -1,0 +1,183 @@
+import { firebaseConfig } from "@/lib/firebase/config";
+import { spaceSegments } from "@/lib/household/household-core";
+import {
+  documentsToObjects,
+  DEFAULT_GEMINI_FALLBACK_MODELS,
+  geminiErrorDetail,
+  geminiErrorMessage,
+  geminiModelChain,
+  nextGeminiStep,
+  pickFallbackModels,
+  triedModelsSummary,
+} from "@/lib/recipes/suggest-core";
+
+/*
+ * AI を使う API（レシピ提案・在庫AI）で共通の、サーバー側の部品（2026-11-14 にレシピ提案の route.ts から切り出した）。
+ * ログインの確認・本人の権限での Firestore の読み取り・Gemini の呼び出し（やり直しと予備モデルへの切り替え）。
+ */
+// 2026-09 に gemini-2.5-flash が新規ユーザーに閉じられた。レシート取込（GAS）と同じモデルにそろえる。
+// Gemini 3 系は temperature を既定のまま使う前提なので指定しない。
+// 主に使うAIは Gemini 4 Hydrogen（2026-11-14 ユーザー指定）。混んでいるときは予備（flash 系）に切り替わる。
+// Vercel の環境変数 GEMINI_MODEL があればそちらが優先される
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-4-hydrogen";
+const GEMINI_TIMEOUT_MS = 50_000;
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export async function verifyUser(request: Request): Promise<{ uid: string; idToken: string }> {
+  const authorization = request.headers.get("authorization");
+  const idToken = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!idToken) throw new ApiError("ログイン情報を確認できませんでした。", 401);
+
+  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken }),
+    cache: "no-store",
+  });
+  if (!response.ok) throw new ApiError("ログインの有効期限が切れています。再読み込みしてください。", 401);
+  const data = (await response.json()) as { users?: Array<{ localId?: string }> };
+  const uid = data.users?.[0]?.localId;
+  if (!uid) throw new ApiError("ユーザーを確認できませんでした。", 401);
+  return { uid, idToken };
+}
+
+const DOCUMENTS = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
+
+/**
+ * 在庫の置き場所。同居人と「家」を共有していれば households/{id}、していなければ users/{uid}（2026-09-28）。
+ * 画面側（space.ts）と同じ決め方にすること。違うと、画面の在庫と提案に使う在庫がずれる。
+ */
+export async function spaceBase(uid: string, idToken: string): Promise<string> {
+  const response = await fetch(`${DOCUMENTS}/users/${encodeURIComponent(uid)}`, { headers: { Authorization: `Bearer ${idToken}` }, cache: "no-store" });
+  if (response.ok) {
+    const body = (await response.json()) as { fields?: { householdId?: { stringValue?: string } } };
+    const householdId = body.fields?.householdId?.stringValue;
+    if (householdId) return spaceSegments(uid, householdId).map(encodeURIComponent).join("/");
+  }
+  return spaceSegments(uid, null).map(encodeURIComponent).join("/");
+}
+
+/** 在庫の置き場所の {name} を全部読む（本人の ID トークンで。ルールが効く）。 */
+export async function readUserCollection(uid: string, idToken: string, name: string, space: string) {
+  const base = `${DOCUMENTS}/${space}/${name}`;
+  const all: Array<Record<string, unknown> & { id: string }> = [];
+  let pageToken = "";
+  for (let page = 0; page < 10; page++) {
+    const url = `${base}?pageSize=300${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` }, cache: "no-store" });
+    if (!response.ok) {
+      console.error(`[api/ai] ${name} を読めません`, response.status, (await response.text()).slice(0, 300));
+      throw new ApiError("在庫を読み取れませんでした。再読み込みしてからお試しください。", 502);
+    }
+    const body = (await response.json()) as { documents?: Array<{ name?: string; fields?: Record<string, Record<string, unknown>> }>; nextPageToken?: string };
+    all.push(...documentsToObjects(body.documents ?? []));
+    if (!body.nextPageToken) break;
+    pageToken = body.nextPageToken;
+  }
+  return all;
+}
+
+/**
+ * 予備のモデルを、Google のモデル一覧から選ぶ（2026-09-22）。
+ * 名前を推測で書いておくと、無くなっていたときに黙って飛ばされて、混雑に弱いままだった。
+ * 一覧を取れなかったときだけ、書いておいた名前（DEFAULT_GEMINI_FALLBACK_MODELS）を使う。
+ */
+async function listFallbackModels(apiKey: string): Promise<string[]> {
+  try {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+      headers: { "x-goog-api-key": apiKey },
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`models.list ${response.status}`);
+    const body = (await response.json()) as { models?: Array<{ name?: string; supportedGenerationMethods?: string[] }> };
+    const picked = pickFallbackModels(body.models ?? [], GEMINI_MODEL);
+    console.info("[api/ai] 予備のモデル", picked);
+    if (picked.length) return picked;
+  } catch (error) {
+    console.error("[api/ai] モデル一覧を取れません", error);
+  }
+  return [...DEFAULT_GEMINI_FALLBACK_MODELS];
+}
+
+export async function askGemini(prompt: string, schema: unknown): Promise<{ data: unknown; model: string }> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new ApiError("AIの設定がまだです（サーバーに GEMINI_API_KEY がありません）。", 500);
+
+  // 関数の持ち時間（maxDuration 60秒）の中で、Google 側が混んでいれば1回やり直し、
+  // それでもだめなら予備のモデルに切り替える（2026-09-22。決め方は suggest-core の nextGeminiStep）。
+  // 予備は、GEMINI_FALLBACK_MODELS があればそれ、無ければ本来のモデルが断られたときに Google の一覧から選ぶ
+  const configured = process.env.GEMINI_FALLBACK_MODELS;
+  const models = geminiModelChain(GEMINI_MODEL, configured);
+  let fallbacksLoaded = Boolean(configured);
+  const deadline = Date.now() + GEMINI_TIMEOUT_MS;
+  let modelIndex = 0;
+  let attemptOnModel = 0;
+  let response: Response;
+  let bodyText = "";
+  let lastFailure = { status: 0, detail: "" };
+  const tried: Array<{ model: string; status: number }> = [];
+  for (;;) {
+    const model = models[modelIndex];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(deadline - Date.now(), 1_000));
+    try {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", responseSchema: schema },
+        }),
+        signal: controller.signal,
+        cache: "no-store",
+      });
+    } catch (error) {
+      if ((error as Error).name === "AbortError") throw new ApiError("AIの返事が時間内に届きませんでした。もう一度お試しください。", 504);
+      throw new ApiError("AIに接続できませんでした。", 502);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    bodyText = await response.text();
+    if (response.ok) break;
+    console.error("[api/ai] Gemini がエラーを返しました", model, `${attemptOnModel + 1}回目`, response.status, bodyText.slice(0, 500));
+    tried.push({ model, status: response.status });
+    // 予備のモデルが無い（404）だけなら、利用者に伝える失敗は、その前の本当の失敗（503 など）のほうにする
+    if (!(response.status === 404 && lastFailure.status)) {
+      lastFailure = { status: response.status, detail: geminiErrorDetail(bodyText) };
+    }
+    let step = nextGeminiStep({ modelCount: models.length, modelIndex, attemptOnModel, status: response.status, remainingMs: deadline - Date.now() });
+    // 本来のモデルで粘りきったら、ここで初めて予備を Google の一覧から選んで足す
+    if (step.action === "stop" && !fallbacksLoaded && response.status !== 401 && response.status !== 403) {
+      fallbacksLoaded = true;
+      models.push(...(await listFallbackModels(apiKey)).filter((name) => !models.includes(name)));
+      step = nextGeminiStep({ modelCount: models.length, modelIndex, attemptOnModel, status: response.status, remainingMs: deadline - Date.now() });
+    }
+    if (step.action === "stop") {
+      const message = geminiErrorMessage(lastFailure.status)
+        + (lastFailure.detail ? ` ／ Google の説明: ${lastFailure.detail}` : "")
+        + (tried.length > 1 ? ` ／ 試したAI: ${triedModelsSummary(tried)}` : "");
+      throw new ApiError(message, lastFailure.status === 429 ? 429 : 502);
+    }
+    attemptOnModel = step.modelIndex === modelIndex ? attemptOnModel + 1 : 0;
+    modelIndex = step.modelIndex;
+    if (step.waitMs) await new Promise((resolve) => setTimeout(resolve, step.waitMs));
+  }
+
+  try {
+    const parsed = JSON.parse(bodyText) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const text = parsed.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
+    return { data: JSON.parse(text), model: models[modelIndex] };
+  } catch {
+    console.error("[api/ai] Gemini の返答を読めません", bodyText.slice(0, 500));
+    throw new ApiError("AIの返事を読み取れませんでした。もう一度お試しください。", 502);
+  }
+}
+
