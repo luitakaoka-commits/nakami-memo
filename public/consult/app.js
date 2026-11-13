@@ -126,7 +126,8 @@ function messageHtml(message, index) {
   if (message.role === "user") return `<article class="turn user"><div class="bubble">${esc(message.text)}</div></article>`;
   const meta = [];
   if (message.sources?.length) meta.push(`<span>参考にした記録</span>${message.sources.map((name) => `<span class="chip">${esc(name)}</span>`).join("")}`);
-  if (message.fallback && message.model) meta.push(`<span>予備のAI（${esc(message.model)}）で答えました</span>`);
+  // どのモデルで答えたかを毎回出す（2026-11-13 ユーザー要望）。混雑で予備に切り替わったときはそう書く
+  if (message.model) meta.push(message.fallback ? `<span>予備のAI（${esc(message.model)}）で答えました</span>` : `<span>${esc(message.model)}で答えました</span>`);
   if (message.status === "stopped") meta.push("<span>途中で止めました</span>");
   const error = message.status === "error"
     ? `<div class="turn-error"><p class="status danger">${esc(message.error || "答えられませんでした。")}</p><button type="button" class="text-button" data-retry="${index}">もう一度</button></div>`
