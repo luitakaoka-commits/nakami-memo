@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#fffdf8">
+  <meta name="description" content="お金・在庫・レシピ・からだの記録をもとに相談できるAI">
+  <!-- 3アプリと同じく「くらしノート」1つとしてインストールする。manifest は共通のものを指す -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/kurashi-note-apple-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="くらしノート">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="consult.css?v=1">
+  <title>相談</title>
+</head>
+<body>
+  <div id="login" class="login" hidden>
+    <section class="sheet login-sheet">
+      <p class="eyebrow">くらしノート</p>
+      <h1>相談</h1>
+      <p class="support">お金・在庫・レシピ・からだの記録をもとに、AIに相談できます。</p>
+      <p id="login-error" class="status danger" role="alert" hidden></p>
+      <button id="login-button" class="primary-button" type="button">Googleでログイン</button>
+    </section>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <header class="app-header">
+      <button class="icon-button" id="menu-open" aria-label="相談の一覧を開く" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <strong id="thread-title" class="thread-title">新しい相談</strong>
+      <button class="icon-button" id="new-chat" aria-label="新しい相談を始める"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+    </header>
+
+    <main id="main" class="chat" tabindex="-1">
+      <div id="older-wrap" class="older" hidden><button id="older" class="text-button" type="button">前のやりとりを読む</button></div>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <section id="welcome" class="welcome" hidden>
+        <p class="eyebrow" id="welcome-date"></p>
+        <h1>何を相談しますか？</h1>
+        <p class="support" id="welcome-sources">お金・在庫・レシピ・からだの記録を見ながら答えます。</p>
+        <div class="suggestions">
+          <button type="button" class="suggestion">今月、あといくら使っても大丈夫？</button>
+          <button type="button" class="suggestion">期限が近い食材で、今日は何を作ればいい？</button>
+          <button type="button" class="suggestion">次のカード引落に向けて気をつけることは？</button>
+          <button type="button" class="suggestion">食費のムダを減らすには何から始めればいい？</button>
+        </div>
+      </section>
+    </main>
+
+    <form id="composer" class="composer">
+      <label class="sr-only" for="prompt">相談する内容</label>
+      <textarea id="prompt" rows="1" maxlength="4000" placeholder="相談する内容を入力" enterkeyhint="send"></textarea>
+      <button id="send" class="send-button" type="submit" aria-label="送る"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      <button id="stop" class="send-button stop" type="button" aria-label="返答を止める" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button>
+    </form>
+  </div>
+
+  <dialog id="sidebar" class="sidebar" aria-labelledby="sidebar-title">
+    <div class="sidebar-heading"><div><p class="eyebrow">くらしノート</p><h2 id="sidebar-title">相談</h2></div><button id="menu-close" class="icon-button" type="button" aria-label="閉じる">×</button></div>
+    <button id="sidebar-new" class="menu-link new-thread" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新規チャット</span></button>
+    <p class="menu-group-title">これまでの相談</p>
+    <nav id="threads" class="threads" aria-label="これまでの相談"></nav>
+    <p class="support retention">30日使っていない相談は、自動で整理します。</p>
+    <p class="menu-group-title">ほかのアプリ</p>
+    <a class="menu-link" href="/money/index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="12" cy="12" r="4"/></svg><span>お金管理</span></a>
+    <a class="menu-link" href="/app"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg><span>なかみメモ</span></a>
+    <a class="menu-link" href="/recipe"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h11a2 2 0 0 1 2 2v14H8a2 2 0 0 1-2-2z"/><path d="M6 18a2 2 0 0 1 2-2h11M10 8h5m-5 4h5"/></svg><span>つくりおきノート</span></a>
+  </dialog>
+
+  <dialog id="thread-menu" class="detail-dialog" aria-labelledby="thread-menu-title">
+    <div class="dialog-heading"><h2 id="thread-menu-title">相談</h2><button class="icon-button" type="button" data-close aria-label="閉じる">×</button></div>
+    <form id="rename-form" class="fields">
+      <label>名前<input id="rename-input" maxlength="40" required></label>
+      <button class="primary-button" type="submit">名前を変える</button>
+    </form>
+    <button id="delete-thread" class="text-button danger-text" type="button">この相談を削除</button>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="app.js?v=1"></script>
+</body>
+</html>

@@ -195,5 +195,15 @@ t("からだの記録（health）は本人の場所にだけ置け、同居人�
   ok(!store.includes("spaceCollection"), "からだの記録が家の場所（space.ts）を通っている");
 });
 
+t("相談AIのやりとり（consultThreads）は本人の場所にだけ置け、家には置けない（2026-11-13）", () => {
+  const usersBlock = rules.slice(rules.indexOf("match /users/{userId} {"), rules.indexOf("match /households/{householdId} {"));
+  ok((usersBlock.match(/collection == 'consultThreads'/g) || []).length === 2, "本人の場所（とその下のメッセージ）で consultThreads が許されていない");
+  ok(!allowed.has("consultThreads"), "consultThreads が allowedUserCollection に入っている（家にも置けてしまう）");
+  ok(!householdBlock.includes("'consultThreads'"), "家のルールが consultThreads を許している");
+  const app = read("public", "consult", "app.js");
+  ok(app.includes('collection(db, "users", state.uid, "consultThreads")'), "相談を本人の場所以外に書いている");
+  ok(!/households/.test(app), "相談の画面が家の場所に書いている");
+});
+
 console.log(`\n合計 ${pass + fail} 件 ／ 成功 ${pass} ／ 失敗 ${fail}`);
 process.exit(fail ? 1 : 0);

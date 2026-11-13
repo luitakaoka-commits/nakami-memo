@@ -52,6 +52,8 @@ function resolveSupabaseHostname(): string {
 const staticAppRedirects = [
   { source: "/money", destination: "/money/index.html", permanent: false },
   { source: "/recipe", destination: "/recipe/index.html", permanent: false },
+  // 相談AI（4つ目。2026-11-13）
+  { source: "/consult", destination: "/consult/index.html", permanent: false },
   // 3アプリの Firebase を cash-manege にまとめるときの、データの引っ越しページ（2026-09-14）。
   // 引っ越しが済んで古いプロジェクトを片付けたら、public/migrate/ ごと消す。
   { source: "/migrate", destination: "/migrate/index.html", permanent: false },

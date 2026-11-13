@@ -26,6 +26,8 @@ export const APPS = [
   // ログインは3アプリ共通になった（2026-09-14）ので、中身の /app へ直接行く。未ログインなら /app がログインへ案内する。
   { id: "nakami", name: "なかみメモ", href: "/app" },
   { id: "recipe", name: "つくりおきノート", href: "/recipe" },
+  // 相談AI（2026-11-13）。3アプリの記録をまとめて相談する4つ目。くらしノートの起動先（last-app）にはしない
+  { id: "consult", name: "相談", href: "/consult" },
 ];
 
 const ICONS = {
@@ -41,6 +43,10 @@ const ICONS = {
     '<path d="M4.6 9.6h10.8v3.1a3.6 3.6 0 0 1-3.6 3.6H8.2a3.6 3.6 0 0 1-3.6-3.6z" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>' +
     '<path d="M3 8.2h14" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>' +
     '<path d="M10 5.2v1.6" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>',
+  // 相談 … 吹き出し（話しかけて相談する）
+  consult:
+    '<path d="M4 5h12a1.6 1.6 0 0 1 1.6 1.6v6.2A1.6 1.6 0 0 1 16 14.4H9.4L6 17.2v-2.8H4a1.6 1.6 0 0 1-1.6-1.6V6.6A1.6 1.6 0 0 1 4 5z" stroke="#ffffff" stroke-width="1.7" stroke-linejoin="round"/>' +
+    '<circle cx="7" cy="9.7" r="1" fill="#ffffff"/><circle cx="10" cy="9.7" r="1" fill="#ffffff"/><circle cx="13" cy="9.7" r="1" fill="#ffffff"/>',
 };
 
 /** アプリのアイコンタイル。size は 26（バー）か 36（シート）を想定。 */

@@ -31,8 +31,9 @@ const mod = await import(pathToFileURL(path.join(SHARED, "app-switcher.js")).hre
 const { mountAppSwitcher, publishAppStatus, APPS, appIconMarkup } = mod;
 
 // --- バー ---
-t("3アプリが定義されている", () => eq(APPS.map((a) => a.id), ["money", "nakami", "recipe"], "id"));
-t("リンク先が正しい（なかみメモは入口ページではなく中身の /app）", () => eq(APPS.map((a) => a.href), ["/money", "/app", "/recipe"], "href"));
+// 2026-11-13 に4つ目の「相談」を足した（3アプリの順番と行き先は変えていない）
+t("3アプリと相談が定義されている", () => eq(APPS.map((a) => a.id), ["money", "nakami", "recipe", "consult"], "id"));
+t("リンク先が正しい（なかみメモは入口ページではなく中身の /app）", () => eq(APPS.map((a) => a.href), ["/money", "/app", "/recipe", "/consult"], "href"));
 
 const bar = mountAppSwitcher({ current: "money" });
 t("バーが body の先頭に入る", () => ok(document.body.firstChild === bar, "先頭でない"));
@@ -59,10 +60,10 @@ t("ダイアログとして宣言されている", () => {
   eq(d.getAttribute("role"), "dialog", "role");
   eq(d.getAttribute("aria-modal"), "true", "aria-modal");
 });
-t("3行ぶん出る", () => eq(sheet.querySelectorAll(".appsw-row").length, 3, "行数"));
+t("4行ぶん出る（3アプリと相談）", () => eq(sheet.querySelectorAll(".appsw-row").length, 4, "行数"));
 t("3行それぞれに固有のアイコンが付く", () => {
   const tiles = [...sheet.querySelectorAll(".appsw-row .appsw-tile")].map((el) => el.className.split("--")[1]);
-  eq(tiles, ["money", "nakami", "recipe"], "アイコン");
+  eq(tiles, ["money", "nakami", "recipe", "consult"], "アイコン");
 });
 t("現在のアプリはリンクではなく「今ここ」が付く", () => {
   const rows = [...sheet.querySelectorAll(".appsw-row")];
@@ -107,7 +108,7 @@ t("他アプリが書いた状態が表示される", () => {
     const el = r.querySelector(".appsw-state");
     return el ? el.textContent : "";
   });
-  eq(states, ["", "期限が近い 3件", "今週の献立 未設定"], "状態行");
+  eq(states, ["", "期限が近い 3件", "今週の献立 未設定", ""], "状態行（4行目の相談は状態を書かない）");
   document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 });
 

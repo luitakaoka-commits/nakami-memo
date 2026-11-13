@@ -15,6 +15,7 @@
   --appsw-money: #14402f;
   --appsw-nakami: #1f5c43;
   --appsw-recipe: #8a6a1f;
+  --appsw-consult: #713745;
 
   font-family: inherit;
   box-sizing: border-box;
@@ -84,6 +85,7 @@
 .appsw-tile--money { background: var(--appsw-money); }
 .appsw-tile--nakami { background: var(--appsw-nakami); }
 .appsw-tile--recipe { background: var(--appsw-recipe); }
+.appsw-tile--consult { background: var(--appsw-consult); }
 
 .appsw-caret {
   width: 10px;

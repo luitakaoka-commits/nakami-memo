@@ -88,6 +88,9 @@ await checkPage("つくりおきノート /recipe", "/recipe", [
   "app-switcher",
 ]);
 
+// 相談AI（4つ目。2026-11-13）。画面の部品と、記録の要約に使うお金管理の計算部品まで取れること
+await checkPage("相談 /consult", "/consult", ["相談", "composer", "thread-title"]);
+
 await checkPage("なかみメモ /", "/", []);
 
 await checkPage("くらしノートの起動ページ /start.html", "/start.html", ["くらしノート"]);

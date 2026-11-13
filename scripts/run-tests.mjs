@@ -56,6 +56,13 @@ const SUITES = [
     file: "health.test.mjs",
     nodeArgs: ["--experimental-strip-types", "--no-warnings"],
   },
+  // 相談AI（4つ目。2026-11-13）。AIへの指示・会話の切り詰め・流れる返答の読み取り・記録の要約
+  {
+    name: "consult",
+    cwd: path.join(ROOT, "src", "lib", "consult"),
+    file: "consult-core.test.mjs",
+    nodeArgs: ["--experimental-strip-types", "--no-warnings"],
+  },
   // 在庫の「使い切った／捨てた」。お金管理と同じ値を使っているかもここで見る
   {
     name: "inventory-outcome",
