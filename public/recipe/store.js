@@ -57,8 +57,11 @@ export function saveDocument(name, id, data) {
   return setDoc(doc(col(name), id), data).catch(reportWriteError);
 }
 
-export function patchDocument(name, id, data) {
-  return updateDoc(doc(col(name), id), data).catch(reportWriteError);
+export function patchDocument(name, id, data, options = {}) {
+  return updateDoc(doc(col(name), id), data).catch((error) => {
+    reportWriteError(error);
+    if (options.rejectOnError) throw error;
+  });
 }
 
 export function removeDocument(name, id) {

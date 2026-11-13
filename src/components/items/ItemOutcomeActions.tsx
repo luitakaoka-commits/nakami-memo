@@ -71,11 +71,11 @@ export function ItemOutcomeActions({ item }: { item: Item }) {
           </button>
         </div>
       ) : (
-        <div className="flex flex-wrap gap-1">
-          <button type="button" disabled={busy} onClick={() => record({ kind: "consumed" })} className="ui-button ui-button--ghost">
+        <div className="ui-outcome">
+          <button type="button" disabled={busy} onClick={() => record({ kind: "consumed" })} className="ui-button ui-button--ghost ui-button--used">
             使い切った
           </button>
-          <button type="button" disabled={busy} onClick={() => setAsking(true)} className="ui-button ui-button--ghost">
+          <button type="button" disabled={busy} onClick={() => setAsking(true)} className="ui-button ui-button--ghost ui-button--tossed">
             捨てた
           </button>
         </div>

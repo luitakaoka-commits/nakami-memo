@@ -1,0 +1,137 @@
+/* N1 — playful household inventory; real rooms and familiar navigation.
+   Critique: intent 5, hierarchy 4, execution 4, specificity 5, restraint 4, variety 5. */
+.ui-commandbar { background: transparent; color: var(--ink-strong); box-shadow: none; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0 0 24px; }
+.ui-commandbar h1 { color: var(--ink-strong); font-weight: 700; line-height: 1.4; font-size: clamp(1.7rem, 3vw, 2.6rem); }
+.ui-commandbar .ui-button--on-dark { background: var(--brand); color: var(--on-brand); border-color: var(--brand); }
+.ui-commandbar .ui-input { border-color: var(--line); }
+.ui-brand-mark { border-radius: 40% 40% 30% 30%; }
+.ui-stat { border-top: 0; padding-inline: 8px; }
+.ui-stat__value, .ui-item-card__quantity { font-family: var(--font-number), var(--font-ui); font-weight: 500; }
+.ui-item-card { background: var(--surface); box-shadow: none; }
+.ui-section__head { align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.ui-section__head > div { min-width: 0; flex-wrap: wrap; }
+.ui-button, .ui-nav-link, .ui-chip { white-space: nowrap; touch-action: manipulation; }
+.ui-mobile-nav .ui-nav-link { border-radius: 16px 16px 0 0; }
+.ui-mobile-header { top: calc(40px + env(safe-area-inset-top, 0px)); }
+#appsw-mount { position: sticky; top: 0; z-index: 40; }
+.home-scene { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: 30px; align-items: center; padding: 28px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: var(--radius-large); }
+.home-scene__drawing, .home-room-contents { min-width: 0; }
+.home-scene__heading p { margin: 0 0 5px; font-size: .8rem; color: var(--ink-muted); }
+.home-scene__heading h2 { margin: 0; font-size: clamp(1.4rem,3vw,2rem); font-weight: 700; }
+.home-scene__heading > span { display: block; margin-top: 8px; font-size: .72rem; color: var(--ink-muted); }
+.home-illustration { position: relative; width: 100%; max-width: 100%; min-width: 0; aspect-ratio: 600 / 340; min-height: 195px; margin-top: 16px; }
+.home-illustration > svg { display: block; height: 100%; width: 100%; position: absolute; inset: 0; }
+.home-cloud { fill: var(--home-cloud); animation: home-cloud-drift 9s ease-in-out infinite alternate; }
+.home-ground, .home-wood-line { fill: none; stroke: var(--home-wood); stroke-width: 2.5; }
+.home-roof { fill: var(--home-roof); }
+.home-wall { fill: var(--surface); stroke: var(--line-strong); stroke-width: 2; }
+.home-attic { fill: var(--brand-soft); stroke: var(--home-wood); stroke-width: 2.5; }
+.home-plant { fill: var(--home-leaf); stroke: var(--home-leaf-line); stroke-width: 3; }
+.home-rooms { position: absolute; left: 21%; right: 21%; top: 44%; bottom: 8%; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+.home-rooms[data-rooms="1"] { grid-template-columns: minmax(0,1fr); }
+.home-room { min-width: 0; min-height: 44px; display: flex; align-items: center; flex-direction: column; justify-content: center; gap: 3px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; background: var(--home-room-cool); color: var(--ink-strong); transition: transform var(--duration-standard) var(--home-ease), background var(--duration-standard) var(--ease-standard); }
+.home-room > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; font-weight: 700; }
+.home-room > small { font-size: .65rem; color: var(--ink-muted); }
+.home-room[data-active="true"] { background: var(--home-window); border-color: var(--home-wood); transform: translateY(-3px); }
+.home-room:active { transform: translateY(1px) scale(.97); }
+.home-rooms[data-rooms="3"] .home-room, .home-rooms[data-rooms="4"] .home-room { gap: 1px; padding: 3px; }
+.home-rooms[data-rooms="3"] .home-room svg, .home-rooms[data-rooms="4"] .home-room svg { display: none; }
+.home-extra-rooms { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.home-extra-rooms .home-room { flex: 1; min-width: 88px; }
+.home-room-contents { border-left: 1px solid var(--line); padding-left: 28px; }
+.home-room-contents .ui-kicker { margin-bottom: 7px; }
+.home-room-contents h3 { font-size: 1.5rem; margin: 0; overflow-wrap: anywhere; }
+.home-room-summary { font-size: .78rem; color: var(--ink-muted); margin: 9px 0 20px; }
+.home-location-list { display: grid; margin-bottom: 20px; }
+.home-location { display: flex; align-items: center; gap: 9px; min-height: 50px; border-bottom: 1px solid var(--line); padding: 10px 0; font-size: .86rem; }
+.home-location > span:first-of-type { min-width: 0; overflow-wrap: anywhere; }
+.home-location > small { margin-left: auto; font-size: .7rem; white-space: nowrap; color: var(--ink-muted); }
+.home-location > svg, .home-location > span:last-child { flex-shrink: 0; color: var(--brand); }
+@keyframes home-cloud-drift { from { transform: translateX(-4px); } to { transform: translateX(7px); } }
+@media (max-width: 1050px) { .home-scene { grid-template-columns: minmax(0,1fr); gap: 20px; }.home-scene__drawing { width: min(100%,550px); margin-inline: auto; }.home-room-contents { border-left: 0; border-top: 1px solid var(--line); padding: 22px 0 0; } }
+@media (max-width: 600px) { .home-scene { padding: 18px 16px; border-radius: 20px; }.ui-commandbar__actions { flex-wrap: wrap; }.ui-search-form { flex: 1; }.ui-commandbar__actions > .ui-button { flex: 0 0 auto; }.ui-main { padding-inline: 14px; }.ui-stack { gap: 20px; }.home-room > span { font-size: .72rem; }.home-room > small { font-size: .6rem; }.home-room-contents h3 { font-size: 1.3rem; }.home-scene__heading > span { font-size: .68rem; } }
+@media (prefers-reduced-motion: reduce) { .home-cloud { animation: none; }.home-room { transition: none; } }
+
+/* ふんわり・直感の層（2026-11-14 ユーザー要望「ふんわりしながらも直感的に」）。
+   小さな家の配色はそのまま。線で囲むのをやめて、やわらかい影の面にし、押せるものは丸く、押すと少し沈んで戻る。
+   動かすのは transform と opacity だけ。行き過ぎは1回・1割まで。 */
+:root {
+  --fuwa-shadow: 0 1px 1px rgba(110, 72, 44, .05), 0 10px 26px -12px rgba(110, 72, 44, .28);
+  --fuwa-shadow-lift: 0 2px 3px rgba(110, 72, 44, .08), 0 18px 34px -14px rgba(110, 72, 44, .38);
+  --fuwa-spring: cubic-bezier(.34, 1.3, .64, 1);
+  --leaf: #4f6c3e;
+  --leaf-soft: #e3ead2;
+}
+body { background: radial-gradient(120% 60% at 50% 0%, #fbf3e2 0%, var(--canvas) 62%) fixed; }
+
+/* 面：線をやめて影で浮かせる */
+.ui-item-card, .ui-location-card, .ui-form-surface, .ui-detail-card, .ui-qr-card, .ui-empty {
+  border-color: transparent; border-radius: 22px; background: var(--surface); box-shadow: var(--fuwa-shadow);
+}
+.ui-item-card { padding: 14px; gap: 14px; }
+.ui-item-card:hover, .ui-location-card:hover { border-color: transparent; box-shadow: var(--fuwa-shadow-lift); }
+.ui-item-card__media { border-radius: 18px; background: var(--surface-tint); }
+.ui-item-card__name { font-size: 1rem; font-weight: 700; }
+.ui-item-card__quantity { align-self: start; border-radius: 999px; padding: 7px 12px; background: var(--surface-soft); font-size: 1.05rem; }
+.ui-badge { border-radius: 999px; }
+.home-scene { border-color: transparent; border-radius: 28px; background: var(--surface); box-shadow: var(--fuwa-shadow); }
+
+/* 押せるもの：丸く、押すと沈んで弾んで戻る */
+.ui-button { border-radius: 999px; min-height: 44px; padding-inline: 18px; font-weight: 700;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard), transform 320ms var(--fuwa-spring); }
+.ui-button:active:not(:disabled), .ui-chip:active, .ui-nav-link:active, .ui-mobile-logout:active { transform: scale(.94); transition-duration: 80ms; }
+.ui-button--primary, .ui-commandbar .ui-button--on-dark { box-shadow: 0 8px 18px -8px rgba(165, 75, 50, .7); }
+.ui-button--secondary { border-color: transparent; background: var(--surface); box-shadow: var(--fuwa-shadow); }
+.ui-button--ghost { min-height: 40px; padding-inline: 14px; background: var(--surface-soft); color: var(--brand-strong); }
+.ui-button--ghost:hover { background: var(--brand-soft); }
+.ui-chip { min-height: 44px; border-color: transparent; padding-inline: 16px; background: var(--surface); box-shadow: var(--fuwa-shadow); transition: background var(--duration-fast) var(--ease-standard), transform 320ms var(--fuwa-spring); }
+.ui-chip[aria-pressed="true"] { background: var(--brand); color: var(--on-brand); box-shadow: 0 8px 18px -8px rgba(165, 75, 50, .7); }
+
+/* 在庫カードの3つの操作を、意味で見分けられるようにする */
+.ui-outcome { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ui-outcome .ui-button { flex: 1 1 auto; }
+.ui-button--used { background: var(--leaf-soft); color: var(--leaf); }
+.ui-button--used:hover { background: #d5dfbf; }
+.ui-button--tossed { background: var(--surface-tint); color: var(--ink); }
+.ui-button--tossed:hover { background: #e6d4b2; }
+
+/* 入力：やわらかい面。選ぶと枠が色づく */
+.ui-input, .ui-form-field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), .ui-form-field select, .ui-form-field textarea {
+  border-radius: 16px; border-color: transparent; background: var(--surface-soft); box-shadow: inset 0 0 0 1px var(--line);
+}
+.ui-input:focus, .ui-form-field input:focus, .ui-form-field select:focus, .ui-form-field textarea:focus { box-shadow: inset 0 0 0 2px var(--brand); outline: none; }
+.ui-commandbar { border-bottom: 0; padding-bottom: 6px; }
+.ui-commandbar .ui-input { background: var(--surface); box-shadow: var(--fuwa-shadow); }
+
+/* 数字の4枚：色のついた丸い面 */
+.ui-stat { gap: 8px; border: 0; border-radius: 22px; padding: 16px 16px 14px; background: var(--surface); box-shadow: var(--fuwa-shadow); }
+.ui-stat:nth-child(3) { background: #fbe9c9; }
+.ui-stat:nth-child(4) { background: var(--leaf-soft); }
+.ui-stat__value { font-size: 1.9rem; }
+.ui-section__title { font-weight: 700; }
+
+/* お部屋：選ぶとふわっと持ち上がる */
+.home-room { border-color: transparent; border-radius: 14px; transition: transform 380ms var(--fuwa-spring), background var(--duration-standard) var(--ease-standard), box-shadow var(--duration-standard) var(--ease-standard); }
+.home-room[data-active="true"] { border-color: transparent; box-shadow: 0 8px 16px -8px rgba(110, 72, 44, .55); transform: translateY(-4px) scale(1.03); }
+.home-location { min-height: 56px; margin-bottom: 8px; border: 0; border-radius: 16px; padding: 10px 14px; background: var(--surface-soft); transition: transform 320ms var(--fuwa-spring), background var(--duration-fast) var(--ease-standard); }
+.home-location:hover { background: var(--brand-soft); }
+.home-location:active { transform: scale(.97); transition-duration: 80ms; }
+.home-location-list { margin-bottom: 14px; }
+
+@media (max-width: 820px) {
+  .ui-app-shell { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+  .ui-mobile-header { border-bottom: 0; }
+  .ui-mobile-logout { border-color: transparent; border-radius: 999px; box-shadow: var(--fuwa-shadow); }
+  /* 下のメニュー：浮かぶ丸い台。まんなかの「追加」だけ一段高い丸ボタン */
+  .ui-mobile-nav { inset: auto 12px calc(10px + env(safe-area-inset-bottom)); border: 0; border-radius: 28px; padding: 6px; background: var(--glass-nav); box-shadow: var(--fuwa-shadow-lift); }
+  .ui-mobile-nav .ui-nav-link { min-height: 56px; border-radius: 22px; gap: 3px; font-weight: 700; transition: background var(--duration-standard) var(--ease-standard), color var(--duration-standard) var(--ease-standard), transform 320ms var(--fuwa-spring); }
+  .ui-mobile-nav .ui-nav-link[data-active="true"] { background: var(--brand-soft); color: var(--brand-strong); }
+  .ui-mobile-nav .ui-nav-link[data-active="true"] svg { transform: translateY(-1px) scale(1.1); transition: transform 380ms var(--fuwa-spring); }
+  .ui-mobile-nav .ui-nav-link[href="/app/items/new"] { color: var(--brand-strong); }
+  .ui-mobile-nav .ui-nav-link[href="/app/items/new"] svg { box-sizing: content-box; width: 22px; height: 22px; margin-top: -22px; border: 4px solid var(--surface); border-radius: 50%; padding: 10px; background: var(--brand); color: var(--on-brand); box-shadow: 0 10px 18px -8px rgba(165, 75, 50, .8); }
+  .ui-mobile-nav .ui-nav-link[href="/app/items/new"][data-active="true"] { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-button, .ui-chip, .ui-nav-link, .home-room, .home-location { transition: none; }
+  .ui-button:active:not(:disabled), .ui-chip:active, .ui-nav-link:active, .home-location:active { transform: none; }
+}

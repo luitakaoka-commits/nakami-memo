@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 import { ItemCard } from "@/components/items/ItemCard";
 import { OutOfStockCleanup } from "@/components/items/OutOfStockCleanup";
+import { HomeScene } from "@/components/dashboard/HomeScene";
 
 export function Dashboard() {
   const { areas, locations, itemsWithLocation, loading, error } = useInventory();
@@ -33,7 +34,7 @@ export function Dashboard() {
   return (
     <div className="ui-stack">
       <section className="ui-commandbar">
-        <div><p className="ui-kicker">なかみメモ</p><h1>ホーム</h1></div>
+        <div><p className="ui-kicker">なかみメモ / ホーム</p><h1>家のなかを、<br />ひと目で。</h1></div>
         <div className="ui-commandbar__actions">
           <form action="/app/search" className="ui-search-form">
             <input name="q" className="ui-input" placeholder="アイテム・場所・カテゴリ" aria-label="検索" />
@@ -42,6 +43,12 @@ export function Dashboard() {
           <Link href="/app/items/new" className="ui-button ui-button--on-dark"><Plus size={17} strokeWidth={2} /><span>追加</span></Link>
         </div>
       </section>
+
+      <HomeScene rooms={grouped.map(({ area, locations: roomLocations }) => ({
+        id: area.id, name: area.name,
+        itemCount: itemsWithLocation.filter((item) => roomLocations.some((location) => location.id === item.locationId)).length,
+        locations: roomLocations.map((location) => ({ id: location.id, name: location.name, itemCount: itemsWithLocation.filter((item) => item.locationId === location.id).length })),
+      }))} />
 
       <div className="ui-stat-grid" aria-label="在庫サマリー">
         <div className="ui-stat"><span className="ui-stat__label">アイテム</span><strong className="ui-stat__value">{itemsWithLocation.length}</strong></div>

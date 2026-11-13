@@ -6,16 +6,16 @@
    （どこにいても同じ場所に同じものがある、という手触りが切り替えUIの価値なので）。 */
 
 .appsw {
-  --appsw-bg: #ffffff;
-  --appsw-ink: #16211c;
-  --appsw-muted: #6d7d72;
-  --appsw-line: #e0e5df;
-  --appsw-line-strong: #cbd3c9;
+  --appsw-bg: #fffaf0;
+  --appsw-ink: #513d32;
+  --appsw-muted: #79614b;
+  --appsw-line: #ddcdb6;
+  --appsw-line-strong: #c3ad8f;
   --appsw-sheet-shadow: 0 -8px 32px rgba(12, 24, 18, 0.18);
-  --appsw-money: #14402f;
-  --appsw-nakami: #1f5c43;
-  --appsw-recipe: #8a6a1f;
-  --appsw-consult: #713745;
+  --appsw-money: #713745;
+  --appsw-nakami: #a54b32;
+  --appsw-recipe: #a33c2b;
+  --appsw-consult: #4f6c3e;
 
   font-family: inherit;
   box-sizing: border-box;
@@ -27,11 +27,11 @@
 
 @media (prefers-color-scheme: dark) {
   .appsw {
-    --appsw-bg: #161d19;
-    --appsw-ink: #e4ebe5;
-    --appsw-muted: #8fa096;
-    --appsw-line: #29332d;
-    --appsw-line-strong: #3a453e;
+    --appsw-bg: #30251f;
+    --appsw-ink: #faf2e2;
+    --appsw-muted: #d0bfa9;
+    --appsw-line: #594535;
+    --appsw-line-strong: #7b614b;
   }
 }
 
@@ -93,6 +93,7 @@
   flex: none;
   color: var(--appsw-muted);
 }
+
 
 /* ---------- シート ---------- */
 
