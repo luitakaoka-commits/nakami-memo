@@ -703,7 +703,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=102" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=103" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -4042,8 +4042,20 @@
         const imported = normalizeState(JSON.parse(reader.result));
         if (!imported.accounts.length && !imported.transactions.length) throw new Error('データがありません');
         if (!window.confirm('現在のデータを読み込んだ内容で置き換えますか？')) return;
-        imported.meta.onboarded = true; imported.meta.demo = false; state = imported; persist(); showApp(); showToast('バックアップを読み込みました');
-      } catch (error) { showToast(`読み込みに失敗しました: ${error.message}`); }
+        imported.meta.onboarded = true; imported.meta.demo = false;
+        // 保存に失敗したら元に戻す。戻さないと、画面は読み込んだ内容・端末とクラウドは前の内容、と食い違ったまま残る（2026-11-13）
+        const previous = state;
+        state = imported;
+        try { persist(); } catch (error) { state = previous; throw error; }
+        showApp(); showToast('バックアップを読み込みました');
+      } catch (error) {
+        // ブラウザの保存領域（1サイトあたり約500万文字）は3アプリと未保存データの控えで共有している。
+        // 件数の多いバックアップほど溢れやすいので、原因が分かる文にする
+        const full = error?.name === 'QuotaExceededError' || error?.code === 22 || error?.code === 1014;
+        showToast(full
+          ? '読み込みに失敗しました: この端末の保存領域がいっぱいです（今のデータはそのままです）。'
+          : `読み込みに失敗しました: ${error.message}`);
+      }
     };
     reader.readAsText(file, 'utf-8');
   }
