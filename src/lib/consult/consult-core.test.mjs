@@ -124,6 +124,43 @@ t("記録の要約（お金）：口座・使える額・これからの支払�
   ok(!text.includes("999円"), "過ぎた予定は入れない");
 });
 
+t("お金管理を全部：設定・予定（全件）・カードの請求・月ごとの収支・定期・シフト・レシートとムダ・取引の記録（全件）", () => {
+  const state = {
+    accounts: [{ id: "bank", name: "三菱UFJ", role: "primary", includeInSpendable: true, reserveAmount: 5000 }],
+    cards: [{ id: "smbc", name: "SMBC", closingDay: 15, paymentDay: 10, paymentMonthOffset: 1, accountId: "bank", reflectionDays: 2 }],
+    settings: { defenseLine: 10000, cashflowHorizonDays: 90, wage: { hourlyRate: 1200, paymentDay: 15 } },
+    transactions: [
+      { id: "f1", kind: "payment", status: "planned", amount: 80000, dueDate: "2027-03-05", category: "固定費", memo: "家賃", sourceAccountId: "bank" },
+      { id: "d1", kind: "payment", status: "planned", entryType: "itemized", amount: 500, dueDate: "2026-12-10", transactionDate: "2026-11-10", cardId: "smbc", category: "食費", memo: "メール明細" },
+      { id: "h1", kind: "payment", status: "settled", amount: 2480, dueDate: "2026-11-09", category: "食費", memo: "スーパー" },
+      { id: "h2", kind: "payment", status: "absorbed", entryType: "itemized", amount: 1200, dueDate: "2026-10-10", transactionDate: "2026-09-20", cardId: "smbc", category: "食費", memo: "コンビニ" },
+      { id: "h3", kind: "income", status: "settled", amount: 55000, dueDate: "2025-04-01", category: "収入", memo: "とても古い入金" },
+    ],
+    recurringPlans: [{ name: "通信費", amount: 3300, dayOfMonth: 27, cardId: "smbc", active: false }],
+    workEntries: [{ date: "2026-11-10", hours: 6, status: "planned" }],
+  };
+  const text = context.formatMoneyDetails({
+    state, today: "2026-11-13",
+    cardGroups: [{ dueDate: "2026-12-10", cardId: "smbc", billingCycle: "2026-11", statements: [{}], statementTotal: 82232, statementAsOf: "2026-11-13", itemized: [{}], itemizedTotal: 500, pendingTotal: 500 }],
+    months: [{ month: "2026-10", summary: { income: { total: 1 }, expense: { total: 2, categories: [] }, saving: { total: 0 }, lendingTotal: 0 } }, { month: "2026-11", summary: { income: { total: 55000 }, expense: { total: 2480, categories: [{ label: "食費", amount: 2480 }] }, saving: { total: 0 }, lendingTotal: 0 } }],
+    receipts: [{ id: "r1", storeName: "東急ストア", purchasedAt: "2026-11-09" }],
+    receiptItems: [{ receiptId: "r1", name: "葉物野菜", amount: 180, category: "食品", outcomeTracked: true, outcome: "wasted", wasteAmount: 180, outcomeReason: "期限切れ" }],
+    pendingMails: 3,
+  });
+  for (const phrase of [
+    "役割 primary、使える額に含める、口座ごとの予備額 5,000円", "SMBC: 15日締め・10日払い（締め月の翌月）、引落口座 三菱UFJ、請求額への反映まで2日",
+    "最低限残す予備額 10,000円", "時給 1,200円、給料日 15日", "2027-03-05 支払い 80,000円 家賃", "2026-12-10 SMBC（2026-11締め）: 登録した請求額 82,232円（2026-11-13に見た額）",
+    "うち請求額にまだ入っていない 500円", "- 2026-11: 収入 55,000円、支出 2,480円", "通信費 3,300円（毎月、27日、SMBC、停止中）", "2026-11-10 6時間（予定）",
+    "ムダになった額の合計 180円", "東急ストア 葉物野菜 180円（食品、捨てた、ムダ 180円・期限切れ）", "メール取込の確認待ち: 3件",
+    "取引の記録（全3件", "2026-11-09 支払い・確定 2,480円 スーパー", "2026-09-20 支払い・請求額の内訳 1,200円 コンビニ", "2025-04-01 収入・確定 55,000円 とても古い入金",
+  ]) ok(text.includes(phrase), `「${phrase}」が無い`);
+  ok(text.indexOf("- 2026-11:") < text.indexOf("- 2026-10:"), "月ごとは新しい順");
+  ok(!text.includes("登録してある予定（今日以降、全2件）") && !/予定[^\n]*メール明細/.test(text.split("取引の記録")[0].split("カードの請求")[0]), "メールの明細は予定の一覧に重ねない（カードの請求に入る）");
+  const plain = context.formatMoneyDetails({ state, today: "2026-11-13" });
+  const tight = context.formatMoneyDetails({ state, today: "2026-11-13", budget: plain.indexOf("2026-11-09 支払い") + 60 });
+  ok(tight.includes("これより古い取引") && tight.includes("スーパー") && !tight.includes("とても古い入金"), `上限を超えたら古い取引から省く\n${tight.slice(-300)}`);
+});
+
 t("記録の要約（在庫・レシピ・からだの記録）", () => {
   const stock = context.formatInventory([
     { name: "牛乳", quantity: 1, unit: "本", category: "飲料", expiration: "2026-11-14", location: "冷蔵庫" },

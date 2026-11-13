@@ -15,8 +15,11 @@ export const MAX_TURNS = 24;
 export const MAX_HISTORY_CHARS = 24_000;
 /** 1通の上限 */
 export const MAX_MESSAGE_CHARS = 4_000;
-/** 記録の要約の上限 */
-export const MAX_CONTEXT_CHARS = 30_000;
+/**
+ * 記録の要約の上限。お金管理を全部見せる（2026-11-13 ユーザー要望）ので広くとる。
+ * お金管理の記録は画面側で 150,000文字までに収め、超える分は取引の古いほうから省く（context-format.js）
+ */
+export const MAX_CONTEXT_CHARS = 200_000;
 /** 使われていない相談を自動で消すまでの日数（ことのはの鏡と同じ） */
 export const RETENTION_DAYS = 30;
 

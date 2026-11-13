@@ -6,7 +6,7 @@ import {
   collection, doc, getDoc, getDocs, query, where
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "../recipe/firebase.js";
-import { formatHealth, formatInventory, formatMoney, formatRecipes } from "./context-format.js";
+import { formatHealth, formatInventory, formatMoney, formatMoneyDetails, formatRecipes } from "./context-format.js";
 
 /** 日本の今日（YYYY-MM-DD） */
 export function japanToday() {
@@ -35,22 +35,49 @@ async function readMoneyState(uid) {
   try { id = localStorage.getItem("okane-active-workspace") || ""; } catch { /* 読めなければ探す */ }
   if (id) {
     const snapshot = await getDoc(doc(db, "workspaces", id)).catch(() => null);
-    if (snapshot?.exists() && (snapshot.data().memberUids || []).includes(uid)) return snapshot.data().state || null;
+    if (snapshot?.exists() && (snapshot.data().memberUids || []).includes(uid)) return { id, state: snapshot.data().state || null };
   }
   const found = await getDocs(query(collection(db, "workspaces"), where("memberUids", "array-contains", uid)));
-  const rows = found.docs.map((item) => item.data()).sort((a, b) => Number(b.ownerUid === uid) - Number(a.ownerUid === uid));
-  return rows[0]?.state || null;
+  const rows = found.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => Number(b.ownerUid === uid) - Number(a.ownerUid === uid));
+  return rows[0] ? { id: rows[0].id, state: rows[0].state || null } : { id: "", state: null };
+}
+
+/** 家計スペースの下の記録（レシート・品物・メール取込）。読めなければ空 */
+async function readWorkspaceCollection(workspaceId, name) {
+  if (!workspaceId) return [];
+  const snapshot = await getDocs(collection(db, "workspaces", workspaceId, name)).catch(() => null);
+  return (snapshot?.docs || []).map((item) => ({ id: item.id, ...item.data() }));
+}
+
+/** 取引のある最初の月から今月までの 'YYYY-MM' */
+function monthsSince(transactions, today) {
+  const dates = transactions.map((t) => t?.transactionDate || t?.dueDate || "").filter((d) => /^\d{4}-\d{2}/.test(d) && d <= today).sort();
+  if (!dates.length) return [];
+  const list = [];
+  for (let month = dates[0].slice(0, 7); month <= today.slice(0, 7); month = window.FinanceEngine.shiftMonthKey(month, 1)) list.push(month);
+  return list;
 }
 
 async function moneyContext(uid, today) {
-  const [state] = await Promise.all([readMoneyState(uid), loadMoneyScripts()]);
+  const [{ id: workspaceId, state }] = await Promise.all([readMoneyState(uid), loadMoneyScripts()]);
   if (!state) return "";
+  const engine = window.FinanceEngine;
   let view = null;
   let summary = null;
   try { view = window.DailyFinance.overview({ state, today, candidates: [] }); } catch (error) { console.warn("[相談] 使える額を計算できません", error); }
   const month = today.slice(0, 7);
-  try { summary = window.FinanceEngine.summarizePeriod(state.transactions || [], window.FinanceEngine.calendarMonthRange(month), { basis: "real" }); } catch (error) { console.warn("[相談] 今月の収支を計算できません", error); }
-  return formatMoney({ state, view, summary, today, monthLabel: `${Number(month.slice(5))}月` });
+  try { summary = engine.summarizePeriod(state.transactions || [], engine.calendarMonthRange(month), { basis: "real" }); } catch (error) { console.warn("[相談] 今月の収支を計算できません", error); }
+  // ここから下は「お金管理を全部見せる」ための記録（2026-11-13 ユーザー要望）
+  let months = [];
+  let cardGroups = [];
+  try { months = monthsSince(state.transactions || [], today).map((key) => ({ month: key, summary: engine.summarizePeriod(state.transactions || [], engine.calendarMonthRange(key), { basis: "real" }) })); } catch (error) { console.warn("[相談] 月ごとの収支を計算できません", error); }
+  try { cardGroups = engine.groupCardCharges(state.transactions || [], state.cards || [], { overrides: state.settings?.holidayOverrides || {} }); } catch (error) { console.warn("[相談] カードの請求をまとめられません", error); }
+  const [receipts, receiptItems, candidates] = await Promise.all(["receipts", "receiptItems", "importCandidates"].map((name) => readWorkspaceCollection(workspaceId, name)));
+  const pendingMails = candidates.filter((item) => ["pending", "needs_review"].includes(item.status)).length;
+  return [
+    formatMoney({ state, view, summary, today, monthLabel: `${Number(month.slice(5))}月` }),
+    formatMoneyDetails({ state, cardGroups, months, receipts, receiptItems, pendingMails, today }),
+  ].join("\n\n");
 }
 
 /** 在庫・レシピの置き場所（同居人と共有していれば家、していなければ自分。つくりおきノートの store.js と同じ決め方） */

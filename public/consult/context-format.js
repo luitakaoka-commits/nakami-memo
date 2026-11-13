@@ -55,6 +55,109 @@ export function formatMoney({ state, view, summary, today, monthLabel }) {
   return lines.join("\n");
 }
 
+const KIND_LABELS = { payment: "支払い", income: "収入", saving: "貯金", nisa: "NISA", reimbursement: "立替回収", transfer: "振込", adjustment: "残高調整" };
+const STATUS_LABELS = { planned: "予定", settled: "確定", absorbed: "請求額の内訳", cancelled: "取消" };
+const OUTCOME_LABELS = { in_stock: "まだある", consumed: "使い切った", wasted: "捨てた", partial: "一部捨てた", given: "あげた" };
+
+/**
+ * お金管理の記録を全部（2026-11-13 ユーザー要望「全てを見てほしい」）。
+ * 口座・カード・設定・これからの予定（全件）・カードの請求（期間ごと）・月ごとの収支（全期間）・定期支払い・
+ * シフト・レシートとムダ支出・メール取込の確認待ち・取引の記録（全件、新しい順）。
+ * 文字数の上限（budget）を超えるときだけ、取引の記録の古いほうから省き、省いた件数を書く。
+ *
+ * cardGroups は FinanceEngine.groupCardCharges の結果、months は [{ month, summary }]（summarizePeriod）。
+ */
+export function formatMoneyDetails({ state, cardGroups = [], months = [], receipts = [], receiptItems = [], pendingMails = 0, today, budget = 150_000 }) {
+  if (!state) return "";
+  const cards = new Map((state.cards || []).map((card) => [card.id, card]));
+  const accounts = new Map((state.accounts || []).map((account) => [account.id, account]));
+  const cardName = (id) => clip(cards.get(id)?.name || "カード", 16);
+  const accountName = (id) => clip(accounts.get(id)?.name || "", 16);
+  const head = ["【お金管理の記録（全部）】"];
+
+  head.push("口座の設定:");
+  for (const account of state.accounts || []) {
+    head.push(`- ${clip(account.name, 30)}: 役割 ${account.role || "不明"}、使える額に${account.includeInSpendable === false ? "含めない" : "含める"}、口座ごとの予備額 ${yen(account.reserveAmount)}`);
+  }
+  if ((state.cards || []).length) {
+    head.push("カード:");
+    for (const card of state.cards) {
+      head.push(`- ${clip(card.name, 20)}: ${card.closingDay ? `${card.closingDay}日締め` : "月末締め"}・${card.paymentDay ? `${card.paymentDay}日払い` : "月末払い"}（締め月の${["同じ月", "翌月", "翌々月"][Number(card.paymentMonthOffset ?? 1)] || "翌月"}）、引落口座 ${accountName(card.accountId)}${Number.isInteger(card.reflectionDays) ? `、請求額への反映まで${card.reflectionDays}日` : ""}`);
+    }
+  }
+  const settings = state.settings || {};
+  const wage = settings.wage || {};
+  head.push(`設定: 最低限残す予備額 ${yen(settings.defenseLine)}、見通しの日数 ${settings.cashflowHorizonDays || 90}日、時給 ${yen(wage.hourlyRate)}、給料日 ${wage.paymentDay || "未設定"}日`);
+
+  const future = (state.transactions || [])
+    .filter((t) => t && t.status === "planned" && (t.dueDate || "") >= today && t.entryType !== "itemized")
+    .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+  if (future.length) {
+    head.push(`登録してある予定（今日以降、全${future.length}件）:`);
+    for (const t of future) head.push(`- ${t.dueDate} ${KIND_LABELS[t.kind] || t.kind} ${yen(t.amount)} ${clip(t.memo || t.category, 20)}（${clip(t.category, 10)}${t.cardId ? `、${cardName(t.cardId)}` : ""}${t.sourceAccountId ? `、${accountName(t.sourceAccountId)}` : ""}${t.lendingAmount ? `、うち立替 ${yen(t.lendingAmount)}` : ""}${t.salaryPaymentMonth ? "、給料" : ""}）`);
+  }
+
+  const groups = cardGroups.filter((group) => (group.dueDate || "") >= today);
+  if (groups.length) {
+    head.push("カードの請求（引落日ごと）:");
+    for (const group of groups) {
+      const statement = group.statements?.[0];
+      head.push(`- ${group.dueDate} ${cardName(group.cardId)}（${group.billingCycle}締め）: ${statement
+        ? `登録した請求額 ${yen(group.statementTotal)}（${group.statementAsOf || "?"}に見た額）、内訳の明細 ${group.itemized.length}件 ${yen(group.itemizedTotal)}、うち請求額にまだ入っていない ${yen(group.pendingTotal)}`
+        : `請求額は未登録。メールの明細 ${group.itemized.length}件 ${yen(group.itemizedTotal)}`}`);
+    }
+  }
+
+  if (months.length) {
+    head.push("月ごとの確定した収支（全期間、新しい順）:");
+    for (const { month, summary } of months.slice().sort((a, b) => b.month.localeCompare(a.month))) {
+      const top = (summary.expense?.categories || []).slice(0, 5).map((item) => `${clip(item.label, 10)} ${yen(item.amount)}`).join("、");
+      head.push(`- ${month}: 収入 ${yen(summary.income?.total)}、支出 ${yen(summary.expense?.total)}、貯蓄・投資 ${yen(summary.saving?.total)}、立替 ${yen(summary.lendingTotal)}${top ? `（支出の内訳: ${top}）` : ""}`);
+    }
+  }
+
+  const plans = (state.recurringPlans || []).filter(Boolean);
+  if (plans.length) {
+    head.push("定期支払い（全部）:");
+    for (const plan of plans) head.push(`- ${clip(plan.name || plan.memo || "定期", 20)} ${yen(plan.amount)}（${plan.interval || "毎月"}、${plan.dayOfMonth ? `${plan.dayOfMonth}日` : ""}${plan.cardId ? `、${cardName(plan.cardId)}` : ""}${plan.active === false || plan.isActive === false ? "、停止中" : ""}）`);
+  }
+
+  const work = (state.workEntries || []).filter((entry) => entry && entry.date).sort((a, b) => b.date.localeCompare(a.date));
+  if (work.length) {
+    head.push(`シフト（全${work.length}件、新しい順）:`);
+    for (const entry of work) head.push(`- ${entry.date} ${entry.hours}時間（${entry.status === "worked" ? "勤務済み" : "予定"}${entry.hourlyRateOverride ? `、時給 ${yen(entry.hourlyRateOverride)}` : ""}${entry.memo ? `、${clip(entry.memo, 12)}` : ""}）`);
+  }
+
+  if (receiptItems.length) {
+    const wasted = receiptItems.filter((item) => item.wasteAmount > 0);
+    head.push(`レシートの品物 ${receiptItems.length}件（レシート ${receipts.length}枚）。捨てた・ムダになった額の合計 ${yen(wasted.reduce((sum, item) => sum + Number(item.wasteAmount || 0), 0))}`);
+    const byReceipt = new Map(receipts.map((receipt) => [receipt.id, receipt]));
+    const sorted = receiptItems.slice().sort((a, b) => String(byReceipt.get(b.receiptId)?.purchasedAt || "").localeCompare(String(byReceipt.get(a.receiptId)?.purchasedAt || "")));
+    for (const item of sorted) {
+      const receipt = byReceipt.get(item.receiptId);
+      head.push(`- ${day(receipt?.purchasedAt) || "日付不明"} ${clip(receipt?.storeName, 12)} ${clip(item.name || item.rawName, 20)} ${yen(item.amount)}（${clip(item.category, 8)}${item.outcomeTracked ? `、${OUTCOME_LABELS[item.outcome] || item.outcome}` : ""}${item.wasteAmount ? `、ムダ ${yen(item.wasteAmount)}${item.outcomeReason ? `・${clip(item.outcomeReason, 10)}` : ""}` : ""}）`);
+    }
+  }
+  if (pendingMails) head.push(`メール取込の確認待ち: ${pendingMails}件（まだ記録に入っていない）`);
+
+  // 取引の記録は全件。上限を超えるときだけ古いほうから省く
+  const history = (state.transactions || [])
+    .filter((t) => t && t.status !== "planned")
+    .sort((a, b) => String(b.transactionDate || b.dueDate).localeCompare(String(a.transactionDate || a.dueDate)));
+  const lines = [...head, `取引の記録（全${history.length}件、新しい順。「請求額の内訳」はカードの請求額に含まれる明細なので、支出として二重に数えない）:`];
+  let length = lines.join("\n").length;
+  let shown = 0;
+  for (const t of history) {
+    const line = `- ${t.transactionDate || t.dueDate} ${KIND_LABELS[t.kind] || t.kind}・${STATUS_LABELS[t.status] || t.status} ${yen(t.amount)} ${clip(t.memo || t.category, 20)}（${clip(t.category, 10)}${t.cardId ? `、${cardName(t.cardId)}` : ""}${t.lendingAmount ? `、うち立替 ${yen(t.lendingAmount)}` : ""}）`;
+    if (length + line.length + 1 > budget) break;
+    lines.push(line);
+    length += line.length + 1;
+    shown += 1;
+  }
+  if (shown < history.length) lines.push(`（文字数の上限のため、これより古い取引 ${history.length - shown}件は省きました。月ごとの収支には全期間が入っています）`);
+  return lines.join("\n");
+}
+
 /** なかみメモの在庫。items は { name, quantity, unit, category, expiration('YYYY-MM-DD' or ''), location } */
 export function formatInventory(items, today) {
   if (!Array.isArray(items)) return "";
