@@ -58,6 +58,7 @@ test('画面：確定・保存の画面を開いても、金額欄に自動で�
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
   assert.ok(!app.includes("$('#event-amount').focus()"), '記録の画面で金額欄に入っている');
   assert.ok(!app.includes("form.elements.namedItem('amount').focus()"), '引落の確定で金額欄に入っている');
+  assert.ok(!app.includes("$('#work-hours').focus()"), 'シフトの画面で勤務時間の欄に入っている');
 });
 
 const failures = checks.filter(c => !c.pass);

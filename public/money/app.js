@@ -703,7 +703,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=106" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=107" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -3919,7 +3919,8 @@
     $('#work-memo').value = current?.memo || '';
     $('#work-modal').hidden = false;
     updateWorkRateHint();
-    $('#work-hours').focus();
+    // 勤務時間の欄へも自動で入らない（キーボードを出さない。2026-11-24 ユーザー要望）
+    focusModalHeading($('#work-modal'));
   }
 
   /** 勤務日から、その日に使う時給を出す（平日時給・土日祝時給は日本のカレンダーで自動。2026-11-24） */
