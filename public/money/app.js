@@ -703,7 +703,7 @@
     onboarding.hidden = false;
     onboarding.innerHTML = `
       <div class="onboarding-inner">
-        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=104" alt=""></span><strong>お金管理</strong></div>
+        <div class="onboarding-brand"><span class="auth-icon"><img src="icons/app-icon.svg?v=106" alt=""></span><strong>お金管理</strong></div>
         <section class="onboarding-form">
           <span class="eyebrow">初期設定</span>
           <div class="onboarding-security"><span class="security-mark">${icon('safe')}</span><span>この端末に保存して使います</span></div>
@@ -1076,7 +1076,7 @@
     const checkStatus = checkStatusOf(check);
     const salary = nextSalary();
     const salaryRecord = salaryRecordState(salary.paymentMonth, salary);
-    const wageConfigured = Number(state.settings.wage.hourlyRate || 0) > 0;
+    const wageConfigured = [state.settings.wage.hourlyRate, state.settings.wage.weekdayHourlyRate, state.settings.wage.holidayHourlyRate].some(rate => Number(rate || 0) > 0);
 
     const upcoming = sortedTransactions(state.transactions.filter(item => item.status === 'planned'
       && item.entryType !== 'itemized' && item.dueDate >= today())).slice(0, 4);
@@ -2893,7 +2893,7 @@
     const paymentMonth = currentShiftPaymentMonth();
     const salary = finance.calculateSalaryByPaymentMonth(state.workEntries, paymentMonth, wage, holidayOptions());
     const movedForward = salary.paymentDate !== salary.scheduledPaymentDate;
-    const needsRate = !Number(wage.hourlyRate) && !salary.entries.some(entry => entry.rate > 0);
+    const needsRate = !Number(wage.hourlyRate) && !Number(wage.weekdayHourlyRate) && !Number(wage.holidayHourlyRate) && !salary.entries.some(entry => entry.rate > 0);
     const salaryRecord = salaryRecordState(paymentMonth, salary);
 
     const options = shiftPaymentMonthOptions(paymentMonth)
@@ -2902,7 +2902,7 @@
 
     // 試作（UI最終版）の行：日付と時間を左右に、下に状態・時給・メモ、操作は下線の文字ボタン
     const rows = salary.entries.map(entry => `<article class="plan-row work-row"><div class="plan-toolbar"><strong>${entry.date.replaceAll('-', '/')}</strong><strong>${formatHours(entry.hours)}</strong></div>
-        <p class="support">${entry.status === 'worked' ? '勤務済み' : '勤務予定'} · ${formatAbsoluteYen(entry.rate)}／時${entry.memo ? ` · ${esc(entry.memo)}` : ''} · ${formatFlowAmount(entry.amount, 'in')}</p>
+        <p class="support">${entry.status === 'worked' ? '勤務済み' : '勤務予定'} · ${formatAbsoluteYen(entry.rate)}／時${entry.rateKind === "holiday" ? "（土日祝）" : ""}${entry.memo ? ` · ${esc(entry.memo)}` : ''} · ${formatFlowAmount(entry.amount, 'in')}</p>
         <div class="mail-actions"><button class="mini-button" data-action="edit-work" data-id="${entry.id}" aria-label="${formatDate(entry.date, true)}のシフトを編集">編集</button><button class="mini-button danger" data-action="delete-work" data-id="${entry.id}" aria-label="${formatDate(entry.date, true)}のシフトを削除">削除</button></div>
       </article>`).join('');
 
@@ -3041,7 +3041,7 @@
     return `
       <div class="prototype-flow settings-flow"><div class="page-heading"><h1>設定</h1></div>
       ${section('calculation', '計算設定')}<form id="settings-form" class="form-stack"><label><span>最低限残す金額</span><div class="amount-input"><span>¥</span><input id="settings-defense" type="number" min="0" step="1" value="${Number(state.settings.defenseLine || 0)}"></div></label><label><span>今使える金額の判定期限</span><select id="settings-deadline"><option value="legacy14" ${state.settings.deadlineMode === 'legacy14' ? 'selected' : ''}>従来の試算のみ：毎月14日締め</option><option value="card-closing" ${state.settings.deadlineMode === 'card-closing' ? 'selected' : ''}>基準カードの次回締め日</option></select></label>${state.cards.map(card => `<label class="check-row"><input type="checkbox" name="deadline-card" value="${esc(card.id)}" ${state.settings.deadlineCardIds?.includes?.(card.id) ? 'checked' : ''}><span>${esc(card.name)}</span></label>`).join('')}<label><span>支払いの予測期間</span><select id="settings-horizon"><option value="30" ${Number(state.settings.cashflowHorizonDays) === 30 ? 'selected' : ''}>30日間</option><option value="60" ${Number(state.settings.cashflowHorizonDays) === 60 ? 'selected' : ''}>60日間</option><option value="90" ${Number(state.settings.cashflowHorizonDays || 90) === 90 ? 'selected' : ''}>90日間</option><option value="180" ${Number(state.settings.cashflowHorizonDays) === 180 ? 'selected' : ''}>180日間</option></select></label><label><span>ふりかえりを始める曜日</span><select id="settings-review-day">${['日', '月', '火', '水', '木', '金', '土'].map((label, index) => `<option value="${index}" ${Number(state.settings.reviewDayOfWeek || 0) === index ? 'selected' : ''}>${label}曜日</option>`).join('')}</select></label><button class="button button-primary" type="submit">保存</button></form></details>
-      ${section('wage', '給与設定')}<form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><button class="button button-primary" type="submit">給与設定を保存</button></form></details>
+      ${section('wage', '給与設定')}<form id="wage-settings-form" class="form-stack"><label><span>基本時給</span><div class="amount-input"><span>¥</span><input id="wage-hourly-rate" type="number" min="0" step="1" value="${Number(wage.hourlyRate || 0)}" required></div></label><div class="field-grid field-grid-2"><label><span>平日時給</span><div class="amount-input"><span>¥</span><input id="wage-weekday-rate" type="number" min="0" step="1" inputmode="numeric" value="${Number(wage.weekdayHourlyRate || 0) || ''}" placeholder="基本時給"></div></label><label><span>土日祝時給</span><div class="amount-input"><span>¥</span><input id="wage-holiday-rate" type="number" min="0" step="1" inputmode="numeric" value="${Number(wage.holidayHourlyRate || 0) || ''}" placeholder="基本時給"></div></label></div><small class="field-hint">勤務日が平日か土日祝かは、日本のカレンダー（振替休日も含む）で自動で選びます。空のときは基本時給を使います。</small><div class="field-grid field-grid-2"><label><span>給料日</span><input id="wage-salary-payment-day" type="number" min="1" max="31" step="1" value="${Number(wage.salaryPaymentDay || 15)}" required><small class="field-hint">勤務月の翌月の日にち</small></label><label><span>給与の入金口座</span><select id="wage-deposit-account"><option value="">生活費口座（基準口座）</option>${state.accounts.map(item => `<option value="${item.id}" ${wage.depositAccountId === item.id ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label></div><label class="check-row"><input id="wage-include-forecast" type="checkbox" ${wage.includeForecastInSpendable ? 'checked' : ''}><span>給与見込みを「今使える金額」に含める</span></label><button class="button button-primary" type="submit">給与設定を保存</button></form></details>
       ${section('sharing', '家計共有')}${renderCloudSettings()}</details>
       ${section('backup', 'バックアップ・復元')}<div class="field-grid field-grid-2"><button class="button button-quiet" data-action="export">JSONを書き出す</button><button class="button button-quiet" data-action="import">JSONを読み込む</button></div><button class="button button-quiet" data-action="export-cloud" ${cloud?.readCloudBackup ? '' : 'disabled'}>クラウドの原本を書き出す</button><button class="button button-quiet" data-action="restore-cloud" ${cloud?.restoreCloudBackup ? '' : 'disabled'}>クラウド原本から新しい家計へ復元</button><button class="button button-quiet" data-action="resume-cloud-restore" ${cloud?.restoreCloudBackup ? '' : 'disabled'}>復元を確認・再開</button><button class="button button-quiet" data-action="export-recovery" ${cloud?.readUnsavedRecovery ? '' : 'disabled'}>未保存データを書き出す</button><button class="button button-danger button-full" data-action="reset">すべて削除</button></details></div>`;
   }
@@ -3468,8 +3468,17 @@
         : 'シフトから作った給与の見込みです。金額か日付を直して保存すると、シフトを変えてもこの額のままになります。';
     }
     modal.hidden = false;
-    $('#event-amount').focus();
-    if (presetStatus === 'settled') $('#event-amount').select();
+    // 金額欄へは自動で入らない（キーボードが出て、確定・保存がすぐ押せなかった。2026-11-24 ユーザー要望）。
+    // 直したいときは本人が金額欄を押す。読み上げ用に、見出しへ移しておく
+    focusModalHeading(modal);
+  }
+
+  /** 入力欄ではなく見出しへ移す（キーボードを出さずに、画面の読み上げが新しい画面から始まるように） */
+  function focusModalHeading(modal) {
+    const heading = modal?.querySelector('h2');
+    if (!heading) return;
+    heading.setAttribute('tabindex', '-1');
+    heading.focus({ preventScroll: true });
   }
 
   function closeModal(id) { const modal = $(`#${id}`); if (modal) modal.hidden = true; modalEditContexts.delete(id); }
@@ -3713,7 +3722,7 @@
     form.elements.namedItem('date').value = today();
     $('#debit-summary').textContent = cardName(transaction.cardId) + '・確認済み請求額 ' + formatAbsoluteYen(transaction.amount);
     $('#debit-modal').hidden = false;
-    form.elements.namedItem('amount').focus();
+    focusModalHeading($('#debit-modal'));
   }
 
   async function saveDebit(event) {
@@ -3903,12 +3912,26 @@
     $('#work-modal-title').textContent = current ? '勤務を編集' : '勤務を記録';
     $('#work-id').value = current?.id || '';
     $('#work-date').value = current?.date || today();
-    $('#work-status').value = current?.status || 'worked';
+    // 新しく足すときは「勤務予定」から（2026-11-24 ユーザー要望。勤務が終わったら「勤務済み」にする）
+    $('#work-status').value = current?.status || 'planned';
     $('#work-hours').value = current?.hours ?? '';
     $('#work-rate').value = current?.hourlyRateOverride || '';
     $('#work-memo').value = current?.memo || '';
     $('#work-modal').hidden = false;
+    updateWorkRateHint();
     $('#work-hours').focus();
+  }
+
+  /** 勤務日から、その日に使う時給を出す（平日時給・土日祝時給は日本のカレンダーで自動。2026-11-24） */
+  function updateWorkRateHint() {
+    const input = $('#work-rate');
+    const hint = $('#work-rate-hint');
+    if (!input || !hint) return;
+    const date = $('#work-date').value;
+    const auto = date ? finance.hourlyRateForDate(date, state.settings.wage, holidayOptions()) : null;
+    const label = !auto ? '' : auto.kind === 'holiday' ? (auto.holidayName ? `祝日（${auto.holidayName}）の時給` : '土日の時給') : auto.kind === 'weekday' ? '平日の時給' : '基本時給';
+    input.placeholder = auto?.rate ? `${label} ${formatAbsoluteYen(auto.rate)}` : '基本時給を使用';
+    hint.textContent = auto?.rate ? `空のままなら${label}（${formatAbsoluteYen(auto.rate)}）で計算します` : '設定の「給与設定」で時給を入れると、ここに出ます';
   }
 
   function saveWork(event) {
@@ -3948,13 +3971,15 @@
     const next = {
       ...state.settings.wage,
       hourlyRate: Number($('#wage-hourly-rate').value || 0),
+      weekdayHourlyRate: Number($('#wage-weekday-rate')?.value || 0),
+      holidayHourlyRate: Number($('#wage-holiday-rate')?.value || 0),
       salaryPaymentDay: Number($('#wage-salary-payment-day').value || 15),
       salaryMonthOffset: 1,
       periodMode: 'calendarMonth',
       depositAccountId: $('#wage-deposit-account').value || '',
       includeForecastInSpendable: $('#wage-include-forecast').checked
     };
-    if (next.hourlyRate < 0 || next.salaryPaymentDay < 1 || next.salaryPaymentDay > 31) { showToast('時給と給料日を確認してください'); return; }
+    if (next.hourlyRate < 0 || next.weekdayHourlyRate < 0 || next.holidayHourlyRate < 0 || next.salaryPaymentDay < 1 || next.salaryPaymentDay > 31) { showToast('時給と給料日を確認してください'); return; }
     state.settings.wage = next;
     // 時給や給料日が変わると、手を入れていない見込みの額と日付も変わる
     syncSalaryRecords();
@@ -4251,7 +4276,7 @@
     if (name === 'forget-candidate-card') { forgetCandidateCard(Number(action.dataset.index)); return; }
     if (name === 'ignore-candidate') { ignoreCandidate(action.dataset.id); return; }
     if (name === 'delete-candidate') { deleteCandidate(action.dataset.id); return; }
-    if (name === 'add-work') { closeAddMenu(); openWorkModal(); if (action.dataset.workDate) $('#work-date').value = action.dataset.workDate; }
+    if (name === 'add-work') { closeAddMenu(); openWorkModal(); if (action.dataset.workDate) { $('#work-date').value = action.dataset.workDate; updateWorkRateHint(); } }
     if (name === 'edit-work') openWorkModal(action.dataset.id);
     if (name === 'delete-work') deleteWork(action.dataset.id);
     if (name === 'reset-what-if') updateWhatIf(0);
@@ -4360,6 +4385,7 @@
     $('#event-usage-date').addEventListener('change', () => syncCardSourceAccount(true));
     $('#event-entry-type').addEventListener('change', updateEntryTypeNote);
     $('#event-date').addEventListener('change', updateEntryTypeNote);
+    $('#work-date')?.addEventListener('change', updateWorkRateHint);
     $('#event-form').addEventListener('submit', saveEvent);
     $('#account-form').addEventListener('submit', saveAccount);
     $('#card-form').addEventListener('submit', saveCard);

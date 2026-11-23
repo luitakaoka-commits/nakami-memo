@@ -1811,3 +1811,10 @@ body {
 .detail-panel .detail-name > .mini-button:first-of-type { margin-left: auto; }
 .detail-panel .detail-name > .mini-button:first-of-type { flex-basis: auto; }
 .detail-panel .detail-panel-head { margin-top: 8px; }
+
+/* 保存・確定のボタンを、開いたらすぐ押せる位置に置く（2026-11-24 ユーザー要望）。
+   入力欄が多くて下までスクロールしないと押せなかった。ボタンの列を画面の下に貼り付ける。
+   あわせて、開いたときに金額欄へ自動で入らない（キーボードが出て下が隠れていた）。直したいときは本人が押す */
+.modal-backdrop > .modal .modal-actions { position: sticky; bottom: calc(-1 * clamp(16px, 6vw, 24px)); z-index: 2; margin-inline: calc(-1 * clamp(16px, 6vw, 24px)); margin-bottom: calc(-1 * clamp(16px, 6vw, 24px)); padding: 12px clamp(16px, 6vw, 24px) calc(clamp(16px, 6vw, 24px) + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-page); }
+/* 開いたときに見出しへ移すのは読み上げのためだけ。枠は出さない（キーボードでは見出しに止まらない） */
+.modal h2[tabindex="-1"]:focus { outline: none; }

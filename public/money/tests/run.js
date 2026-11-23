@@ -15,6 +15,7 @@ const { createSuite } = require(path.join(__dirname, 'finance-engine.tests.js'))
 const SUITES = [
   'daily-finance.test.js',
   'statement-asof.test.js',
+  'wage-calendar.test.js',
   'redesign-core.test.js',
   'redesign-backup.test.js',
   'sync-coordinator.test.js',

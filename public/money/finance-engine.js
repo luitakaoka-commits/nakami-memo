@@ -375,6 +375,23 @@
   }
 
   /**
+   * その日の時給（2026-11-14 ユーザー要望）。
+   * 平日時給・土日祝時給は日本のカレンダー（isWeekend・isJapaneseHoliday）で自動で選ぶ。
+   * どちらも未設定（0）なら、今までどおり基本時給（hourlyRate）を使う。日ごとの変更（hourlyRateOverride）がいちばん優先。
+   * kind: 'override'（その日だけ）／'holiday'（土日祝）／'weekday'（平日）／'base'（基本時給）
+   */
+  function hourlyRateForDate(dateInput, wageSettings = {}, options = {}, override = 0) {
+    const fixed = Math.max(Number(override) || 0, 0);
+    if (fixed > 0) return { rate: fixed, kind: 'override', holidayName: '' };
+    const base = Math.max(Number(wageSettings.hourlyRate) || 0, 0);
+    const holidayName = japaneseHolidayName(dateInput, options);
+    const offDay = isWeekend(dateInput) || Boolean(holidayName);
+    const special = Math.max(Number(offDay ? wageSettings.holidayHourlyRate : wageSettings.weekdayHourlyRate) || 0, 0);
+    if (special > 0) return { rate: special, kind: offDay ? 'holiday' : 'weekday', holidayName };
+    return { rate: base, kind: 'base', holidayName };
+  }
+
+  /**
    * 支給月を指定して、その月に支給される給与を集計する。
    * 支給月は保存値ではなく勤務日から毎回計算するため、ルール変更時も再計算できる。
    */
@@ -382,14 +399,13 @@
     const monthOffset = Number(wageSettings.salaryMonthOffset) || DEFAULT_SALARY_MONTH_OFFSET;
     const workMonth = shiftMonthKey(targetPaymentMonth, -monthOffset);
     const range = calendarMonthRange(workMonth);
-    const baseRate = Math.max(Number(wageSettings.hourlyRate) || 0, 0);
-
     const entries = workEntries
       .filter(entry => entry && entry.date >= range.startDate && entry.date <= range.endDate)
       .map(entry => {
         const hours = Math.max(Number(entry.hours) || 0, 0);
-        const rate = Math.max(Number(entry.hourlyRateOverride) || baseRate, 0);
-        return { ...entry, hours, rate, amount: Math.round(hours * rate) };
+        // 日ごとの変更 → 平日／土日祝の時給 → 基本時給 の順（hourlyRateForDate）
+        const { rate, kind: rateKind } = hourlyRateForDate(entry.date, wageSettings, options, entry.hourlyRateOverride);
+        return { ...entry, hours, rate, rateKind, amount: Math.round(hours * rate) };
       })
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
@@ -2214,7 +2230,7 @@
     // 日本時間(JST)と利用時刻
     jstDateStringOf, jstTimeStringOf, editedUsageInstant, jstToday, usageInstantOf, sortByUsageDesc,
     // 祝日・営業日
-    japaneseHolidayName, isJapaneseHoliday, isJapaneseBusinessDay,
+    japaneseHolidayName, isJapaneseHoliday, isJapaneseBusinessDay, hourlyRateForDate,
     previousBusinessDay, nextBusinessDay, holidaysForYear,
     // カード
     calculateCardPaymentDate, nextCardPaymentDate, calculateUnpaidCardUsage, aggregateCardBills, capUnsettledCardCredits,
